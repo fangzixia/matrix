@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Build Agent - Web 项目开发闭环</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260520-0035">
+</head>
+<body>
+    <div class="app">
+        <!-- 顶部导航 -->
+        <header class="header">
+            <div class="container">
+                <h1 class="logo">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle; margin-right: 8px;">
+                        <rect width="32" height="32" rx="6" fill="#0F172A"/>
+                        <circle cx="16" cy="16" r="10" fill="none" stroke="#38BDF8" stroke-width="1.2"/>
+                        <path d="M14 9v3M18 9v3M9 14h3M9 18h3M14 20v3M18 20v3M20 14h3M20 18h3" stroke="#38BDF8" stroke-width="1"/>
+                        <path d="M13 16h6" stroke="#fff" stroke-width="1.5"/>
+                    </svg>
+                    Build Agent
+                </h1>
+                <nav class="nav">
+                    <a href="#dashboard" class="nav-link active" data-page="dashboard">仪表盘</a>
+                    <a href="#chat" class="nav-link" data-page="chat">自由对话</a>
+                    <a href="#execution" class="nav-link" data-page="execution">执行任务</a>
+                    <a href="#history" class="nav-link" data-page="history">验收历史</a>
+                    <a href="#config" class="nav-link" data-page="config">系统配置</a>
+                </nav>
+                <div class="workspace-indicator" id="workspace-indicator" title="点击切换工作区">
+                    <span class="workspace-icon">📁</span>
+                    <span class="workspace-path" id="workspace-path-display">未选择工作区</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- 主内容区 -->
+        <main class="main">
+            <div class="container">
+                <!-- 仪表盘页面 -->
+                <div id="dashboard-page" class="page active">
+                    <h2 class="page-title">项目概览</h2>
+                    
+                    <!-- 统计卡片 -->
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon">📋</div>
+                            <div class="stat-content">
+                                <div class="stat-label">总需求数</div>
+                                <div class="stat-value" id="total-requirements">0</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">✅</div>
+                            <div class="stat-content">
+                                <div class="stat-label">已评测</div>
+                                <div class="stat-value" id="passed-requirements">0</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">❌</div>
+                            <div class="stat-content">
+                                <div class="stat-label">未评测</div>
+                                <div class="stat-value" id="failed-requirements">0</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">📊</div>
+                            <div class="stat-content">
+                                <div class="stat-label">通过率</div>
+                                <div class="stat-value" id="pass-rate">0%</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 最近需求 -->
+                    <div class="section">
+                        <h3 class="section-title">最近需求</h3>
+                        <div id="recent-requirements" class="requirements-list">
+                            <div class="empty-state">暂无需求数据</div>
+                        </div>
+                    </div>
+
+                    <!-- 失败项统计 -->
+                    <div class="section">
+                        <h3 class="section-title">失败项统计</h3>
+                        <div id="failure-stats" class="failure-stats">
+                            <div class="empty-state">暂无失败项数据</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 自由对话页面 -->
+                <div id="chat-page" class="page">
+                    <div class="page-header">
+                        <h2 class="page-title">自由对话</h2>
+                        <button class="btn btn-secondary" id="chat-clear-btn">清空历史</button>
+                    </div>
+                    <div class="chat-layout">
+                        <!-- 左侧会话列表 -->
+                        <div class="chat-sidebar">
+                            <button class="btn btn-primary chat-new-btn" id="chat-new-btn">
+                                <span class="btn-icon">＋</span> 新建会话
+                            </button>
+                            <div class="chat-session-list" id="chat-session-list"></div>
+                        </div>
+                        <!-- 右侧对话区 -->
+                        <div class="chat-main">
+                            <div class="chat-messages" id="chat-messages">
+                                <div class="chat-empty" id="chat-empty">
+                                    <div class="chat-empty-icon">💬</div>
+                                    <p>输入任何需求，Agent 将直接执行</p>
+                                </div>
+                            </div>
+                            <!-- 执行进度（嵌入 chat） -->
+                            <div class="chat-progress" id="chat-progress" style="display:none;">
+                                <div class="chat-progress-bar">
+                                    <div class="chat-progress-fill" id="chat-progress-fill"></div>
+                                </div>
+                                <div class="chat-progress-logs" id="chat-progress-logs"></div>
+                            </div>
+                            <div class="chat-input-area">
+                                <textarea class="chat-input" id="chat-input" rows="3" placeholder="输入需求或问题，Shift+Enter 换行，Enter 发送..."></textarea>
+                                <button class="btn btn-primary chat-send-btn" id="chat-send-btn">
+                                    <span class="btn-icon">▶</span> 发送
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 执行任务页面 -->
+                <div id="execution-page" class="page">
+                    <h2 class="page-title">执行任务</h2>
+
+                    <!-- 快速操作 -->
+                    <div class="quick-actions">
+                        <div class="action-card" data-action="analysis">
+                            <div class="action-icon">🔍</div>
+                            <div class="action-title">分析项目</div>
+                            <div class="action-desc">分析前后端结构，生成项目信息</div>
+                        </div>
+                        <div class="action-card" data-action="requirements">
+                            <div class="action-icon">📝</div>
+                            <div class="action-title">创建需求</div>
+                            <div class="action-desc">编写需求和验收标准</div>
+                        </div>
+                        <div class="action-card" data-action="code">
+                            <div class="action-icon">💻</div>
+                            <div class="action-title">编码实现</div>
+                            <div class="action-desc">根据需求实现代码</div>
+                        </div>
+                        <div class="action-card" data-action="eval">
+                            <div class="action-icon">✓</div>
+                            <div class="action-title">验收评测</div>
+                            <div class="action-desc">验收实现是否符合需求</div>
+                        </div>
+                        <div class="action-card" data-action="build">
+                            <div class="action-icon">🔄</div>
+                            <div class="action-title">完整构建</div>
+                            <div class="action-desc">编码 → 验收循环直到通过</div>
+                        </div>
+                    </div>
+
+                    <!-- 执行表单 -->
+                    <div id="execution-form" class="execution-form" style="display: none;">
+                        <div class="form-header">
+                            <h3 id="execution-form-title">执行任务</h3>
+                            <button class="btn-close" id="close-execution-form">✕</button>
+                        </div>
+                        <div class="form-body">
+                            <div class="form-group">
+                                <label for="task-input">任务描述</label>
+                                <textarea id="task-input" class="form-control" rows="4" placeholder="请输入任务描述..."></textarea>
+                            </div>
+                            <!-- 动态字段将在这里插入 -->
+                            <div class="form-actions">
+                                <button class="btn btn-secondary" id="cancel-execution-btn">取消</button>
+                                <button class="btn btn-primary" id="submit-execution-btn">
+                                    <span class="btn-icon">▶</span>
+                                    开始执行
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 执行进度 -->
+                    <div id="execution-progress" class="execution-progress" style="display: none;">
+                        <div class="progress-header">
+                            <h3>执行中...</h3>
+                            <div class="progress-status" id="progress-status">准备中</div>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progress-fill"></div>
+                        </div>
+                        <div class="progress-logs" id="progress-logs">
+                            <div class="log-entry">
+                                <span class="log-time">00:00:00</span>
+                                <span class="log-message">等待开始...</span>
+                            </div>
+                        </div>
+                        <div class="progress-actions">
+                            <button class="btn btn-secondary" id="stop-execution-btn" disabled>停止执行</button>
+                        </div>
+                    </div>
+
+                    <!-- 执行结果 -->
+                    <div id="execution-result" class="execution-result" style="display: none;">
+                        <div class="result-header">
+                            <h3>执行结果</h3>
+                            <div class="result-status" id="result-status"></div>
+                        </div>
+                        <div class="result-content" id="result-content"></div>
+                        <div class="result-actions">
+                            <button class="btn btn-primary" id="new-execution-btn">执行新任务</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 验收历史页面 -->
+                <div id="history-page" class="page">
+                    <h2 class="page-title">验收历史</h2>
+                    
+                    <div class="filter-bar">
+                        <select id="filter-requirement" class="form-control">
+                            <option value="">全部需求</option>
+                        </select>
+                        <select id="filter-status" class="form-control">
+                            <option value="">全部状态</option>
+                            <option value="passed">已通过</option>
+                            <option value="failed">未通过</option>
+                        </select>
+                    </div>
+
+                    <div id="history-list" class="history-list">
+                        <div class="empty-state">暂无验收历史</div>
+                    </div>
+                </div>
+
+                <!-- 系统配置页面 -->
+                <div id="config-page" class="page">
+                    <div class="page-header">
+                        <h2 class="page-title">系统配置</h2>
+                        <div class="config-actions">
+                            <button class="btn btn-primary" id="save-config-btn">
+                                <span class="btn-icon">💾</span>
+                                保存配置
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="config-loading" class="loading-indicator">
+                        <div class="spinner"></div>
+                        <p>加载配置中...</p>
+                    </div>
+                    <div id="config-error" class="error-message" style="display:none;"></div>
+                    <div id="config-success" class="success-message" style="display:none;"></div>
+
+                    <div id="config-editor-container" style="display:none;">
+                        <!-- 模型配置 -->
+                        <div class="config-section">
+                            <div class="config-section-title">模型配置</div>
+                            <div class="config-section-body">
+                                <div class="config-field">
+                                    <label class="config-field-label">API 地址</label>
+                                    <input type="text" id="model-base-url" class="config-field-input" placeholder="https://api.openai.com/v1" />
+                                </div>
+                                <div class="config-field">
+                                    <label class="config-field-label">API Key</label>
+                                    <input type="password" id="model-api-key" class="config-field-input" placeholder="sk-..." autocomplete="off" />
+                                </div>
+                                <div class="config-field">
+                                    <label class="config-field-label">模型名称</label>
+                                    <input type="text" id="model-name" class="config-field-input" placeholder="gpt-4o-mini" />
+                                </div>
+                                <div class="config-field">
+                                    <label class="config-field-label">上下文 Token 上限</label>
+                                    <input type="number" min="1000" id="model-max-context-tokens" class="config-field-input" placeholder="130000" />
+                                </div>
+                                <div class="config-field">
+                                    <label class="config-field-label">智能压缩阈值</label>
+                                    <input type="number" min="1000" id="model-smart-compress-threshold" class="config-field-input" placeholder="100000" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- MCP 服务器配置 -->
+                        <div class="config-section">
+                            <div class="config-section-title">
+                                MCP 服务器配置
+                                <button class="btn btn-sm btn-secondary" id="test-all-mcp-servers-btn" style="margin-left: 12px;">
+                                    <span class="btn-icon">🔍</span> 测试所有
+                                </button>
+                            </div>
+                            <div class="config-section-body">
+                                <div class="mcp-config-container">
+                                    <div class="mcp-editor-section">
+                                        <div class="mcp-editor-header">
+                                            <span class="mcp-editor-title">JSON 配置编辑器</span>
+                                            <div class="mcp-editor-actions">
+                                                <button class="btn btn-sm btn-secondary" id="format-mcp-json-btn" title="格式化 JSON">
+                                                    <span class="btn-icon">✨</span> 格式化
+                                                </button>
+                                                <button class="btn btn-sm btn-secondary" id="validate-mcp-json-btn" title="验证 JSON">
+                                                    <span class="btn-icon">✓</span> 验证
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <textarea id="mcp-json-editor" class="mcp-json-editor" placeholder='{"mcpServers": {}}'></textarea>
+                                        <div id="mcp-json-error" class="mcp-json-error" style="display:none;"></div>
+                                        <div class="mcp-editor-hint">
+                                            <strong>提示：</strong>直接编辑 JSON 配置，支持的字段：
+                                            <code>command</code>, <code>args</code>, <code>env</code>, 
+                                            <code>url</code>, <code>headers</code>, <code>disabled</code>, 
+                                            <code>autoApprove</code>, <code>timeout</code>
+                                        </div>
+                                    </div>
+                                    <div class="mcp-servers-preview">
+                                        <div class="mcp-preview-header">
+                                            <span class="mcp-preview-title">服务器列表预览</span>
+                                            <span id="mcp-server-count" class="mcp-server-count">0 个服务器</span>
+                                        </div>
+                                        <div id="mcp-servers-list" class="mcp-servers-list">
+                                            <div class="empty-state">暂无 MCP 服务器配置</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- 底部 -->
+        <footer class="footer">
+            <div class="container">
+                <p>&copy; 2024 Build Agent. 基于 AI 的 Web 项目开发闭环工具</p>
+            </div>
+        </footer>
+    </div>
+
+    <!-- 模态框：创建需求 -->
+    <div id="create-requirement-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>创建需求</h3>
+                <button class="btn-close" id="close-create-requirement-modal">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="requirement-description">需求描述</label>
+                    <textarea id="requirement-description" class="form-control" rows="6" placeholder="请详细描述需求..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancel-create-requirement">取消</button>
+                <button class="btn btn-primary" id="submit-create-requirement">
+                    <span class="btn-icon">✓</span>
+                    创建
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模态框：需求详情 -->
+    <div id="requirement-detail-modal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3 id="requirement-detail-title">需求详情</h3>
+                <button class="btn-close" id="close-requirement-detail-modal">✕</button>
+            </div>
+            <div class="modal-body">
+                <div id="requirement-detail-content" class="markdown-content"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="close-requirement-detail">关闭</button>
+                <button class="btn btn-secondary" id="edit-requirement-detail">
+                    <span class="btn-icon">✏️</span>
+                    编辑
+                </button>
+                <button class="btn btn-primary" id="run-build-from-detail">
+                    <span class="btn-icon">🔄</span>
+                    执行构建
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模态框：文件编辑器 -->
+    <div id="file-editor-modal" class="modal">
+        <div class="modal-content modal-xlarge">
+            <div class="modal-header">
+                <h3 id="file-editor-title">文件编辑</h3>
+                <div class="editor-tabs">
+                    <button class="editor-tab active" data-tab="edit">编辑</button>
+                    <button class="editor-tab" data-tab="preview">预览</button>
+                    <button class="editor-tab" data-tab="split">分屏</button>
+                </div>
+                <button class="btn-close" id="close-file-editor-modal">✕</button>
+            </div>
+            <div class="modal-body editor-body">
+                <div class="editor-container">
+                    <div class="editor-pane edit-pane active">
+                        <textarea id="file-editor-textarea" class="markdown-editor" placeholder="在此编辑 Markdown 内容..."></textarea>
+                    </div>
+                    <div class="editor-pane preview-pane">
+                        <div id="file-editor-preview" class="markdown-content"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <div class="editor-info">
+                    <span id="editor-file-path" class="editor-path"></span>
+                    <span id="editor-status" class="editor-status"></span>
+                </div>
+                <div class="editor-actions">
+                    <button class="btn btn-secondary" id="cancel-file-editor">取消</button>
+                    <button class="btn btn-primary" id="save-file-editor">
+                        <span class="btn-icon">💾</span>
+                        保存
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模态框：工作区选择器 -->
+    <div id="workspace-modal" class="modal workspace-modal">
+        <div class="modal-content workspace-modal-content">
+            <div class="modal-header">
+                <h3>选择工作区</h3>
+            </div>
+            <div class="modal-body">
+                <!-- 最近工作区 -->
+                <div id="recent-workspaces-section">
+                    <p class="workspace-section-label">最近打开</p>
+                    <div id="recent-workspaces-list" class="recent-workspaces-list">
+                        <div class="empty-state">暂无最近记录</div>
+                    </div>
+                </div>
+
+                <div class="workspace-divider"></div>
+
+                <!-- 手动输入 / 浏览 -->
+                <p class="workspace-section-label">打开文件夹</p>
+                <div class="workspace-input-row">
+                    <input type="text" id="workspace-path-input" class="form-control" placeholder="输入文件夹路径..." />
+                    <button class="btn btn-secondary" id="workspace-browse-btn" style="display:none;">浏览...</button>
+                    <button class="btn btn-primary" id="workspace-open-btn">打开</button>
+                </div>
+                <div id="workspace-error" class="error-message" style="display:none;margin-top:8px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/marked.min.js"></script>
+    <script src="/static/js/api-adapter.js?v=20260520-0035"></script>
+    <script src="/static/js/app.js?v=20260520-0035"></script>
+</body>
+</html>
