@@ -5,9 +5,12 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"matrix/internal/llm"
+	"matrix/internal/stream"
 )
 
 // JSONSchema 是工具参数的最小化 JSON Schema 描述。
@@ -148,22 +151,24 @@ func (r *Registry) LLMTools() []llm.Tool {
 // CanUseToolFn 是工具执行前的权限检查回调。返回 false 则拒绝执行。
 type CanUseToolFn func(toolName string, args map[string]any) bool
 
+// ProgressFn 报告工具执行进度（started / completed / failed）。
+type ProgressFn func(toolUseID string, data stream.ToolProgressData)
+
 // RunTools 执行 calls 中的所有工具调用，按并发安全性自动分批。
-// 连续的只读工具合并为并行批次；写工具各自独占一个串行批次。
-// canUse 为 nil 时允许所有工具执行。
 func RunTools(
 	ctx context.Context,
 	calls []llm.ToolCall,
 	reg *Registry,
 	canUse CanUseToolFn,
+	onProgress ProgressFn,
 ) []Result {
 	batches := partitionCalls(calls, reg)
 	var all []Result
 	for _, b := range batches {
 		if b.parallel {
-			all = append(all, runParallel(ctx, b.calls, reg, canUse)...)
+			all = append(all, runParallel(ctx, b.calls, reg, canUse, onProgress)...)
 		} else {
-			all = append(all, runSerial(ctx, b.calls, reg, canUse)...)
+			all = append(all, runSerial(ctx, b.calls, reg, canUse, onProgress)...)
 		}
 	}
 	return all
@@ -198,6 +203,7 @@ func runParallel(
 	calls []llm.ToolCall,
 	reg *Registry,
 	canUse CanUseToolFn,
+	onProgress ProgressFn,
 ) []Result {
 	results := make([]Result, len(calls))
 	var wg sync.WaitGroup
@@ -205,69 +211,38 @@ func runParallel(
 		wg.Add(1)
 		go func(idx int, call llm.ToolCall) {
 			defer wg.Done()
-			results[idx] = execOne(ctx, call, reg, canUse)
+			results[idx] = execOne(ctx, call, reg, canUse, onProgress)
 		}(i, c)
 	}
 	wg.Wait()
 	return results
 }
 
-// runSerial 按顺序逐个执行 calls 中的工具调用。
 func runSerial(
 	ctx context.Context,
 	calls []llm.ToolCall,
 	reg *Registry,
 	canUse CanUseToolFn,
+	onProgress ProgressFn,
 ) []Result {
 	results := make([]Result, 0, len(calls))
 	for _, c := range calls {
-		results = append(results, execOne(ctx, c, reg, canUse))
+		results = append(results, execOne(ctx, c, reg, canUse, onProgress))
 	}
 	return results
 }
 
-// execOne 执行单次工具调用，包含参数解析、权限检查和工具查找。
 func execOne(
 	ctx context.Context,
 	call llm.ToolCall,
 	reg *Registry,
 	canUse CanUseToolFn,
+	onProgress ProgressFn,
 ) Result {
 	args, err := parseArgs(call.Function.Arguments)
 	if err != nil {
-		return Result{
-			ToolCallID: call.ID,
-			ToolName:   call.Function.Name,
-			Output:     fmt.Sprintf("参数解析失败: %v", err),
-			IsError:    true,
-		}
-	}
-
-	if canUse != nil && !canUse(call.Function.Name, args) {
-		return Result{
-			ToolCallID: call.ID,
-			ToolName:   call.Function.Name,
-			Output:     fmt.Sprintf("permission denied: %s", call.Function.Name),
-			IsError:    true,
-		}
-	}
-
-	t := reg.Get(call.Function.Name)
-	if t == nil {
-		return Result{
-			ToolCallID: call.ID,
-			ToolName:   call.Function.Name,
-			Output:     fmt.Sprintf("unknown tool: %s", call.Function.Name),
-			IsError:    true,
-		}
-	}
-
-	output, execErr := t.Execute(ctx, args)
-	if execErr != nil {
-		out := execErr.Error()
-		if output != "" {
-			out = output + "\n\n[执行错误] " + execErr.Error()
-		}
+		out := fmt.Sprintf("参数解析失败: %v", err)
+		emitToolDone(onProgress, call, "failed", 0, out)
 		return Result{
 			ToolCallID: call.ID,
 			ToolName:   call.Function.Name,
@@ -275,9 +250,123 @@ func execOne(
 			IsError:    true,
 		}
 	}
+
+	if canUse != nil && !canUse(call.Function.Name, args) {
+		out := fmt.Sprintf("permission denied: %s", call.Function.Name)
+		emitToolDone(onProgress, call, "failed", 0, out)
+		return Result{
+			ToolCallID: call.ID,
+			ToolName:   call.Function.Name,
+			Output:     out,
+			IsError:    true,
+		}
+	}
+
+	t := reg.Get(call.Function.Name)
+	if t == nil {
+		out := fmt.Sprintf("unknown tool: %s", call.Function.Name)
+		emitToolDone(onProgress, call, "failed", 0, out)
+		return Result{
+			ToolCallID: call.ID,
+			ToolName:   call.Function.Name,
+			Output:     out,
+			IsError:    true,
+		}
+	}
+
+	emitProgress(onProgress, call.ID, stream.ToolProgressData{
+		Type:     stream.DataToolProgress,
+		Status:   "started",
+		ToolName: call.Function.Name,
+		Message:  call.Function.Arguments,
+	})
+	if strings.HasPrefix(call.Function.Name, "mcp_") {
+		server, tool := parseMCPToolName(call.Function.Name)
+		emitProgress(onProgress, call.ID, stream.ToolProgressData{
+			Type:       stream.DataMCPProgress,
+			Status:     "started",
+			ServerName: server,
+			ToolName:   tool,
+		})
+	}
+
+	start := time.Now()
+	output, execErr := t.Execute(ctx, args)
+	elapsed := time.Since(start).Milliseconds()
+	if execErr != nil {
+		out := execErr.Error()
+		if output != "" {
+			out = output + "\n\n[执行错误] " + execErr.Error()
+		}
+		emitToolDone(onProgress, call, "failed", elapsed, out)
+		return Result{
+			ToolCallID: call.ID,
+			ToolName:   call.Function.Name,
+			Output:     out,
+			IsError:    true,
+		}
+	}
+	emitToolDone(onProgress, call, "completed", elapsed, output)
 	return Result{
 		ToolCallID: call.ID,
 		ToolName:   call.Function.Name,
 		Output:     output,
 	}
+}
+
+func emitProgress(fn ProgressFn, toolUseID string, data stream.ToolProgressData) {
+	if fn == nil || toolUseID == "" {
+		return
+	}
+	fn(toolUseID, data)
+}
+
+const toolOutputPreviewMax = 500
+
+func previewToolOutput(s string) string {
+	if s == "" {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= toolOutputPreviewMax {
+		return s
+	}
+	return string(runes[:toolOutputPreviewMax]) + "…"
+}
+
+func emitToolDone(fn ProgressFn, call llm.ToolCall, status string, elapsedMs int64, output string) {
+	if fn == nil {
+		return
+	}
+	preview := previewToolOutput(output)
+	emitProgress(fn, call.ID, stream.ToolProgressData{
+		Type:          stream.DataToolProgress,
+		Status:        status,
+		ToolName:      call.Function.Name,
+		ElapsedTimeMs: elapsedMs,
+		Message:       preview,
+	})
+	if strings.HasPrefix(call.Function.Name, "mcp_") {
+		server, tool := parseMCPToolName(call.Function.Name)
+		emitProgress(fn, call.ID, stream.ToolProgressData{
+			Type:          stream.DataMCPProgress,
+			Status:        status,
+			ServerName:    server,
+			ToolName:      tool,
+			ElapsedTimeMs: elapsedMs,
+			Message:       preview,
+		})
+	}
+}
+
+func parseMCPToolName(name string) (server, tool string) {
+	if !strings.HasPrefix(name, "mcp_") {
+		return "", name
+	}
+	rest := strings.TrimPrefix(name, "mcp_")
+	parts := strings.SplitN(rest, "_", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return rest, ""
 }

@@ -98,7 +98,7 @@ body {
 /* 主内容 */
 .main {
     flex: 1;
-    padding: 32px 0;
+    padding: 16px 0;
 }
 
 .page {
@@ -110,9 +110,10 @@ body {
 }
 
 .page-title {
-    font-size: 28px;
+    font-size: 20px;
     font-weight: 600;
-    margin-bottom: 24px;
+    line-height: 1.3;
+    margin-bottom: 12px;
     color: var(--gray-900);
 }
 
@@ -120,7 +121,11 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 24px;
+    margin-bottom: 12px;
+}
+
+.page-header .page-title {
+    margin-bottom: 0;
 }
 
 /* 统计卡片 */
@@ -567,6 +572,176 @@ body {
 .progress-actions {
     display: flex;
     justify-content: flex-end;
+    gap: 8px;
+}
+
+/* SessionView（对齐 Claude Code SDK 流） */
+.session-view-root,
+.chat-session-panel {
+    min-height: 120px;
+}
+
+.session-view {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.session-phase {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--primary-color);
+}
+
+.session-stream {
+    background: var(--gray-50);
+    border-radius: var(--border-radius);
+    padding: 12px;
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+.session-thinking summary {
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--gray-600);
+}
+
+.session-thinking-body {
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: var(--gray-600);
+    white-space: pre-wrap;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.session-assistant {
+    font-size: 14px;
+    line-height: 1.6;
+    margin-top: 8px;
+}
+
+.session-feed {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 360px;
+    overflow-y: auto;
+}
+
+.session-feed .timeline-entry {
+    flex-shrink: 0;
+    font-size: 12px;
+}
+
+.tool-card {
+    border: 1px solid var(--gray-200);
+    border-radius: var(--border-radius);
+    padding: 0;
+    background: white;
+    font-size: 12px;
+}
+
+.tool-card-running {
+    border-color: var(--primary-color);
+    background: #eff6ff;
+}
+
+.tool-card-success {
+    border-color: #86efac;
+}
+
+.tool-card-failed {
+    border-color: #fca5a5;
+    background: #fef2f2;
+}
+
+.tool-card-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+}
+
+.tool-card-summary::-webkit-details-marker {
+    display: none;
+}
+
+.tool-card-summary::before {
+    content: '▸';
+    flex-shrink: 0;
+    margin-right: 6px;
+    font-size: 10px;
+    color: var(--gray-500);
+    transition: transform 0.15s ease;
+}
+
+.tool-card[open] > .tool-card-summary::before {
+    transform: rotate(90deg);
+}
+
+.tool-card-title {
+    font-weight: 600;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tool-card-meta {
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--gray-500);
+}
+
+.tool-card-failed .tool-card-meta {
+    color: var(--danger-color);
+    font-weight: 600;
+}
+
+.tool-card-body {
+    margin: 0 12px 10px;
+    padding: 8px;
+    background: var(--gray-50);
+    border-radius: 4px;
+    overflow-x: auto;
+    font-size: 11px;
+    max-height: 200px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.tool-card-body-error {
+    background: #fff1f2;
+    border: 1px solid #fecaca;
+    color: #991b1b;
+    max-height: 240px;
+}
+
+.timeline-entry {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 4px;
+    color: var(--gray-600);
+}
+
+.timeline-time {
+    flex-shrink: 0;
+    color: var(--gray-400);
+}
+
+.chat-session-panel {
+    margin: 8px 16px;
+    padding: 12px;
+    background: var(--gray-50);
+    border-radius: var(--border-radius);
 }
 
 /* 执行结果 */
@@ -1523,6 +1698,17 @@ body {
     border-bottom: 1px solid var(--gray-200);
     text-transform: uppercase;
     letter-spacing: 0.04em;
+    flex-wrap: wrap;
+}
+
+.config-section-hint {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--gray-500);
+    text-transform: none;
+    letter-spacing: normal;
+    flex: 1;
+    min-width: 200px;
 }
 
 .config-section-body {
@@ -1635,7 +1821,7 @@ body {
 .chat-layout {
     display: flex;
     gap: 16px;
-    height: calc(100vh - 200px);
+    height: calc(100vh - 152px);
     min-height: 500px;
 }
 
@@ -1784,13 +1970,6 @@ body {
     border-bottom-left-radius: 4px;
 }
 
-.chat-output {
-    white-space: pre-wrap;
-    font-family: inherit;
-    font-size: 14px;
-    margin: 0;
-}
-
 .chat-logs-details {
     margin-top: 10px;
     border-top: 1px solid var(--gray-200);
@@ -1884,53 +2063,83 @@ body {
     flex-shrink: 0;
 }
 
-/* ==================== Chat Markdown 渲染 ==================== */
+/* ==================== Chat / Session 紧凑 Markdown（覆盖 .markdown-content 松散间距） ==================== */
 
-.chat-output {
+.chat-output.markdown-content,
+.session-assistant.markdown-content {
     font-size: 14px;
-    line-height: 1.7;
+    line-height: 1.55;
     word-break: break-word;
     overflow-x: hidden;
+    white-space: normal;
+    margin: 0;
 }
 
-/* 段落 */
-.chat-output p {
-    margin: 6px 0;
+.chat-output.markdown-content > *:first-child,
+.session-assistant.markdown-content > *:first-child {
+    margin-top: 0;
+}
+
+.chat-output.markdown-content > *:last-child,
+.session-assistant.markdown-content > *:last-child {
+    margin-bottom: 0;
+}
+
+.chat-output.markdown-content p,
+.session-assistant.markdown-content p {
+    margin: 0.35em 0;
     color: var(--gray-800);
 }
 
-/* 标题 */
-.chat-output h1,
-.chat-output h2,
-.chat-output h3,
-.chat-output h4 {
-    margin: 14px 0 6px;
+.chat-output.markdown-content p:empty,
+.session-assistant.markdown-content p:empty {
+    display: none;
+    margin: 0;
+}
+
+.chat-output.markdown-content h1,
+.chat-output.markdown-content h2,
+.chat-output.markdown-content h3,
+.chat-output.markdown-content h4,
+.session-assistant.markdown-content h1,
+.session-assistant.markdown-content h2,
+.session-assistant.markdown-content h3,
+.session-assistant.markdown-content h4 {
+    margin: 0.65em 0 0.35em;
     font-weight: 600;
     color: var(--gray-900);
-    line-height: 1.4;
+    line-height: 1.35;
 }
-.chat-output h1 { font-size: 18px; border-bottom: 1px solid var(--gray-200); padding-bottom: 4px; }
-.chat-output h2 { font-size: 16px; border-bottom: 1px solid var(--gray-100); padding-bottom: 3px; }
-.chat-output h3 { font-size: 15px; }
-.chat-output h4 { font-size: 14px; }
 
-/* 列表 */
-.chat-output ul,
-.chat-output ol {
-    margin: 6px 0;
-    padding-left: 22px;
+.chat-output.markdown-content h1 { font-size: 18px; border-bottom: 1px solid var(--gray-200); padding-bottom: 4px; }
+.chat-output.markdown-content h2 { font-size: 16px; border-bottom: 1px solid var(--gray-100); padding-bottom: 3px; }
+.chat-output.markdown-content h3 { font-size: 15px; }
+.chat-output.markdown-content h4 { font-size: 14px; }
+
+.chat-output.markdown-content ul,
+.chat-output.markdown-content ol,
+.session-assistant.markdown-content ul,
+.session-assistant.markdown-content ol {
+    margin: 0.35em 0;
+    padding-left: 1.35em;
 }
-.chat-output li {
-    margin: 3px 0;
+
+.chat-output.markdown-content li,
+.session-assistant.markdown-content li {
+    margin: 0.15em 0;
     color: var(--gray-800);
 }
-.chat-output li > ul,
-.chat-output li > ol {
-    margin: 2px 0;
+
+.chat-output.markdown-content li > ul,
+.chat-output.markdown-content li > ol,
+.session-assistant.markdown-content li > ul,
+.session-assistant.markdown-content li > ol {
+    margin: 0.1em 0;
 }
 
 /* 行内代码 */
-.chat-output code {
+.chat-output.markdown-content code,
+.session-assistant.markdown-content code {
     background: rgba(0, 0, 0, 0.06);
     padding: 1px 5px;
     border-radius: 4px;
@@ -1940,14 +2149,16 @@ body {
 }
 
 /* 代码块（marked 生成 <pre><code>） */
-.chat-output pre {
+.chat-output.markdown-content pre,
+.session-assistant.markdown-content pre {
     background: #1e1e1e;
     border-radius: 6px;
     padding: 12px 14px;
     margin: 8px 0;
     overflow-x: auto;
 }
-.chat-output pre code {
+.chat-output.markdown-content pre code,
+.session-assistant.markdown-content pre code {
     background: none;
     padding: 0;
     color: #d4d4d4;
@@ -1958,7 +2169,8 @@ body {
 }
 
 /* 引用块 */
-.chat-output blockquote {
+.chat-output.markdown-content blockquote,
+.session-assistant.markdown-content blockquote {
     border-left: 3px solid var(--primary-color);
     margin: 8px 0;
     padding: 4px 12px;
@@ -1966,79 +2178,90 @@ body {
     border-radius: 0 4px 4px 0;
     color: var(--gray-600);
 }
-.chat-output blockquote p { margin: 2px 0; }
+.chat-output.markdown-content blockquote p,
+.session-assistant.markdown-content blockquote p { margin: 2px 0; }
 
 /* 分割线 */
-.chat-output hr {
+.chat-output.markdown-content hr,
+.session-assistant.markdown-content hr {
     border: none;
     border-top: 1px solid var(--gray-200);
     margin: 10px 0;
 }
 
 /* 链接 */
-.chat-output a {
+.chat-output.markdown-content a,
+.session-assistant.markdown-content a {
     color: var(--primary-color);
     text-decoration: none;
 }
-.chat-output a:hover { text-decoration: underline; }
+.chat-output.markdown-content a:hover,
+.session-assistant.markdown-content a:hover { text-decoration: underline; }
 
 /* 表格 */
-.chat-output table {
+.chat-output.markdown-content table,
+.session-assistant.markdown-content table {
     border-collapse: collapse;
     width: 100%;
     margin: 10px 0;
     font-size: 13px;
 }
-.chat-output th,
-.chat-output td {
+.chat-output.markdown-content th,
+.chat-output.markdown-content td,
+.session-assistant.markdown-content th,
+.session-assistant.markdown-content td {
     border: 1px solid var(--gray-200);
     padding: 6px 12px;
     text-align: left;
 }
-.chat-output th {
+.chat-output.markdown-content th,
+.session-assistant.markdown-content th {
     background: var(--gray-50);
     font-weight: 600;
     color: var(--gray-700);
 }
-.chat-output tr:nth-child(even) td {
+.chat-output.markdown-content tr:nth-child(even) td,
+.session-assistant.markdown-content tr:nth-child(even) td {
     background: var(--gray-50);
 }
 
-/* 其他内联格式 */
-.chat-output strong { font-weight: 600; }
-.chat-output em { font-style: italic; }
-.chat-output del { text-decoration: line-through; color: var(--gray-500); }
+.chat-output.markdown-content strong,
+.session-assistant.markdown-content strong { font-weight: 600; }
+.chat-output.markdown-content em,
+.session-assistant.markdown-content em { font-style: italic; }
+.chat-output.markdown-content del,
+.session-assistant.markdown-content del { text-decoration: line-through; color: var(--gray-500); }
 
-/* ---- 用户消息气泡（蓝色背景）内的颜色适配 ---- */
-.chat-msg-user .chat-output p,
-.chat-msg-user .chat-output li,
-.chat-msg-user .chat-output h1,
-.chat-msg-user .chat-output h2,
-.chat-msg-user .chat-output h3,
-.chat-msg-user .chat-output h4 {
+/* 用户消息气泡（若使用 markdown 渲染） */
+.chat-msg-user .chat-output.markdown-content p,
+.chat-msg-user .chat-output.markdown-content li,
+.chat-msg-user .chat-output.markdown-content h1,
+.chat-msg-user .chat-output.markdown-content h2,
+.chat-msg-user .chat-output.markdown-content h3,
+.chat-msg-user .chat-output.markdown-content h4 {
     color: #fff;
 }
-.chat-msg-user .chat-output h1,
-.chat-msg-user .chat-output h2 {
+.chat-msg-user .chat-output.markdown-content h1,
+.chat-msg-user .chat-output.markdown-content h2 {
     border-bottom-color: rgba(255,255,255,0.3);
 }
-.chat-msg-user .chat-output code {
+.chat-msg-user .chat-output.markdown-content code {
     background: rgba(255,255,255,0.2);
     color: #fff;
 }
-.chat-msg-user .chat-output blockquote {
+.chat-msg-user .chat-output.markdown-content blockquote {
     border-left-color: rgba(255,255,255,0.5);
     background: rgba(255,255,255,0.1);
     color: rgba(255,255,255,0.85);
 }
-.chat-msg-user .chat-output a { color: #bfdbfe; }
-.chat-msg-user .chat-output th,
-.chat-msg-user .chat-output td {
+.chat-msg-user .chat-output.markdown-content a { color: #bfdbfe; }
+.chat-msg-user .chat-output.markdown-content th,
+.chat-msg-user .chat-output.markdown-content td {
     border-color: rgba(255,255,255,0.3);
     color: #fff;
 }
-.chat-msg-user .chat-output th { background: rgba(255,255,255,0.15); }
-.chat-msg-user .chat-output tr:nth-child(even) td { background: rgba(255,255,255,0.08); }
+.chat-msg-user .chat-output.markdown-content th { background: rgba(255,255,255,0.15); }
+.chat-msg-user .chat-output.markdown-content tr:nth-child(even) td { background: rgba(255,255,255,0.08); }
 
 
 /* MCP 服务器配置样式 */
@@ -2242,6 +2465,12 @@ body {
     margin-right: 4px;
 }
 
+/* MCP 区块：避免继承 config-section-body 的表单网格，占满整行 */
+.config-section-body-mcp {
+    display: block;
+    padding: 16px;
+}
+
 /* ==================== MCP 配置样式 ==================== */
 
 .mcp-config-container {
@@ -2424,6 +2653,7 @@ body {
     padding: 16px 20px;
     background: white;
     border-bottom: none;
+    cursor: pointer;
 }
 
 .mcp-server-name-row {
@@ -2533,11 +2763,11 @@ body {
 .mcp-server-body {
     padding: 0 20px 16px 20px;
     background: white;
-    display: none;
+    display: block;
 }
 
-.mcp-server-card.expanded .mcp-server-body {
-    display: block;
+.mcp-server-card:not(.expanded) .mcp-server-body {
+    display: none;
 }
 
 .mcp-server-info {

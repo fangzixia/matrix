@@ -55,7 +55,7 @@ func TestObserve(t *testing.T) {
 		{ToolCallID: "id1", ToolName: "read_file", Output: "内容", IsError: false},
 		{ToolCallID: "id2", ToolName: "bash", Output: "退出异常", IsError: true},
 	}
-	msgs := observe(results, Config{}, nil)
+	msgs := observe(results, Config{})
 
 	if len(msgs) != 2 {
 		t.Fatalf("期望 2 条消息，实际 %d", len(msgs))
@@ -77,7 +77,7 @@ func TestObserve_Truncate(t *testing.T) {
 	results := []tools.Result{
 		{ToolCallID: "id1", ToolName: "x", Output: long},
 	}
-	msgs := observe(results, Config{MaxToolResultRunes: 20}, nil)
+	msgs := observe(results, Config{MaxToolResultRunes: 20})
 	if len(msgs) != 1 {
 		t.Fatalf("期望 1 条消息")
 	}
@@ -117,10 +117,4 @@ func TestTransitionStr(t *testing.T) {
 	if transitionStr(&r2) != "stop_hook_blocking" {
 		t.Error("stop_hook_blocking 跃迁格式化失败")
 	}
-}
-
-// TestEmit_NilChannel 验证 nil channel 时 emit 不 panic。
-func TestEmit_NilChannel(t *testing.T) {
-	// 不应 panic
-	emit(nil, Event{Kind: EventTextDelta, Delta: "你好"})
 }

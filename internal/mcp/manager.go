@@ -2,7 +2,7 @@ package mcp
 
 import (
 	"fmt"
-	"log"
+	"matrix/internal/logger"
 	"os"
 	"sync"
 	"time"
@@ -35,6 +35,7 @@ type Manager struct {
 	clients map[string]*Client
 	configs map[string]ServerConfig
 	mu      sync.RWMutex
+	connect sync.Mutex // 防止并发 ReconnectAll 互相打断
 }
 
 // NewManager 创建 MCP 管理器
@@ -54,7 +55,7 @@ func (m *Manager) UpdateConfigs(configs map[string]ServerConfig) {
 	for name, client := range m.clients {
 		config, exists := configs[name]
 		if !exists || config.Disabled {
-			log.Printf("Closing MCP server: %s", name)
+			logger.Infof("Closing MCP server: %s", name)
 			client.Close()
 			delete(m.clients, name)
 		}
@@ -108,7 +109,7 @@ func (m *Manager) GetClient(name string) (*Client, error) {
 	}
 
 	m.clients[name] = client
-	log.Printf("MCP server started: %s", name)
+	logger.Infof("MCP server started: %s", name)
 
 	return client, nil
 }
@@ -166,6 +167,20 @@ func (m *Manager) TestServer(name string) *ServerStatus {
 	return status
 }
 
+// ReconnectAll 关闭已有连接并重新连接所有已配置服务器
+func (m *Manager) ReconnectAll() map[string]*ServerStatus {
+	m.connect.Lock()
+	defer m.connect.Unlock()
+
+	m.mu.Lock()
+	for name, client := range m.clients {
+		client.Close()
+		delete(m.clients, name)
+	}
+	m.mu.Unlock()
+	return m.TestAllServers()
+}
+
 // TestAllServers 测试所有服务器
 func (m *Manager) TestAllServers() map[string]*ServerStatus {
 	m.mu.RLock()
@@ -206,7 +221,7 @@ func (m *Manager) GetServerStatus(name string) *ServerStatus {
 
 	client, exists := m.clients[name]
 	if !exists {
-		status.Error = "服务器未启动"
+		// 懒加载：配置已保存但尚未调用 GetClient/TestServer，不属于故障
 		return status
 	}
 
@@ -267,7 +282,7 @@ func (m *Manager) ListAllTools() (map[string][]Tool, error) {
 	for name := range configs {
 		tools, err := m.ListTools(name)
 		if err != nil {
-			log.Printf("Failed to list tools for %s: %v", name, err)
+			logger.Infof("Failed to list tools for %s: %v", name, err)
 			continue
 		}
 		results[name] = tools
@@ -282,7 +297,7 @@ func (m *Manager) Close() {
 	defer m.mu.Unlock()
 
 	for name, client := range m.clients {
-		log.Printf("Closing MCP server: %s", name)
+		logger.Infof("Closing MCP server: %s", name)
 		client.Close()
 	}
 

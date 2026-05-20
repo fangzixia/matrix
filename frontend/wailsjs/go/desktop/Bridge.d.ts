@@ -4,6 +4,8 @@ import {desktop} from '../models';
 
 export function CallMCPTool(arg1:string,arg2:string,arg3:Record<string, any>):Promise<Record<string, any>>;
 
+export function CancelAgentSession():Promise<void>;
+
 export function GetAllMCPServerStatuses():Promise<Record<string, desktop.MCPServerStatus>>;
 
 export function GetEvaluations():Promise<Record<string, any>>;
@@ -25,6 +27,8 @@ export function ListMCPTools(arg1:string):Promise<Array<Record<string, any>>>;
 export function OpenFolderDialog():Promise<string>;
 
 export function ReadFile(arg1:string):Promise<Record<string, any>>;
+
+export function RunAgentSession(arg1:string,arg2:string,arg3:string):Promise<desktop.RunResult>;
 
 export function RunTask(arg1:string,arg2:string,arg3:string):Promise<desktop.RunResult>;
 

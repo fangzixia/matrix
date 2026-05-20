@@ -14,11 +14,11 @@ func NewRegistry() *Registry {
 	}
 
 	// 注册所有 Agent
-	r.Register(NewAnalysisAgent())
 	r.Register(NewRequirementsAgent())
 	r.Register(NewCodeAgent())
 	r.Register(NewEvalAgent())
 	r.Register(NewBuildAgent())
+	r.Register(NewPagescanAgent())
 	r.Register(NewChatAgent())
 
 	return r

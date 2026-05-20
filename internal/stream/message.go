@@ -1,0 +1,294 @@
+// Package stream 定义 Agent 会话对外推送的 SDK 风格消息（对齐 Claude Code progress / stream_event / assistant / result）。
+package stream
+
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// 顶层消息 type 常量。
+const (
+	TypeProgress    = "progress"
+	TypeStreamEvent = "stream_event"
+	TypeAssistant   = "assistant"
+	TypeResult      = "result"
+)
+
+// TurnProgress / MCP / 通用工具进度 data.type。
+const (
+	DataTurnProgress = "turn_progress"
+	DataMCPProgress  = "mcp_progress"
+	DataToolProgress = "tool_progress"
+)
+
+// stream_event.event.type。
+const (
+	EventMessageStart      = "message_start"
+	EventContentBlockDelta = "content_block_delta"
+	EventMessageDelta      = "message_delta"
+	EventMessageStop       = "message_stop"
+)
+
+// content_block_delta.delta.type。
+const (
+	DeltaText     = "text_delta"
+	DeltaThinking = "thinking_delta"
+)
+
+// result.subtype。
+const (
+	ResultSuccess       = "success"
+	ResultErrorMaxTurns = "error_max_turns"
+	ResultError         = "error"
+)
+
+// Message 为 Wails agent:stream 事件的 JSON 载荷。
+type Message struct {
+	Type            string  `json:"type"`
+	SessionID       string  `json:"session_id,omitempty"`
+	UUID            string  `json:"uuid,omitempty"`
+	ParentToolUseID *string `json:"parent_tool_use_id,omitempty"`
+
+	// progress
+	ToolUseID string            `json:"tool_use_id,omitempty"`
+	Data      *ToolProgressData `json:"data,omitempty"`
+
+	// stream_event
+	Event *StreamEventPayload `json:"event,omitempty"`
+
+	// assistant
+	Assistant *AssistantPayload `json:"message,omitempty"`
+
+	// result
+	Subtype      string `json:"subtype,omitempty"`
+	StopReason   string `json:"stop_reason,omitempty"`
+	NumTurns     int    `json:"num_turns,omitempty"`
+	DurationMs   int64  `json:"duration_ms,omitempty"`
+	IsError      bool   `json:"is_error,omitempty"`
+	ErrorMessage string `json:"error,omitempty"`
+	Output       string `json:"output,omitempty"`
+}
+
+// ToolProgressData 为 progress 消息的 data 字段。
+type ToolProgressData struct {
+	Type          string `json:"type"`
+	Status        string `json:"status,omitempty"`
+	Turn          int    `json:"turn,omitempty"`
+	Transition    string `json:"transition,omitempty"`
+	Summary       string `json:"summary,omitempty"`
+	ToolName      string `json:"tool_name,omitempty"`
+	ServerName    string `json:"server_name,omitempty"`
+	ElapsedTimeMs int64  `json:"elapsed_time_ms,omitempty"`
+	Message       string `json:"message,omitempty"`
+}
+
+// StreamEventPayload 为 stream_event.event。
+type StreamEventPayload struct {
+	Type  string      `json:"type"`
+	Index int         `json:"index,omitempty"`
+	Delta *BlockDelta `json:"delta,omitempty"`
+	Usage any         `json:"usage,omitempty"`
+}
+
+// BlockDelta 为 content_block_delta 的 delta。
+type BlockDelta struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	Thinking string `json:"thinking,omitempty"`
+}
+
+// AssistantPayload 为 assistant 消息体（简化 OpenAI 形态）。
+type AssistantPayload struct {
+	Role       string         `json:"role"`
+	Content    []ContentBlock `json:"content"`
+	ToolCalls  []ToolUseBlock `json:"tool_calls,omitempty"`
+	StopReason string         `json:"stop_reason,omitempty"`
+}
+
+// ContentBlock 为 assistant content 块。
+type ContentBlock struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	Thinking string `json:"thinking,omitempty"`
+}
+
+// ToolUseBlock 为 tool_use 块。
+type ToolUseBlock struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Input string `json:"input"`
+}
+
+func newUUID() string {
+	return uuid.NewString()
+}
+
+func base(sessionID string) Message {
+	return Message{
+		SessionID: sessionID,
+		UUID:      newUUID(),
+	}
+}
+
+// TurnProgress 新一轮 TAOR 迭代开始。
+func TurnProgress(sessionID string, turn int, transition, summary string) Message {
+	m := base(sessionID)
+	m.Type = TypeProgress
+	m.Data = &ToolProgressData{
+		Type:       DataTurnProgress,
+		Turn:       turn,
+		Transition: transition,
+		Summary:    summary,
+	}
+	return m
+}
+
+// ToolStarted 工具开始执行。
+func ToolStarted(sessionID, toolUseID, toolName string, input string) Message {
+	m := base(sessionID)
+	m.Type = TypeProgress
+	m.ToolUseID = toolUseID
+	m.Data = &ToolProgressData{
+		Type:     DataToolProgress,
+		Status:   "started",
+		ToolName: toolName,
+		Message:  truncate(input, 500),
+	}
+	return m
+}
+
+// MCPProgress MCP 工具进度。
+func MCPProgress(sessionID, toolUseID, status, serverName, toolName string, elapsedMs int64) Message {
+	m := base(sessionID)
+	m.Type = TypeProgress
+	m.ToolUseID = toolUseID
+	m.Data = &ToolProgressData{
+		Type:          DataMCPProgress,
+		Status:        status,
+		ServerName:    serverName,
+		ToolName:      toolName,
+		ElapsedTimeMs: elapsedMs,
+	}
+	return m
+}
+
+// ToolFinished 工具执行结束。
+func ToolFinished(sessionID, toolUseID, toolName, status string, elapsedMs int64, outputPreview string) Message {
+	m := base(sessionID)
+	m.Type = TypeProgress
+	m.ToolUseID = toolUseID
+	m.Data = &ToolProgressData{
+		Type:          DataToolProgress,
+		Status:        status,
+		ToolName:      toolName,
+		ElapsedTimeMs: elapsedMs,
+		Message:       truncate(outputPreview, 500),
+	}
+	return m
+}
+
+// TextDelta 流式文本增量。
+func TextDelta(sessionID, text string, blockIndex int) Message {
+	m := base(sessionID)
+	m.Type = TypeStreamEvent
+	m.Event = &StreamEventPayload{
+		Type:  EventContentBlockDelta,
+		Index: blockIndex,
+		Delta: &BlockDelta{Type: DeltaText, Text: text},
+	}
+	return m
+}
+
+// ThinkingDelta 流式思考增量。
+func ThinkingDelta(sessionID, thinking string, blockIndex int) Message {
+	m := base(sessionID)
+	m.Type = TypeStreamEvent
+	m.Event = &StreamEventPayload{
+		Type:  EventContentBlockDelta,
+		Index: blockIndex,
+		Delta: &BlockDelta{Type: DeltaThinking, Thinking: thinking},
+	}
+	return m
+}
+
+// MessageStart 新一轮 assistant 流开始。
+func MessageStart(sessionID string) Message {
+	m := base(sessionID)
+	m.Type = TypeStreamEvent
+	m.Event = &StreamEventPayload{Type: EventMessageStart}
+	return m
+}
+
+// MessageStop assistant 流结束。
+func MessageStop(sessionID string) Message {
+	m := base(sessionID)
+	m.Type = TypeStreamEvent
+	m.Event = &StreamEventPayload{Type: EventMessageStop}
+	return m
+}
+
+// Assistant 完整 assistant 轮次。
+func Assistant(sessionID, text, thinking string, toolCalls []ToolUseBlock, stopReason string) Message {
+	blocks := make([]ContentBlock, 0, 2)
+	if thinking != "" {
+		blocks = append(blocks, ContentBlock{Type: "thinking", Thinking: thinking})
+	}
+	if text != "" {
+		blocks = append(blocks, ContentBlock{Type: "text", Text: text})
+	}
+	m := base(sessionID)
+	m.Type = TypeAssistant
+	m.Assistant = &AssistantPayload{
+		Role:       "assistant",
+		Content:    blocks,
+		ToolCalls:  toolCalls,
+		StopReason: stopReason,
+	}
+	return m
+}
+
+// ResultSuccessMsg 正常结束。
+func ResultSuccessMsg(sessionID, output, stopReason string, numTurns int, duration time.Duration) Message {
+	m := base(sessionID)
+	m.Type = TypeResult
+	m.Subtype = ResultSuccess
+	m.StopReason = stopReason
+	m.NumTurns = numTurns
+	m.DurationMs = duration.Milliseconds()
+	m.Output = output
+	return m
+}
+
+// ResultMaxTurns 达到最大轮次。
+func ResultMaxTurns(sessionID string, numTurns int, duration time.Duration) Message {
+	m := base(sessionID)
+	m.Type = TypeResult
+	m.Subtype = ResultErrorMaxTurns
+	m.StopReason = "max_turns"
+	m.NumTurns = numTurns
+	m.DurationMs = duration.Milliseconds()
+	m.IsError = true
+	m.ErrorMessage = "已达到最大轮次上限"
+	return m
+}
+
+// ResultErrorMsg 错误结束。
+func ResultErrorMsg(sessionID, stopReason, errMsg string, numTurns int, duration time.Duration) Message {
+	m := base(sessionID)
+	m.Type = TypeResult
+	m.Subtype = ResultError
+	m.StopReason = stopReason
+	m.NumTurns = numTurns
+	m.DurationMs = duration.Milliseconds()
+	m.IsError = true
+	m.ErrorMessage = errMsg
+	return m
+}
+
+func truncate(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
+}

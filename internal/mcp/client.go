@@ -6,12 +6,35 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"matrix/internal/logger"
 	"os/exec"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+// normalizeRPCID 统一 JSON-RPC 请求/响应 ID（JSON 数字常被解析为 float64）
+func normalizeRPCID(id interface{}) string {
+	switch v := id.(type) {
+	case float64:
+		return strconv.FormatInt(int64(v), 10)
+	case float32:
+		return strconv.FormatInt(int64(v), 10)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case int:
+		return strconv.Itoa(v)
+	case int32:
+		return strconv.FormatInt(int64(v), 10)
+	case json.Number:
+		return v.String()
+	case string:
+		return v
+	default:
+		return fmt.Sprint(id)
+	}
+}
 
 // Client MCP 客户端
 type Client struct {
@@ -85,11 +108,11 @@ func NewClient(command string, args []string, env []string) (*Client, error) {
 // Initialize 初始化 MCP 连接
 func (c *Client) Initialize() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if c.initialized {
+		c.mu.Unlock()
 		return nil
 	}
+	c.mu.Unlock()
 
 	req := InitializeRequest{
 		ProtocolVersion: "2024-11-05",
@@ -110,16 +133,17 @@ func (c *Client) Initialize() error {
 		return fmt.Errorf("initialize: %w", err)
 	}
 
-	c.serverInfo = &result.ServerInfo
-	c.capabilities = &result.Capabilities
-	c.initialized = true
-
-	// 发送 initialized 通知
 	if err := c.notify("notifications/initialized", nil); err != nil {
 		return fmt.Errorf("send initialized notification: %w", err)
 	}
 
-	log.Printf("MCP client initialized: server=%s version=%s", result.ServerInfo.Name, result.ServerInfo.Version)
+	c.mu.Lock()
+	c.serverInfo = &result.ServerInfo
+	c.capabilities = &result.Capabilities
+	c.initialized = true
+	c.mu.Unlock()
+
+	logger.Infof("MCP client initialized: server=%s version=%s", result.ServerInfo.Name, result.ServerInfo.Version)
 
 	return nil
 }
@@ -271,6 +295,7 @@ func (c *Client) call(method string, params interface{}, result interface{}) err
 	c.mu.RUnlock()
 
 	id := c.requestID.Add(1)
+	idKey := normalizeRPCID(id)
 	req := JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      id,
@@ -280,8 +305,8 @@ func (c *Client) call(method string, params interface{}, result interface{}) err
 
 	// 创建响应通道
 	respChan := make(chan *JSONRPCResponse, 1)
-	c.pendingCalls.Store(id, respChan)
-	defer c.pendingCalls.Delete(id)
+	c.pendingCalls.Store(idKey, respChan)
+	defer c.pendingCalls.Delete(idKey)
 
 	// 发送请求
 	data, err := json.Marshal(req)
@@ -358,14 +383,14 @@ func (c *Client) readLoop() {
 		var resp JSONRPCResponse
 		if err := json.Unmarshal(line, &resp); err == nil && resp.ID != nil {
 			// 这是一个响应
-			if ch, ok := c.pendingCalls.Load(resp.ID); ok {
+			if ch, ok := c.pendingCalls.Load(normalizeRPCID(resp.ID)); ok {
 				select {
 				case ch.(chan *JSONRPCResponse) <- &resp:
 				default:
-					log.Printf("Warning: response channel full for ID %v", resp.ID)
+					logger.Warnf("Warning: response channel full for ID %v", resp.ID)
 				}
 			} else {
-				log.Printf("Warning: received response for unknown ID %v", resp.ID)
+				logger.Warnf("Warning: received response for unknown ID %v", resp.ID)
 			}
 			continue
 		}
@@ -377,16 +402,16 @@ func (c *Client) readLoop() {
 			select {
 			case c.notifications <- &notif:
 			default:
-				log.Printf("Warning: notification channel full, dropping notification: %s", notif.Method)
+				logger.Warnf("Warning: notification channel full, dropping notification: %s", notif.Method)
 			}
 			continue
 		}
 
-		log.Printf("Warning: received unknown message: %s", string(line))
+		logger.Warnf("Warning: received unknown message: %s", string(line))
 	}
 
 	if err := c.scanner.Err(); err != nil {
-		log.Printf("Error reading from stdout: %v", err)
+		logger.Errorf("Error reading from stdout: %v", err)
 	}
 }
 
@@ -394,6 +419,6 @@ func (c *Client) readLoop() {
 func (c *Client) logStderr() {
 	scanner := bufio.NewScanner(c.stderr)
 	for scanner.Scan() {
-		log.Printf("[MCP stderr] %s", scanner.Text())
+		logger.Infof("[MCP stderr] %s", scanner.Text())
 	}
 }

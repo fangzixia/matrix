@@ -6,6 +6,10 @@ export function CallMCPTool(arg1, arg2, arg3) {
   return window['go']['desktop']['Bridge']['CallMCPTool'](arg1, arg2, arg3);
 }
 
+export function CancelAgentSession() {
+  return window['go']['desktop']['Bridge']['CancelAgentSession']();
+}
+
 export function GetAllMCPServerStatuses() {
   return window['go']['desktop']['Bridge']['GetAllMCPServerStatuses']();
 }
@@ -48,6 +52,10 @@ export function OpenFolderDialog() {
 
 export function ReadFile(arg1) {
   return window['go']['desktop']['Bridge']['ReadFile'](arg1);
+}
+
+export function RunAgentSession(arg1, arg2, arg3) {
+  return window['go']['desktop']['Bridge']['RunAgentSession'](arg1, arg2, arg3);
 }
 
 export function RunTask(arg1, arg2, arg3) {

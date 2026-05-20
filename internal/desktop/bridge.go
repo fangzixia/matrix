@@ -4,11 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"matrix/internal/logger"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -27,6 +26,7 @@ type Bridge struct {
 	client        *llm.Client
 	agentRegistry *agents.Registry
 	mcpManager    *mcp.Manager
+	sessions      *sessionRunner
 }
 
 // NewBridge 创建新的 Bridge 实例
@@ -54,6 +54,7 @@ func NewBridge(cfg *Config) *Bridge {
 		config:        cfg,
 		agentRegistry: agents.NewRegistry(),
 		mcpManager:    mcpManager,
+		sessions:      &sessionRunner{},
 	}
 }
 
@@ -61,12 +62,27 @@ func NewBridge(cfg *Config) *Bridge {
 func (b *Bridge) Startup(ctx context.Context) {
 	b.ctx = ctx
 	b.updateClient()
-	log.Println("Matrix Desktop started")
+	logger.Info("Matrix Desktop started")
+	go b.autoConnectMCPServers()
+}
+
+func (b *Bridge) autoConnectMCPServers() {
+	if b.mcpManager == nil {
+		return
+	}
+	statuses := b.mcpManager.ReconnectAll()
+	available := 0
+	for _, s := range statuses {
+		if s.Available {
+			available++
+		}
+	}
+	logger.Infof("MCP auto-connect: %d/%d servers available", available, len(statuses))
 }
 
 // Shutdown Wails 关闭回调
 func (b *Bridge) Shutdown(_ context.Context) {
-	log.Println("Matrix Desktop shutdown")
+	logger.Info("Matrix Desktop shutdown")
 	// 关闭所有 MCP 客户端
 	if b.mcpManager != nil {
 		b.mcpManager.Close()
@@ -87,7 +103,7 @@ func (b *Bridge) buildQueryConfig(agentName, sysPrompt, userPrompt string) (quer
 
 	// 注册 MCP 工具
 	if err := tools.RegisterMCPTools(reg, b.mcpManager); err != nil {
-		log.Printf("Warning: failed to register MCP tools: %v", err)
+		logger.Warnf("failed to register MCP tools: %v", err)
 	}
 
 	// 使用统一的全局配置，MaxTurns 由核心模块控制
@@ -123,7 +139,7 @@ func (b *Bridge) buildQueryConfig(agentName, sysPrompt, userPrompt string) (quer
 
 					// TODO: 实现用户确认机制
 					// 目前默认允许所有 MCP 工具调用
-					log.Printf("MCP tool call requires approval: %s/%s", serverName, toolName)
+					logger.Warnf("MCP tool call requires approval: %s/%s", serverName, toolName)
 					return true
 				}
 			}
@@ -142,16 +158,9 @@ type RunResult struct {
 	Error    string `json:"error,omitempty"`
 }
 
-// EventLog 事件日志
-type EventLog struct {
-	Type    string `json:"type"`
-	Time    string `json:"time"`
-	Message string `json:"message"`
-}
-
 // RunTask 执行任务（非流式）
 func (b *Bridge) RunTask(agentName, task, filePath string) (*RunResult, error) {
-	log.Printf("RunTask: agent=%s, task=%s, file=%s", agentName, task, filePath)
+	logger.Infof("RunTask: agent=%s, task=%s, file=%s", agentName, task, filePath)
 
 	if b.client == nil {
 		return nil, fmt.Errorf("请先配置 API Key")
@@ -169,15 +178,7 @@ func (b *Bridge) RunTask(agentName, task, filePath string) (*RunResult, error) {
 		return nil, err
 	}
 
-	// 执行查询
-	events := make(chan query.Event, 64)
-	go func() {
-		for range events {
-			// 非流式模式，忽略事件
-		}
-	}()
-
-	result := query.Run(b.ctx, cfg, events)
+	result := query.Run(b.ctx, cfg)
 
 	if result.Err != nil {
 		return &RunResult{
@@ -193,126 +194,22 @@ func (b *Bridge) RunTask(agentName, task, filePath string) (*RunResult, error) {
 	}, nil
 }
 
-// RunTaskWithProgress 执行任务并流式返回进度
+// RunAgentSession 执行任务并通过 agent:stream 推送 SDK 过程消息。
+func (b *Bridge) RunAgentSession(agentName, task, filePath string) (*RunResult, error) {
+	logger.Infof("RunAgentSession: agent=%s, task=%s, file=%s", agentName, task, filePath)
+	return b.runAgentSession(agentName, task, filePath)
+}
+
+// RunTaskWithProgress 已弃用，保留别名供 wails 绑定过渡。
 func (b *Bridge) RunTaskWithProgress(agentName, task, filePath string) (*RunResult, error) {
-	log.Printf("RunTaskWithProgress: agent=%s, task=%s, file=%s", agentName, task, filePath)
-
-	if b.client == nil {
-		return nil, fmt.Errorf("请先配置 API Key")
-	}
-
-	// 构建系统提示
-	sysPrompt := b.buildSystemPrompt(agentName)
-
-	// 构建用户提示
-	userPrompt := b.buildUserPrompt(agentName, task, filePath)
-
-	// 构建查询配置
-	cfg, err := b.buildQueryConfig(agentName, sysPrompt, userPrompt)
-	if err != nil {
-		return nil, err
-	}
-
-	// 执行查询并发送事件
-	events := make(chan query.Event, 64)
-	startTime := time.Now()
-
-	log.Printf("RunTaskWithProgress: 开始执行，agent=%s", agentName)
-
-	// 使用 WaitGroup 确保所有事件都被发送
-	var wg sync.WaitGroup
-	wg.Add(1)
-	eventCount := 0
-	go func() {
-		defer wg.Done()
-		for ev := range events {
-			eventCount++
-			eventLog := b.convertEvent(ev, startTime)
-			log.Printf("发送事件 #%d: type=%s, message=%s", eventCount, eventLog.Type, eventLog.Message)
-			runtime.EventsEmit(b.ctx, "task:progress", eventLog)
-		}
-		log.Printf("RunTaskWithProgress: 事件发送完成，共 %d 个事件", eventCount)
-	}()
-
-	result := query.Run(b.ctx, cfg, events)
-
-	// 等待所有事件发送完成
-	log.Printf("RunTaskWithProgress: 等待事件发送完成...")
-	wg.Wait()
-	log.Printf("RunTaskWithProgress: 执行完成")
-
-	if result.Err != nil {
-		return &RunResult{
-			Output:   "",
-			HasError: true,
-			Error:    result.Err.Error(),
-		}, nil
-	}
-
-	return &RunResult{
-		Output:   result.Answer,
-		HasError: false,
-	}, nil
-}
-
-// convertEvent 转换查询事件为前端日志格式
-func (b *Bridge) convertEvent(ev query.Event, startTime time.Time) EventLog {
-	elapsed := time.Since(startTime)
-	timeStr := fmt.Sprintf("%02d:%02d:%02d",
-		int(elapsed.Hours()),
-		int(elapsed.Minutes())%60,
-		int(elapsed.Seconds())%60,
-	)
-
-	switch ev.Kind {
-	case query.EventTurnStart:
-		return EventLog{
-			Type:    "info",
-			Time:    timeStr,
-			Message: fmt.Sprintf("开始第 %s 轮", ev.Delta),
-		}
-	case query.EventThinkingDelta:
-		return EventLog{
-			Type:    "thinking",
-			Time:    timeStr,
-			Message: ev.Delta,
-		}
-	case query.EventTextDelta:
-		return EventLog{
-			Type:    "text",
-			Time:    timeStr,
-			Message: ev.Delta,
-		}
-	case query.EventToolCall:
-		return EventLog{
-			Type:    "tool",
-			Time:    timeStr,
-			Message: fmt.Sprintf("调用工具: %s", ev.ToolName),
-		}
-	case query.EventToolResult:
-		status := "成功"
-		if ev.IsError {
-			status = "失败"
-		}
-		return EventLog{
-			Type:    "tool",
-			Time:    timeStr,
-			Message: fmt.Sprintf("工具 %s %s", ev.ToolName, status),
-		}
-	default:
-		return EventLog{
-			Type:    "info",
-			Time:    timeStr,
-			Message: ev.Delta,
-		}
-	}
+	return b.RunAgentSession(agentName, task, filePath)
 }
 
 // buildSystemPrompt 构建系统提示（使用 agents 包）
 func (b *Bridge) buildSystemPrompt(agentName string) string {
 	agent, err := b.agentRegistry.Get(agentName)
 	if err != nil {
-		log.Printf("Agent not found: %s, using default prompt", agentName)
+		logger.Infof("Agent not found: %s, using default prompt", agentName)
 		return `你是一个有用的 AI 助手，可以使用文件系统工具完成任务。
 调用工具前简要说明意图。收到工具结果后解读并决定下一步。
 掌握足够信息时，给出清晰简洁的最终答案。`
@@ -330,7 +227,7 @@ func (b *Bridge) buildSystemPrompt(agentName string) string {
 func (b *Bridge) buildUserPrompt(agentName, task, filePath string) string {
 	agent, err := b.agentRegistry.Get(agentName)
 	if err != nil {
-		log.Printf("Agent not found: %s, using default prompt", agentName)
+		logger.Infof("Agent not found: %s, using default prompt", agentName)
 		workspaceRoot := b.config.Workspace.Root
 		if workspaceRoot == "" {
 			workspaceRoot = "."
@@ -348,13 +245,13 @@ func (b *Bridge) buildUserPrompt(agentName, task, filePath string) string {
 
 // GetSettings 读取用户配置
 func (b *Bridge) GetSettings() (*Settings, error) {
-	log.Println("GetSettings")
+	logger.Info("GetSettings")
 	return b.config.ToSettings(), nil
 }
 
 // SaveSettings 保存用户配置并热重载
 func (b *Bridge) SaveSettings(s *Settings) error {
-	log.Printf("SaveSettings: model=%s", s.Model.Model)
+	logger.Infof("SaveSettings: model=%s", s.Model.Model)
 
 	b.config.FromSettings(s)
 
@@ -379,6 +276,7 @@ func (b *Bridge) SaveSettings(s *Settings) error {
 			}
 		}
 		b.mcpManager.UpdateConfigs(mcpConfigs)
+		go b.autoConnectMCPServers()
 	}
 
 	return nil
@@ -386,7 +284,7 @@ func (b *Bridge) SaveSettings(s *Settings) error {
 
 // GetWorkspace 返回当前工作区和最近列表
 func (b *Bridge) GetWorkspace() (map[string]interface{}, error) {
-	log.Printf("GetWorkspace: current=%s", b.config.Workspace.Root)
+	logger.Infof("GetWorkspace: current=%s", b.config.Workspace.Root)
 	return map[string]interface{}{
 		"current": b.config.Workspace.Root,
 		"recent":  b.config.Workspace.Recent,
@@ -395,7 +293,7 @@ func (b *Bridge) GetWorkspace() (map[string]interface{}, error) {
 
 // SetWorkspace 切换工作区
 func (b *Bridge) SetWorkspace(path string) error {
-	log.Printf("SetWorkspace: path=%s", path)
+	logger.Infof("SetWorkspace: path=%s", path)
 
 	info, err := os.Stat(path)
 	if err != nil || !info.IsDir() {
@@ -621,7 +519,7 @@ func loadWorkspaceHistory() []workspaceEntry {
 
 // TestMCPServer 测试 MCP 服务器连接
 func (b *Bridge) TestMCPServer(serverName string) (*MCPServerStatus, error) {
-	log.Printf("TestMCPServer: %s", serverName)
+	logger.Infof("TestMCPServer: %s", serverName)
 
 	status := b.mcpManager.TestServer(serverName)
 
@@ -638,11 +536,15 @@ func (b *Bridge) TestMCPServer(serverName string) (*MCPServerStatus, error) {
 
 // TestAllMCPServers 测试所有 MCP 服务器
 func (b *Bridge) TestAllMCPServers() (map[string]*MCPServerStatus, error) {
-	log.Println("TestAllMCPServers")
+	logger.Info("TestAllMCPServers")
 
-	statuses := b.mcpManager.TestAllServers()
+	statuses := b.mcpManager.ReconnectAll()
 
 	// 转换为前端格式
+	return mcpStatusesToFrontend(statuses), nil
+}
+
+func mcpStatusesToFrontend(statuses map[string]*mcp.ServerStatus) map[string]*MCPServerStatus {
 	results := make(map[string]*MCPServerStatus)
 	for name, status := range statuses {
 		results[name] = &MCPServerStatus{
@@ -654,8 +556,7 @@ func (b *Bridge) TestAllMCPServers() (map[string]*MCPServerStatus, error) {
 			LastTested: status.LastTested,
 		}
 	}
-
-	return results, nil
+	return results
 }
 
 // GetMCPServerStatus 获取 MCP 服务器状态（从缓存）
@@ -673,7 +574,7 @@ func (b *Bridge) GetMCPServerStatus(serverName string) (*MCPServerStatus, error)
 
 // GetAllMCPServerStatuses 获取所有 MCP 服务器状态
 func (b *Bridge) GetAllMCPServerStatuses() (map[string]*MCPServerStatus, error) {
-	log.Println("GetAllMCPServerStatuses")
+	logger.Info("GetAllMCPServerStatuses")
 
 	statuses := b.mcpManager.GetAllServerStatuses()
 
@@ -694,7 +595,7 @@ func (b *Bridge) GetAllMCPServerStatuses() (map[string]*MCPServerStatus, error) 
 
 // CallMCPTool 调用 MCP 工具
 func (b *Bridge) CallMCPTool(serverName, toolName string, arguments map[string]interface{}) (map[string]interface{}, error) {
-	log.Printf("CallMCPTool: server=%s, tool=%s", serverName, toolName)
+	logger.Infof("CallMCPTool: server=%s, tool=%s", serverName, toolName)
 
 	result, err := b.mcpManager.CallTool(serverName, toolName, arguments)
 	if err != nil {
@@ -712,7 +613,7 @@ func (b *Bridge) CallMCPTool(serverName, toolName string, arguments map[string]i
 
 // ListMCPTools 列出 MCP 服务器的所有工具
 func (b *Bridge) ListMCPTools(serverName string) ([]map[string]interface{}, error) {
-	log.Printf("ListMCPTools: server=%s", serverName)
+	logger.Infof("ListMCPTools: server=%s", serverName)
 
 	tools, err := b.mcpManager.ListTools(serverName)
 	if err != nil {
@@ -734,7 +635,7 @@ func (b *Bridge) ListMCPTools(serverName string) ([]map[string]interface{}, erro
 
 // ListAllMCPTools 列出所有 MCP 服务器的工具
 func (b *Bridge) ListAllMCPTools() (map[string]interface{}, error) {
-	log.Println("ListAllMCPTools")
+	logger.Info("ListAllMCPTools")
 
 	allTools, err := b.mcpManager.ListAllTools()
 	if err != nil {

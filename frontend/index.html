@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Build Agent - Web 项目开发闭环</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/style.css?v=20260520-0035">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260520-feed">
 </head>
 <body>
     <div class="app">
@@ -113,13 +113,7 @@
                                     <p>输入任何需求，Agent 将直接执行</p>
                                 </div>
                             </div>
-                            <!-- 执行进度（嵌入 chat） -->
-                            <div class="chat-progress" id="chat-progress" style="display:none;">
-                                <div class="chat-progress-bar">
-                                    <div class="chat-progress-fill" id="chat-progress-fill"></div>
-                                </div>
-                                <div class="chat-progress-logs" id="chat-progress-logs"></div>
-                            </div>
+                            <div class="chat-session-panel" id="chat-session-panel" style="display:none;"></div>
                             <div class="chat-input-area">
                                 <textarea class="chat-input" id="chat-input" rows="3" placeholder="输入需求或问题，Shift+Enter 换行，Enter 发送..."></textarea>
                                 <button class="btn btn-primary chat-send-btn" id="chat-send-btn">
@@ -136,11 +130,6 @@
 
                     <!-- 快速操作 -->
                     <div class="quick-actions">
-                        <div class="action-card" data-action="analysis">
-                            <div class="action-icon">🔍</div>
-                            <div class="action-title">分析项目</div>
-                            <div class="action-desc">分析前后端结构，生成项目信息</div>
-                        </div>
                         <div class="action-card" data-action="requirements">
                             <div class="action-icon">📝</div>
                             <div class="action-title">创建需求</div>
@@ -160,6 +149,11 @@
                             <div class="action-icon">🔄</div>
                             <div class="action-title">完整构建</div>
                             <div class="action-desc">编码 → 验收循环直到通过</div>
+                        </div>
+                        <div class="action-card" data-action="pagescan">
+                            <div class="action-icon">🗺️</div>
+                            <div class="action-title">页面扫描</div>
+                            <div class="action-desc">Playwright 遍历菜单并生成页面结构报告</div>
                         </div>
                     </div>
 
@@ -185,24 +179,14 @@
                         </div>
                     </div>
 
-                    <!-- 执行进度 -->
                     <div id="execution-progress" class="execution-progress" style="display: none;">
                         <div class="progress-header">
-                            <h3>执行中...</h3>
-                            <div class="progress-status" id="progress-status">准备中</div>
-                        </div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="progress-fill"></div>
-                        </div>
-                        <div class="progress-logs" id="progress-logs">
-                            <div class="log-entry">
-                                <span class="log-time">00:00:00</span>
-                                <span class="log-message">等待开始...</span>
+                            <h3>执行过程</h3>
+                            <div class="progress-actions">
+                                <button class="btn btn-secondary btn-sm" id="stop-execution-btn" disabled>停止</button>
                             </div>
                         </div>
-                        <div class="progress-actions">
-                            <button class="btn btn-secondary" id="stop-execution-btn" disabled>停止执行</button>
-                        </div>
+                        <div id="session-view-root" class="session-view-root"></div>
                     </div>
 
                     <!-- 执行结果 -->
@@ -289,11 +273,9 @@
                         <div class="config-section">
                             <div class="config-section-title">
                                 MCP 服务器配置
-                                <button class="btn btn-sm btn-secondary" id="test-all-mcp-servers-btn" style="margin-left: 12px;">
-                                    <span class="btn-icon">🔍</span> 测试所有
-                                </button>
+                                <span class="config-section-hint">打开本页或保存配置后将自动连接（需本机 Node.js / npx）</span>
                             </div>
-                            <div class="config-section-body">
+                            <div class="config-section-body config-section-body-mcp">
                                 <div class="mcp-config-container">
                                     <div class="mcp-editor-section">
                                         <div class="mcp-editor-header">
@@ -314,6 +296,8 @@
                                             <code>command</code>, <code>args</code>, <code>env</code>, 
                                             <code>url</code>, <code>headers</code>, <code>disabled</code>, 
                                             <code>autoApprove</code>, <code>timeout</code>
+                                            <br><strong>页面扫描</strong>需 Playwright MCP，示例：
+                                            <code>{"mcpServers":{"playwright":{"command":"npx","args":["-y","@playwright/mcp@latest"],"autoApprove":true}}}</code>
                                         </div>
                                     </div>
                                     <div class="mcp-servers-preview">
@@ -456,7 +440,8 @@
     </div>
 
     <script src="/static/js/marked.min.js"></script>
-    <script src="/static/js/api-adapter.js?v=20260520-0035"></script>
-    <script src="/static/js/app.js?v=20260520-0035"></script>
+    <script src="/static/js/session-view.js?v=20260520-feedfix"></script>
+    <script src="/static/js/api-adapter.js?v=20260520-stream"></script>
+    <script src="/static/js/app.js?v=20260520-chatmd"></script>
 </body>
 </html>

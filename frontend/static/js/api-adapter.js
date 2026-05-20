@@ -1,9 +1,10 @@
 // API Adapter - 桌面模式，直接调用 Go Bridge
 
+const STREAM_EVENT = 'agent:stream';
+
 const WailsAPI = {
     getMode: () => 'desktop',
 
-    // 工作区
     async getWorkspace() {
         return window.go.desktop.Bridge.GetWorkspace();
     },
@@ -15,7 +16,6 @@ const WailsAPI = {
         return window.go.desktop.Bridge.OpenFolderDialog();
     },
 
-    // 配置
     async getSettings() {
         return window.go.desktop.Bridge.GetSettings();
     },
@@ -24,7 +24,6 @@ const WailsAPI = {
         return { success: true };
     },
 
-    // 文件操作
     async listFiles(path) {
         const files = await window.go.desktop.Bridge.ListFiles(path);
         return { files };
@@ -38,7 +37,6 @@ const WailsAPI = {
         return { success: true, message: '保存成功' };
     },
 
-    // 需求和评测（从文件系统读取，由 Bridge 提供）
     async getRequirements() {
         const result = await window.go.desktop.Bridge.GetRequirements();
         return { requirements: result };
@@ -48,40 +46,31 @@ const WailsAPI = {
         return { evaluations: result };
     },
 
-    // 任务执行（非流式）
     async runTask(agentName, task, filePath = '') {
         return window.go.desktop.Bridge.RunTask(agentName, task, filePath);
     },
 
-    // 任务执行（流式）
-    async runTaskStreaming(agentName, task, filePath = '', onLog, onDone, onError) {
-        const eventName = 'task:progress';
-
-        console.log('[API Adapter] Starting streaming task:', agentName, task);
-        console.log('[API Adapter] window.runtime available:', !!window.runtime);
-        console.log('[API Adapter] EventsOn available:', typeof window.runtime?.EventsOn);
-
-        // 先注册事件监听器，确保不会错过任何事件
-        if (onLog) {
-            console.log('[API Adapter] Registering event listener for:', eventName);
-            window.runtime.EventsOn(eventName, (log) => {
-                console.log('[API Adapter] Received event:', log);
-                onLog({ type: log.type || 'log', ...log });
+    /**
+     * 流式 Agent 会话：通过 agent:stream 推送 SDK 消息。
+     * @param {function(object): void} onStreamMessage
+     */
+    async runAgentSession(agentName, task, filePath = '', onStreamMessage, onDone, onError) {
+        if (onStreamMessage) {
+            window.runtime.EventsOn(STREAM_EVENT, (msg) => {
+                onStreamMessage(msg);
             });
         }
 
-        // 等待一小段时间确保事件监听器已注册
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await new Promise((resolve) => setTimeout(resolve, 50));
 
         try {
-            console.log('[API Adapter] Calling RunTaskWithProgress...');
-            const result = await window.go.desktop.Bridge.RunTaskWithProgress(agentName, task, filePath);
-            console.log('[API Adapter] Task completed:', result);
-            window.runtime.EventsOff(eventName);
+            const runFn = window.go.desktop.Bridge.RunAgentSession || window.go.desktop.Bridge.RunTaskWithProgress;
+            const result = await runFn(agentName, task, filePath);
+            window.runtime.EventsOff(STREAM_EVENT);
             if (onDone) onDone(result);
         } catch (error) {
-            console.error('[API Adapter] Task error:', error);
-            window.runtime.EventsOff(eventName);
+            console.error('[API Adapter] Session error:', error);
+            window.runtime.EventsOff(STREAM_EVENT);
             if (onError) {
                 onError({ error: error.message || '任务执行失败' });
             } else {
@@ -90,12 +79,25 @@ const WailsAPI = {
         }
     },
 
-    // MCP 服务器测试
+    /** @deprecated 使用 runAgentSession */
+    async runTaskStreaming(agentName, task, filePath = '', onLog, onDone, onError) {
+        return this.runAgentSession(agentName, task, filePath, onLog, onDone, onError);
+    },
+
+    async cancelAgentSession() {
+        if (window.go.desktop.Bridge.CancelAgentSession) {
+            return window.go.desktop.Bridge.CancelAgentSession();
+        }
+    },
+
     async testMCPServer(serverName) {
         return window.go.desktop.Bridge.TestMCPServer(serverName);
     },
-    async testAllMCPServers() {
+    async connectAllMCPServers() {
         return window.go.desktop.Bridge.TestAllMCPServers();
+    },
+    async testAllMCPServers() {
+        return this.connectAllMCPServers();
     },
     async getMCPServerStatus(serverName) {
         return window.go.desktop.Bridge.GetMCPServerStatus(serverName);
@@ -107,4 +109,4 @@ const WailsAPI = {
 
 window.WailsAPI = WailsAPI;
 
-console.log('[API Adapter] Desktop mode');
+console.log('[API Adapter] Desktop mode (agent:stream)');

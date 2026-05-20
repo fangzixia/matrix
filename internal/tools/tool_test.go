@@ -2,10 +2,12 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
 	"matrix/internal/llm"
+	"matrix/internal/stream"
 )
 
 // mockTool 创建用于测试的虚拟工具。
@@ -66,7 +68,7 @@ func TestRunToolsPermissionDenied(t *testing.T) {
 
 	results := RunTools(context.Background(), calls, reg, func(name string, _ map[string]any) bool {
 		return false // 拒绝所有工具
-	})
+	}, nil)
 
 	if len(results) != 1 {
 		t.Fatalf("期望 1 个结果")
@@ -85,12 +87,49 @@ func TestRunToolsUnknownTool(t *testing.T) {
 	calls := []llm.ToolCall{
 		{ID: "1", Function: llm.ToolCallFunction{Name: "不存在的工具", Arguments: "{}"}},
 	}
-	results := RunTools(context.Background(), calls, reg, nil)
+	results := RunTools(context.Background(), calls, reg, nil, nil)
 	if !results[0].IsError {
 		t.Error("期望未知工具返回错误")
 	}
 	if !strings.Contains(results[0].Output, "unknown tool") {
 		t.Errorf("错误信息异常: %s", results[0].Output)
+	}
+}
+
+// TestRunToolsProgressFailedOutput 验证失败时 progress 携带错误输出预览。
+func TestRunToolsProgressFailedOutput(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(&Tool{
+		Name:              "fail_tool",
+		Parameters:        JSONSchema{Type: "object"},
+		IsConcurrencySafe: true,
+		Execute: func(_ context.Context, _ map[string]any) (string, error) {
+			return "stderr content", fmt.Errorf("命令退出异常: exit status 1")
+		},
+	})
+
+	var failedData stream.ToolProgressData
+	onProgress := func(_ string, data stream.ToolProgressData) {
+		if data.Status == "failed" {
+			failedData = data
+		}
+	}
+
+	calls := []llm.ToolCall{
+		{ID: "tc1", Function: llm.ToolCallFunction{Name: "fail_tool", Arguments: "{}"}},
+	}
+	results := RunTools(context.Background(), calls, reg, nil, onProgress)
+	if len(results) != 1 || !results[0].IsError {
+		t.Fatal("期望工具执行失败")
+	}
+	if failedData.Message == "" {
+		t.Fatal("期望 failed progress 携带 message")
+	}
+	if !strings.Contains(failedData.Message, "stderr content") {
+		t.Errorf("message 应包含 stderr: %q", failedData.Message)
+	}
+	if !strings.Contains(failedData.Message, "命令退出异常") {
+		t.Errorf("message 应包含执行错误: %q", failedData.Message)
 	}
 }
 
@@ -106,7 +145,7 @@ func TestRunToolsConcurrent(t *testing.T) {
 		{ID: "2", Function: llm.ToolCallFunction{Name: "tb", Arguments: "{}"}},
 		{ID: "3", Function: llm.ToolCallFunction{Name: "tc", Arguments: "{}"}},
 	}
-	results := RunTools(context.Background(), calls, reg, nil)
+	results := RunTools(context.Background(), calls, reg, nil, nil)
 	if len(results) != 3 {
 		t.Fatalf("期望 3 个结果，实际 %d", len(results))
 	}

@@ -3,7 +3,7 @@ package query
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"matrix/internal/logger"
 	"strings"
 	"unicode/utf8"
 
@@ -40,7 +40,7 @@ func prepareHistoryForRequest(cfg Config, msgs *[]Message) contextPipelineStats 
 	stats.AfterTokens = estimateRequestTokens(cfg, *msgs)
 
 	if stats.Compacted {
-		slog.Info("query: context pipeline compacted history",
+		logger.Info("query: context pipeline compacted history",
 			"before_tokens_est", stats.BeforeTokens,
 			"after_tokens_est", stats.AfterTokens,
 			"hard_compacted", stats.HardCompacted,

@@ -15,6 +15,7 @@ package query
 
 import (
 	"matrix/internal/llm"
+	"matrix/internal/stream"
 	"matrix/internal/tools"
 )
 
@@ -136,6 +137,8 @@ type Config struct {
 	MaxToolResultRunes int
 	// LogPrefix 非空时，会拼入「第 N 轮」类事件与结构化日志，便于区分父子 Agent 的 TAOR 循环。
 	LogPrefix string
+	// SessionID 为流式 SDK 消息的会话标识；空则由 RunSession 生成。
+	SessionID string
 }
 
 // StopReason 描述 TAOR 循环终止的原因。
@@ -169,40 +172,5 @@ type Result struct {
 	Messages []Message
 }
 
-// EventKind 标识实时流式事件的类型。
-type EventKind string
-
-const (
-	// EventThinkingDelta 表示模型扩展思考的增量 token。
-	EventThinkingDelta EventKind = "thinking_delta"
-	// EventTextDelta 表示模型输出的文本增量 token。
-	EventTextDelta EventKind = "text_delta"
-	// EventToolCall 表示模型请求调用某个工具。
-	EventToolCall EventKind = "tool_call"
-	// EventToolResult 表示某个工具已执行完成。
-	EventToolResult EventKind = "tool_result"
-	// EventTurnStart 表示新一轮 TAOR 迭代开始。
-	EventTurnStart EventKind = "turn_start"
-	// EventDone 表示整个循环已结束，携带最终 Result。
-	EventDone EventKind = "done"
-)
-
-// Event 通过可选的 events channel 发送，用于实时展示 TAOR 进度。
-type Event struct {
-	// Kind 为本次事件的类型。
-	Kind EventKind
-	// Delta 携带增量文本，由 EventThinkingDelta、EventTextDelta 和 EventTurnStart 使用。
-	Delta string
-	// ToolName 为工具名称，由 EventToolCall 和 EventToolResult 使用。
-	ToolName string
-	// ToolCallID 为工具调用 ID，由 EventToolCall 和 EventToolResult 使用。
-	ToolCallID string
-	// ToolInput 为工具调用的原始 JSON 参数字符串，由 EventToolCall 使用。
-	ToolInput string
-	// ToolOutput 为工具执行的输出内容，由 EventToolResult 使用。
-	ToolOutput string
-	// IsError 为 true 表示工具执行失败，由 EventToolResult 使用。
-	IsError bool
-	// Result 仅在 EventDone 事件中设置，携带循环最终结果。
-	Result *Result
-}
+// StreamSink 为 RunSession 的过程消息出口（见 matrix/internal/stream）。
+type StreamSink = stream.Sink

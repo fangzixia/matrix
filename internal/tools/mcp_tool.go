@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"matrix/internal/logger"
 	"matrix/internal/mcp"
 )
 
@@ -21,7 +21,7 @@ func NewMCPTool(serverName string, tool mcp.Tool, manager *mcp.Manager) *Tool {
 	params := convertMCPSchema(tool.InputSchema)
 
 	execute := func(ctx context.Context, args map[string]any) (string, error) {
-		log.Printf("Calling MCP tool: server=%s, tool=%s", serverName, tool.Name)
+		logger.Infof("Calling MCP tool: server=%s, tool=%s", serverName, tool.Name)
 
 		result, err := manager.CallTool(serverName, tool.Name, args)
 		if err != nil {
@@ -134,7 +134,7 @@ func RegisterMCPTools(registry *Registry, manager *mcp.Manager) error {
 		for _, tool := range tools {
 			mcpTool := NewMCPTool(serverName, tool, manager)
 			registry.Register(mcpTool)
-			log.Printf("Registered MCP tool: %s", mcpTool.Name)
+			logger.Infof("Registered MCP tool: %s", mcpTool.Name)
 		}
 	}
 

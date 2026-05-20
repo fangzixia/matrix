@@ -1,7 +1,7 @@
 package session
 
 import (
-	"log/slog"
+	"matrix/internal/logger"
 
 	"matrix/internal/query"
 )
@@ -19,7 +19,7 @@ func PrepareHistory(policy Policy, needLog bool) func(*[]query.Message) {
 		}
 		if ApplyMicroCompact(msgs, policy) && needLog {
 			after := EstimateTokens(*msgs)
-			slog.Info("session: 已执行微压缩",
+			logger.Info("session: 已执行微压缩",
 				"估算token_前", before,
 				"估算token_后", after,
 				"保留最近工具条数", policy.KeepRecentToolResults,

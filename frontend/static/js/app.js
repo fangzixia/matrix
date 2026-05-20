@@ -12,7 +12,7 @@ const state = {
     executionStartTime: null,
     /** 流式执行所属任务类型（切换卡片时 currentAction 会变，日志须归到发起执行的任务） */
     streamingAction: null,
-    /** 每个任务卡片独立的执行日志与结果，互不影响 */
+    /** 每个任务卡片独立的执行过程快照 */
     executionByAction: {},
 };
 
@@ -52,12 +52,22 @@ function showNotification(message, type = 'info') {
 
 function createEmptyExecutionSlot() {
     return {
-        logs: [],
+        sessionSnapshot: null,
         result: null,
         hasError: false,
         running: false,
-        logStartTime: null,
     };
+}
+
+let executionSessionView = null;
+
+function getExecutionSessionView() {
+    const root = $('#session-view-root');
+    if (!root || !window.SessionView) return null;
+    if (!executionSessionView) {
+        executionSessionView = window.SessionView.create(root);
+    }
+    return executionSessionView;
 }
 
 function getExecutionSlot(action) {
@@ -73,20 +83,14 @@ function applyExecutionViewForAction(action) {
     const slot = getExecutionSlot(action);
     const progressEl = $('#execution-progress');
     const resultEl = $('#execution-result');
+    const view = getExecutionSessionView();
 
-    if (slot.running) {
-        resultEl.style.display = 'none';
+    if (slot.running || slot.sessionSnapshot || slot.result) {
         progressEl.style.display = 'block';
-        $('#progress-status').textContent = '执行中';
-        const w = slot.logs.length > 0 ? Math.min(10 + slot.logs.length * 5, 90) : 5;
-        $('#progress-fill').style.width = `${w}%`;
-        renderLogsFromSlot(slot);
-    } else if (slot.result || slot.logs.length > 0) {
-        // 任务已完成：保留日志区域，同时展示结果
-        progressEl.style.display = 'block';
-        $('#progress-status').textContent = slot.hasError ? '执行失败' : '执行完成';
-        $('#progress-fill').style.width = '100%';
-        renderLogsFromSlot(slot);
+        if (view) {
+            view.reset();
+            if (slot.sessionSnapshot) view.loadSnapshot(slot.sessionSnapshot);
+        }
         if (slot.result) {
             renderResultToDOM(slot);
             resultEl.style.display = 'block';
@@ -97,32 +101,6 @@ function applyExecutionViewForAction(action) {
         progressEl.style.display = 'none';
         resultEl.style.display = 'none';
     }
-}
-
-function renderLogsFromSlot(slot) {
-    const container = $('#progress-logs');
-    container.innerHTML = '';
-    if (!slot.logs.length) {
-        const row = document.createElement('div');
-        row.className = 'log-entry';
-        row.innerHTML = '<span class="log-time">00:00:00</span><span class="log-message">准备执行...</span>';
-        container.appendChild(row);
-        return;
-    }
-    slot.logs.forEach(({ time, message, type }) => {
-        const div = document.createElement('div');
-        div.className = `log-entry ${type}`;
-        const t1 = document.createElement('span');
-        t1.className = 'log-time';
-        t1.textContent = time;
-        const t2 = document.createElement('span');
-        t2.className = 'log-message';
-        t2.textContent = message;
-        div.appendChild(t1);
-        div.appendChild(t2);
-        container.appendChild(div);
-    });
-    container.scrollTop = container.scrollHeight;
 }
 
 function renderResultToDOM(slot) {
@@ -228,12 +206,16 @@ const api = {
         return await WailsAPI.runTask(agent, task, filePath);
     },
 
-    async runAgentStreaming(agent, task, filePath = '', onLog, onDone, onError) {
-        return await WailsAPI.runTaskStreaming(agent, task, filePath, onLog, onDone, onError);
+    async runAgentStreaming(agent, task, filePath = '', onStream, onDone, onError) {
+        return await WailsAPI.runAgentSession(agent, task, filePath, onStream, onDone, onError);
     },
 
-    async runBuild(task, filePath = '', onLog, onDone, onError) {
-        return await WailsAPI.runTaskStreaming('build', task, filePath, onLog, onDone, onError);
+    async runBuild(task, filePath = '', onStream, onDone, onError) {
+        return await WailsAPI.runAgentSession('build', task, filePath, onStream, onDone, onError);
+    },
+
+    async cancelAgentSession() {
+        return await WailsAPI.cancelAgentSession();
     },
 
     async getFiles(path) {
@@ -466,20 +448,20 @@ async function showExecutionForm(action) {
     applyExecutionViewForAction(action);
 
     const titles = {
-        analysis: '分析项目',
         requirements: '创建需求',
         code: '编码实现',
         eval: '验收评测',
         build: '完整构建',
+        pagescan: '页面扫描',
         chat: '自由对话',
     };
 
     const placeholders = {
-        analysis: '（可选）指定分析范围或重点...',
         requirements: '请描述需求...',
         code: '（可选）指定实现重点...',
         eval: '（可选）指定验收重点...',
         build: '（可选）指定构建参数...',
+        pagescan: '请用自然语言描述，例如：访问 https://app.example.com ，用户名 admin 密码 ***，登录后遍历左侧菜单，记录路由、子 Tab 和按钮，跳过「日志」菜单…',
         chat: '请输入你的需求或问题，Agent 将直接执行...',
     };
 
@@ -487,17 +469,25 @@ async function showExecutionForm(action) {
     $('#task-input').value = '';
     $('#task-input').placeholder = placeholders[action] || '请输入任务描述...';
     
-    // analysis 和其他非 requirements 的任务描述可选
-    const taskOptional = action !== 'requirements' && action !== 'chat';
+    // 除 requirements 外，任务描述均为可选
+    const taskOptional = action !== 'requirements' && action !== 'chat' && action !== 'pagescan';
     const label = $('#task-input').previousElementSibling;
     if (label && label.tagName === 'LABEL') {
-        label.textContent = taskOptional ? '任务描述（可选）' : '任务描述';
+        if (action === 'pagescan') {
+            label.textContent = '扫描说明';
+        } else {
+            label.textContent = taskOptional ? '任务描述（可选）' : '任务描述';
+        }
     }
     
     // 根据不同的 action 显示不同的表单字段
     await setupFormFields(action);
     
     $('#execution-form').style.display = 'block';
+    const taskInput = $('#task-input');
+    if (taskInput) {
+        taskInput.rows = action === 'pagescan' ? 8 : 4;
+    }
     $('#task-input').focus();
 
     $$('.action-card').forEach((c) => {
@@ -518,10 +508,7 @@ async function setupFormFields(action) {
     const formBody = $('#execution-form .form-body');
     const actionsDiv = formBody.querySelector('.form-actions');
     
-    if (action === 'analysis') {
-        // 分析项目：显示设计文档查看按钮
-        await addAnalysisFields(formBody, actionsDiv);
-    } else if (action === 'requirements') {
+    if (action === 'requirements') {
         // 创建需求：显示已有需求文件选择
         await addRequirementsFields(formBody, actionsDiv);
     } else if (action === 'code') {
@@ -534,50 +521,7 @@ async function setupFormFields(action) {
         // 完整构建：需求文件下拉框
         await addBuildFields(formBody, actionsDiv);
     }
-    // chat: 无额外字段，只有任务描述输入框
-}
-
-// 分析项目的字段
-async function addAnalysisFields(formBody, actionsDiv) {
-    try {
-        const designPath = '.spec/DESIGN.md';
-
-        // 检查文件是否存在
-        let fileExists = false;
-        try {
-            await api.readFile(designPath);
-            fileExists = true;
-        } catch (e) {
-            // 文件不存在
-        }
-        
-        if (fileExists) {
-            const fieldDiv = document.createElement('div');
-            fieldDiv.className = 'form-group dynamic-field';
-            fieldDiv.innerHTML = `
-                <label>项目设计文档</label>
-                <div class="file-info-box">
-                    <span class="file-path">${designPath}</span>
-                    <button type="button" class="btn btn-secondary btn-sm" id="view-design-file-btn">
-                        <span class="btn-icon">👁️</span>
-                        查看/编辑
-                    </button>
-                </div>
-            `;
-            formBody.insertBefore(fieldDiv, actionsDiv);
-            
-            $('#view-design-file-btn').addEventListener('click', async () => {
-                try {
-                    const response = await api.readFile(designPath);
-                    openFileEditor(designPath, response.content, false);
-                } catch (error) {
-                    showNotification('加载文件失败: ' + error.message, 'error');
-                }
-            });
-        }
-    } catch (error) {
-        console.error('加载分析配置失败:', error);
-    }
+    // pagescan / chat: 仅文本输入框，无额外动态字段
 }
 
 // 创建需求的字段
@@ -863,7 +807,12 @@ async function addBuildFields(formBody, actionsDiv) {
 async function submitExecution() {
     const task = $('#task-input').value.trim();
     let filePath = '';
-    
+
+    if (state.currentAction === 'pagescan' && !task) {
+        showNotification('请用自然语言描述扫描目标、访问地址、登录方式与范围', 'error');
+        return;
+    }
+
     // 根据不同的 action 获取需求路径
     if (state.currentAction === 'requirements') {
         const selectEl = $('#existing-req-select');
@@ -884,147 +833,71 @@ async function submitExecution() {
 
     console.log('[App] Starting execution:', state.currentAction, task, filePath);
 
+    const action = state.currentAction;
+    const view = getExecutionSessionView();
+    const stopBtn = $('#stop-execution-btn');
+    if (stopBtn) {
+        stopBtn.disabled = false;
+        stopBtn.onclick = () => api.cancelAgentSession();
+    }
+
     try {
-        // 使用流式 API
         await api.runAgentStreaming(
-            state.currentAction,
+            action,
             task,
             filePath,
-            // onLog - 处理来自 Bridge 的 EventLog
-            (log) => {
-                console.log('[App] Received log:', log);
-                // log 格式: { type: string, time: string, message: string }
-                if (log.message) {
-                    addLog(log.message, log.type || 'info');
+            (msg) => {
+                const slot = getExecutionSlot(action);
+                if (state.currentAction === action && view) {
+                    view.apply(msg);
                 }
+                if (view) slot.sessionSnapshot = view.getSnapshot();
             },
-            // onDone
             (result) => {
-                console.log('[App] Task done:', result);
+                if (stopBtn) stopBtn.disabled = true;
                 showExecutionResult(result, false);
             },
-            // onError
             (error) => {
-                console.error('[App] Task error:', error);
+                if (stopBtn) stopBtn.disabled = true;
                 showExecutionResult(error, true);
             }
         );
     } catch (error) {
-        console.error('[App] Exception:', error);
+        if (stopBtn) stopBtn.disabled = true;
         showExecutionResult({ error: error.message }, true);
     }
 }
 
-function handleLogEvent(log) {
-    let message = '';
-    let type = 'info';
-
-    if (log.error) {
-        message = `❌ 错误: ${log.error}`;
-        type = 'error';
-    } else if (log.output) {
-        // 格式化输出
-        if (log.agent_name === 'system') {
-            message = `⚙️ ${log.output}`;
-            type = 'info';
-        } else if (log.tool_name) {
-            message = `🔧 ${log.tool_name}: ${truncateLog(log.output)}`;
-            type = 'info';
-        } else if (log.role === 'assistant') {
-            message = `🤖 ${truncateLog(log.output)}`;
-            type = 'info';
-        } else {
-            message = truncateLog(log.output);
-            type = 'info';
-        }
-    }
-
-    if (message) {
-        addLog(message, type);
-
-        // 仅当仍停留在发起执行的任务卡片上时更新进度条（避免切换卡片后误改 UI）
-        if (state.streamingAction && state.currentAction === state.streamingAction) {
-            const currentWidth = parseFloat($('#progress-fill').style.width) || 0;
-            if (currentWidth < 90) {
-                $('#progress-fill').style.width = `${Math.min(currentWidth + 5, 90)}%`;
-            }
-        }
-    }
-}
-
-function truncateLog(text, maxLength = 200) {
-    if (!text) return '';
-    text = text.trim();
-    if (text.length <= maxLength) return text;
-    return text.substring(0, maxLength) + '...';
-}
-
 function showExecutionProgress() {
     state.streamingAction = state.currentAction;
-    const slot = getExecutionSlot(state.streamingAction);
+    const action = state.streamingAction;
+    const slot = getExecutionSlot(action);
     slot.running = true;
     slot.result = null;
     slot.hasError = false;
-    slot.logStartTime = Date.now();
-    state.executionStartTime = slot.logStartTime;
+    slot.sessionSnapshot = null;
 
     $('#execution-progress').style.display = 'block';
     $('#execution-result').style.display = 'none';
-    $('#progress-status').textContent = '执行中';
-    $('#progress-fill').style.width = '0%';
-    const _startNow = new Date();
-    const _startTime = `${String(_startNow.getHours()).padStart(2, '0')}:${String(_startNow.getMinutes()).padStart(2, '0')}:${String(_startNow.getSeconds()).padStart(2, '0')}`;
-    slot.logs = [{ time: _startTime, message: '准备执行...', type: 'info' }];
-    if (state.currentAction === state.streamingAction) {
-        renderLogsFromSlot(slot);
-    }
 
-    // 清除之前的定时器
-    if (state.progressInterval) {
-        clearInterval(state.progressInterval);
-        state.progressInterval = null;
-    }
-}
-
-function addLog(message, type = 'info') {
-    const action = state.streamingAction || state.currentAction;
-    const slot = getExecutionSlot(action);
-    const now = new Date();
-    const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
-    slot.logs.push({ time, message, type });
-
-    if (state.currentAction !== action) {
-        return;
-    }
-
-    const logEntry = document.createElement('div');
-    logEntry.className = `log-entry ${type}`;
-    const t1 = document.createElement('span');
-    t1.className = 'log-time';
-    t1.textContent = time;
-    const t2 = document.createElement('span');
-    t2.className = 'log-message';
-    t2.textContent = message;
-    logEntry.appendChild(t1);
-    logEntry.appendChild(t2);
-
-    $('#progress-logs').appendChild(logEntry);
-    $('#progress-logs').scrollTop = $('#progress-logs').scrollHeight;
+    const view = getExecutionSessionView();
+    if (view) view.reset();
 }
 
 function hideExecutionProgress() {
-    if (state.progressInterval) {
-        clearInterval(state.progressInterval);
-        state.progressInterval = null;
-    }
     $('#execution-progress').style.display = 'none';
+    const stopBtn = $('#stop-execution-btn');
+    if (stopBtn) stopBtn.disabled = true;
 }
 
 function showExecutionResult(result, hasError) {
     const action = state.streamingAction || state.currentAction;
     const slot = getExecutionSlot(action);
+    const view = getExecutionSessionView();
     slot.running = false;
     state.streamingAction = null;
+
+    if (view) slot.sessionSnapshot = view.getSnapshot();
 
     if (hasError) {
         slot.hasError = true;
@@ -1037,15 +910,11 @@ function showExecutionResult(result, hasError) {
         };
     }
 
-    // 停止进度定时器但保留日志区域可见
-    if (state.progressInterval) {
-        clearInterval(state.progressInterval);
-        state.progressInterval = null;
-    }
-    $('#progress-fill').style.width = '100%';
-    $('#progress-status').textContent = hasError ? '执行失败' : '执行完成';
+    const stopBtn = $('#stop-execution-btn');
+    if (stopBtn) stopBtn.disabled = true;
 
     if (state.currentAction === action) {
+        if (view && slot.sessionSnapshot) view.loadSnapshot(slot.sessionSnapshot);
         renderResultToDOM(slot);
         $('#execution-result').style.display = 'block';
     }
@@ -1191,21 +1060,55 @@ function getCategoryText(category) {
     return texts[category] || category;
 }
 
+/** 文档页等场景：保留适度段落间距 */
+function normalizeMarkdownText(text) {
+    if (!text) return '';
+    return text
+        .replace(/\r\n/g, '\n')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+/**
+ * 对话/进度区：收紧源文本空行，避免列表项之间被拆成多个段落块。
+ */
+function normalizeChatMarkdown(text) {
+    if (!text) return '';
+    let s = normalizeMarkdownText(text);
+    // 列表项前不要空段落（常见模型输出：\n\n- item）
+    s = s.replace(/\n{2,}(?=[-*+]\s)/g, '\n');
+    s = s.replace(/\n{2,}(?=\d+\.\s)/g, '\n');
+    // 同一列表内连续项之间仅保留单换行
+    s = s.replace(/(\n[-*+]\s[^\n]+)\n{2,}(?=[-*+]\s)/g, '$1\n');
+    s = s.replace(/(\n\d+\.\s[^\n]+)\n{2,}(?=\d+\.\s)/g, '$1\n');
+    return s;
+}
+
 function formatMarkdown(text) {
     if (!text) return '';
-    // 压缩连续空行（超过2个换行符的压缩为2个），避免渲染出大量空白
-    text = text.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+\n/g, '\n');
+    text = normalizeMarkdownText(text);
     if (typeof marked !== 'undefined') {
         try {
-            // breaks: false 避免单个换行变成 <br>，由 Markdown 段落语义控制换行
             return marked.parse(text, { breaks: false, gfm: true });
         } catch (e) {
             // fallback
         }
     }
-    // fallback: plain text with line breaks
-    return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\n/g, '<br>');
 }
+
+function formatChatMarkdown(text) {
+    if (!text) return '';
+    const html = formatMarkdown(normalizeChatMarkdown(text));
+    return html.replace(/<p>\s*<\/p>/gi, '');
+}
+
+window.formatChatMarkdown = formatChatMarkdown;
 function initFileEditor() {
     const editorState = {
         currentPath: '',
@@ -1423,10 +1326,10 @@ class ConfigPageController {
         this.settings = null;
         this.mcpServers = {};
         this.mcpServerStatuses = {};
+        this.mcpConnecting = false;
         this.jsonValid = true;
         
         $('#save-config-btn')?.addEventListener('click', () => this.saveConfig());
-        $('#test-all-mcp-servers-btn')?.addEventListener('click', () => this.testAllMCPServers());
         $('#format-mcp-json-btn')?.addEventListener('click', () => this.formatMCPJson());
         $('#validate-mcp-json-btn')?.addEventListener('click', () => this.validateMCPJson());
         
@@ -1435,6 +1338,16 @@ class ConfigPageController {
         if (editor) {
             editor.addEventListener('input', () => this.onMCPJsonChange());
         }
+
+        $('#mcp-servers-list')?.addEventListener('click', (e) => {
+            if (e.target.closest('.mcp-toggle-switch') || e.target.closest('button')) return;
+            const header = e.target.closest('.mcp-server-header');
+            if (!header) return;
+            const card = header.closest('.mcp-server-card');
+            if (!card) return;
+            card.classList.toggle('expanded');
+            header.setAttribute('aria-expanded', card.classList.contains('expanded') ? 'true' : 'false');
+        });
     }
 
     async loadConfig() {
@@ -1448,14 +1361,15 @@ class ConfigPageController {
 
         try {
             this.settings = await WailsAPI.getSettings();
-            this.mcpServers = this.settings.mcpServers || {};
-            
-            // 加载 MCP 服务器状态
-            await this.loadMCPServerStatuses();
+            // 转为普通对象，避免 Wails 模型实例影响 JSON.stringify
+            this.mcpServers = JSON.parse(JSON.stringify(this.settings.mcpServers || {}));
             
             this.render();
             loadingEl.style.display = 'none';
             container.style.display = 'block';
+
+            // 自动连接 MCP 服务器
+            await this.connectAllMCPServers({ silent: true });
         } catch (e) {
             loadingEl.style.display = 'none';
             errorEl.textContent = `加载配置失败: ${e.message}`;
@@ -1528,6 +1442,7 @@ class ConfigPageController {
             
             const parsed = JSON.parse(jsonText);
             editor.value = JSON.stringify(parsed, null, 2);
+            this.onMCPJsonChange();
             showNotification('JSON 格式化成功', 'success');
         } catch (e) {
             showNotification(`格式化失败: ${e.message}`, 'error');
@@ -1615,13 +1530,17 @@ class ConfigPageController {
                     description = `${status.toolCount} tools, ${resourceCount} resources enabled`;
                 }
             } else if (isDisabled) {
-                description = 'Disabled';
+                description = '已禁用';
+            } else if (this.mcpConnecting) {
+                description = '正在连接...';
+            } else if (status && status.error) {
+                description = '连接失败';
             } else {
-                description = 'Not tested';
+                description = '等待连接';
             }
             
             return `
-                <div class="mcp-server-card ${isDisabled ? 'disabled' : ''}" data-server="${name}">
+                <div class="mcp-server-card expanded ${isDisabled ? 'disabled' : ''}" data-server="${name}">
                     <div class="mcp-server-header">
                         <div class="mcp-server-name-row">
                             <div class="mcp-server-icon">${initial}</div>
@@ -1730,28 +1649,39 @@ class ConfigPageController {
         }
     }
 
-    async testAllMCPServers() {
-        try {
-            showNotification('正在测试所有 MCP 服务器...', 'info');
-            
-            const statuses = await WailsAPI.testAllMCPServers();
-            this.mcpServerStatuses = statuses;
+    async connectAllMCPServers({ silent = false } = {}) {
+        const servers = this.mcpServers || {};
+        if (Object.keys(servers).length === 0) {
+            this.mcpServerStatuses = {};
             this.renderMCPServersPreview();
-            
-            const available = Object.values(statuses).filter(s => s.available).length;
-            const total = Object.keys(statuses).length;
-            showNotification(`测试完成: ${available}/${total} 个服务器可用`, 'success');
-        } catch (error) {
-            showNotification(`测试失败: ${error.message}`, 'error');
+            return;
         }
-    }
 
-    async loadMCPServerStatuses() {
+        this.mcpConnecting = true;
+        this.renderMCPServersPreview();
+
         try {
-            const statuses = await WailsAPI.getAllMCPServerStatuses();
+            const timeoutMs = 90000;
+            const statuses = await Promise.race([
+                WailsAPI.connectAllMCPServers(),
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('连接超时（90秒），请检查 Node.js / npx 或网络')), timeoutMs)
+                ),
+            ]);
             this.mcpServerStatuses = statuses || {};
+            if (!silent) {
+                const available = Object.values(statuses).filter(s => s.available).length;
+                const total = Object.keys(statuses).length;
+                showNotification(`MCP 已连接: ${available}/${total} 个服务器可用`, 'success');
+            }
         } catch (error) {
-            console.error('Failed to load MCP server statuses:', error);
+            console.error('MCP auto-connect failed:', error);
+            if (!silent) {
+                showNotification(`MCP 连接失败: ${error.message}`, 'error');
+            }
+        } finally {
+            this.mcpConnecting = false;
+            this.renderMCPServersPreview();
         }
     }
 
@@ -1790,6 +1720,7 @@ class ConfigPageController {
             const s = this.collectSettings();
             await WailsAPI.saveSettings(s);
             this.settings = s;
+            await this.connectAllMCPServers({ silent: true });
             successEl.textContent = '配置已保存';
             successEl.style.display = 'block';
             setTimeout(() => { successEl.style.display = 'none'; }, 3000);
@@ -1826,6 +1757,16 @@ const ChatPage = (() => {
     let sessions = [];
     let activeId = null;
     let isRunning = false;
+    let chatSessionView = null;
+
+    function getChatSessionView() {
+        const panel = document.querySelector('#chat-session-panel');
+        if (!panel || !window.SessionView) return null;
+        if (!chatSessionView) {
+            chatSessionView = window.SessionView.create(panel, { compact: true });
+        }
+        return chatSessionView;
+    }
 
     function load() {
         try { sessions = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch { sessions = []; }
@@ -1923,23 +1864,19 @@ const ChatPage = (() => {
         } else {
             const mdDiv = document.createElement('div');
             mdDiv.className = 'chat-output markdown-content';
-            mdDiv.innerHTML = formatMarkdown(msg.content || '（无输出）');
+            mdDiv.innerHTML = formatChatMarkdown(msg.content || '（无输出）');
             bubble.appendChild(mdDiv);
-            if (msg.logs && msg.logs.length > 0) {
+            if (msg.sessionSnapshot) {
                 const details = document.createElement('details');
                 details.className = 'chat-logs-details';
                 const summary = document.createElement('summary');
-                summary.textContent = `查看执行日志（${msg.logs.length} 条）`;
+                const n = (msg.sessionSnapshot.timeline || []).length;
+                summary.textContent = `查看执行过程（${n} 步）`;
                 details.appendChild(summary);
-                const logsDiv = document.createElement('div');
-                logsDiv.className = 'chat-logs-inner';
-                msg.logs.forEach(({ time, message, type }) => {
-                    const row = document.createElement('div');
-                    row.className = `log-entry ${type}`;
-                    row.innerHTML = `<span class="log-time">${time}</span><span class="log-message">${escapeHtml(message)}</span>`;
-                    logsDiv.appendChild(row);
-                });
-                details.appendChild(logsDiv);
+                const inner = document.createElement('div');
+                inner.className = 'chat-logs-inner session-view';
+                window.SessionView.create(inner).loadSnapshot(msg.sessionSnapshot);
+                details.appendChild(inner);
                 bubble.appendChild(details);
             }
         }
@@ -1984,51 +1921,28 @@ const ChatPage = (() => {
         isRunning = true;
         setSendDisabled(true);
 
-        const progressEl = document.querySelector('#chat-progress');
-        const logsEl = document.querySelector('#chat-progress-logs');
-        const fillEl = document.querySelector('#chat-progress-fill');
-        if (progressEl) progressEl.style.display = 'block';
-        if (logsEl) logsEl.innerHTML = '';
-        if (fillEl) fillEl.style.width = '0%';
+        const panelEl = document.querySelector('#chat-session-panel');
+        const view = getChatSessionView();
+        if (panelEl) panelEl.style.display = 'block';
+        if (view) view.reset();
 
-        const collectedLogs = [];
-
-        function appendProgressLog(time, message, type) {
-            console.log('[ChatPage] Progress log:', { time, message, type });
-            collectedLogs.push({ time, message, type });
-            if (!logsEl) return;
-            const row = document.createElement('div');
-            row.className = `log-entry ${type}`;
-            row.innerHTML = `<span class="log-time">${time}</span><span class="log-message">${escapeHtml(message)}</span>`;
-            logsEl.appendChild(row);
-            logsEl.scrollTop = logsEl.scrollHeight;
-            if (fillEl) fillEl.style.width = `${Math.min(collectedLogs.length * 4, 90)}%`;
-        }
+        let snapshot = null;
 
         try {
-            console.log('[ChatPage] Calling runTaskStreaming...');
-            await window.WailsAPI.runTaskStreaming(
+            await window.WailsAPI.runAgentSession(
                 'chat', text, '',
-                (log) => {
-                    // log 格式: { type: string, time: string, message: string }
-                    console.log('[ChatPage] Received log:', log);
-                    const t = log.time || nowTime();
-                    const type = log.type || 'info';
-                    const message = log.message || '';
-                    
-                    if (message) {
-                        appendProgressLog(t, message, type);
-                    }
+                (msg) => {
+                    if (view) view.apply(msg);
+                    if (view) snapshot = view.getSnapshot();
                 },
                 (result) => {
-                    console.log('[ChatPage] Task completed:', result);
-                    if (fillEl) fillEl.style.width = '100%';
-                    setTimeout(() => { if (progressEl) progressEl.style.display = 'none'; }, 600);
+                    setTimeout(() => { if (panelEl) panelEl.style.display = 'none'; }, 400);
+                    const content = (view && view.getState().assistantText) || result.output || '（任务完成，无文本输出）';
                     session.messages.push({
                         role: 'assistant',
-                        content: result.output || '（任务完成，无文本输出）',
+                        content,
                         time: nowTime(),
-                        logs: collectedLogs,
+                        sessionSnapshot: snapshot || (view ? view.getSnapshot() : null),
                     });
                     save();
                     renderSidebar();
@@ -2037,13 +1951,12 @@ const ChatPage = (() => {
                     setSendDisabled(false);
                 },
                 (err) => {
-                    console.error('[ChatPage] Task failed:', err);
-                    if (progressEl) progressEl.style.display = 'none';
+                    if (panelEl) panelEl.style.display = 'none';
                     session.messages.push({
                         role: 'assistant',
                         content: `执行失败: ${err.error || '未知错误'}`,
                         time: nowTime(),
-                        logs: collectedLogs,
+                        sessionSnapshot: snapshot,
                     });
                     save();
                     renderSidebar();
@@ -2053,9 +1966,13 @@ const ChatPage = (() => {
                 }
             );
         } catch (e) {
-            console.error('[ChatPage] Exception:', e);
-            if (progressEl) progressEl.style.display = 'none';
-            session.messages.push({ role: 'assistant', content: `执行失败: ${e.message}`, time: nowTime(), logs: collectedLogs });
+            if (panelEl) panelEl.style.display = 'none';
+            session.messages.push({
+                role: 'assistant',
+                content: `执行失败: ${e.message}`,
+                time: nowTime(),
+                sessionSnapshot: snapshot,
+            });
             save();
             renderSidebar();
             renderMessages();

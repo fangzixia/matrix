@@ -24,7 +24,7 @@ package coordinator
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"matrix/internal/logger"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -248,10 +248,10 @@ func makeAgentExecute(cfg Config) func(context.Context, map[string]any) (string,
 		if cfg.Async != nil {
 			cfg.Async.Inc()
 			go func() {
-				slog.Info("coordinator: [异步] 子 Agent 启动", "id", id, "description", description)
-				result := query.Run(ctx, subCfg, nil)
+				logger.Info("coordinator: [异步] 子 Agent 启动", "id", id, "description", description)
+				result := query.Run(ctx, subCfg)
 				updateRegistry(cfg.AgentRegistry, id, result)
-				slog.Info("coordinator: [异步] 子 Agent 完成",
+				logger.Info("coordinator: [异步] 子 Agent 完成",
 					"id", id, "turns", result.TurnCount)
 				// 将 <result> XML 注入父 TAOR 循环（user-role 消息）
 				cfg.Async.Send(query.Message{
@@ -268,10 +268,10 @@ func makeAgentExecute(cfg Config) func(context.Context, map[string]any) (string,
 		}
 
 		// ── 同步路径（Config.Async 为 nil）──────────────────────────────
-		slog.Info("coordinator: [同步] 子 Agent 启动", "id", id, "description", description)
-		result := query.Run(ctx, subCfg, nil)
+		logger.Info("coordinator: [同步] 子 Agent 启动", "id", id, "description", description)
+		result := query.Run(ctx, subCfg)
 		updateRegistry(cfg.AgentRegistry, id, result)
-		slog.Info("coordinator: [同步] 子 Agent 完成",
+		logger.Info("coordinator: [同步] 子 Agent 完成",
 			"id", id, "turns", result.TurnCount)
 		return agent.FormatResult(id, description, result), nil
 	}
@@ -352,7 +352,7 @@ func makeSendMessageExecute(cfg Config) func(context.Context, map[string]any) (s
 			return "", fmt.Errorf("send_message: 未找到 Agent %q", to)
 		}
 
-		slog.Info("coordinator: 续接子 Agent",
+		logger.Info("coordinator: 续接子 Agent",
 			"id", agentID, "transcript_len", len(rec.Transcript))
 
 		history := make([]query.Message, len(rec.Transcript))
@@ -373,10 +373,10 @@ func makeSendMessageExecute(cfg Config) func(context.Context, map[string]any) (s
 			InitialMessages:    history,
 		}
 
-		result := query.Run(ctx, subCfg, nil)
+		result := query.Run(ctx, subCfg)
 		updateRegistry(cfg.AgentRegistry, agentID, result)
 
-		slog.Info("coordinator: 续接完成", "id", agentID, "turns", result.TurnCount)
+		logger.Info("coordinator: 续接完成", "id", agentID, "turns", result.TurnCount)
 		return agent.FormatResult(agentID, rec.Description+"（续接）", result), nil
 	}
 }
@@ -411,7 +411,7 @@ func NewTaskStopTool(cfg Config) *tools.Tool {
 			cfg.AgentRegistry.Update(agentID, func(r *agent.Record) {
 				r.Status = agent.StatusStopped
 			})
-			slog.Info("coordinator: 停止子 Agent", "id", agentID, "reason", reason)
+			logger.Info("coordinator: 停止子 Agent", "id", agentID, "reason", reason)
 			return fmt.Sprintf("Agent %s 已标记为停止：%s", taskID, reason), nil
 		},
 	}
