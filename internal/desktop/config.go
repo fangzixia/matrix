@@ -44,6 +44,8 @@ type ContextConfig struct {
 	ContextLimitTokens        int `json:"contextLimitTokens"`
 	ContextSafetyMarginTokens int `json:"contextSafetyMarginTokens"`
 	MaxToolResultRunes        int `json:"maxToolResultRunes"`
+	AutoCompactThreshold      int `json:"autoCompactThreshold"`
+	KeepRecentMessages        int `json:"keepRecentMessages"`
 }
 
 // MCPServerConfig MCP 服务器配置
@@ -102,6 +104,8 @@ func DefaultConfig() *Config {
 			ContextLimitTokens:        196608,
 			ContextSafetyMarginTokens: 2048,
 			MaxToolResultRunes:        12000,
+			AutoCompactThreshold:      100000,
+			KeepRecentMessages:        8,
 		},
 		MCPServers: map[string]MCPServerConfig{},
 	}
@@ -192,6 +196,9 @@ func (c *Config) FromSettings(s *Settings) {
 	c.Model.Model = s.Model.Model
 	c.Context.ContextLimitTokens = s.Model.MaxContextTokens
 	c.Model.SmartCompressThreshold = s.Model.SmartCompressThreshold
+	if s.Model.SmartCompressThreshold > 0 {
+		c.Context.AutoCompactThreshold = s.Model.SmartCompressThreshold
+	}
 	if s.MCPServers != nil {
 		c.MCPServers = s.MCPServers
 	}

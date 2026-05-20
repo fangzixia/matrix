@@ -23,7 +23,7 @@ type sessionRunner struct {
 	sessionID string
 }
 
-func (b *Bridge) runAgentSession(agentName, task, filePath string) (*RunResult, error) {
+func (b *Bridge) runAgentSession(task string) (*RunResult, error) {
 	if b.sessions == nil {
 		b.sessions = &sessionRunner{}
 	}
@@ -48,14 +48,6 @@ func (b *Bridge) runAgentSession(agentName, task, filePath string) (*RunResult, 
 		cancel()
 	}()
 
-	sysPrompt := b.buildSystemPrompt(agentName)
-	userPrompt := b.buildUserPrompt(agentName, task, filePath)
-	cfg, err := b.buildQueryConfig(agentName, sysPrompt, userPrompt)
-	if err != nil {
-		return nil, err
-	}
-	cfg.SessionID = sessionID
-
 	base := wailsSink{emit: func(msg stream.Message) {
 		if msg.SessionID == "" {
 			msg.SessionID = sessionID
@@ -65,20 +57,13 @@ func (b *Bridge) runAgentSession(agentName, task, filePath string) (*RunResult, 
 	coalesced := newCoalesceSink(base, sessionID, 100*time.Millisecond)
 	defer coalesced.close()
 
-	logger.Infof("SessionRunner: start agent=%s session=%s", agentName, sessionID)
-	result := query.RunSession(runCtx, cfg, coalesced)
-
-	if result.Err != nil {
-		return &RunResult{
-			Output:   "",
-			HasError: true,
-			Error:    result.Err.Error(),
-		}, nil
+	logger.Infof("SessionRunner: start session=%s", sessionID)
+	cfg, err := b.buildQueryConfig(b.formatUserMessage(task))
+	if err != nil {
+		return nil, err
 	}
-	return &RunResult{
-		Output:   result.Answer,
-		HasError: false,
-	}, nil
+	cfg.SessionID = sessionID
+	return b.toRunResult(query.RunSession(runCtx, cfg, coalesced))
 }
 
 // CancelAgentSession 取消当前正在运行的 Agent 会话。

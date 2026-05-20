@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"matrix/internal/logger"
@@ -20,9 +21,10 @@ type contextPipelineStats struct {
 	AfterTokens   int
 	Compacted     bool
 	HardCompacted bool
+	LLMCompacted  bool
 }
 
-func prepareHistoryForRequest(cfg Config, msgs *[]Message) contextPipelineStats {
+func prepareHistoryForRequest(ctx context.Context, cfg Config, msgs *[]Message) contextPipelineStats {
 	stats := contextPipelineStats{}
 	if msgs == nil {
 		return stats
@@ -33,7 +35,15 @@ func prepareHistoryForRequest(cfg Config, msgs *[]Message) contextPipelineStats 
 		stats.Compacted = true
 	}
 
-	if enforceHardContextBudget(cfg, msgs) {
+	if shouldProactiveAutoCompact(cfg, *msgs) {
+		if compacted, ok := llmCompactHistory(ctx, cfg, *msgs, 0, "auto"); ok {
+			*msgs = compacted
+			stats.Compacted = true
+			stats.LLMCompacted = true
+		}
+	}
+
+	if enforceHardContextBudget(ctx, cfg, msgs) {
 		stats.HardCompacted = true
 		stats.Compacted = true
 	}
@@ -44,6 +54,7 @@ func prepareHistoryForRequest(cfg Config, msgs *[]Message) contextPipelineStats 
 			"before_tokens_est", stats.BeforeTokens,
 			"after_tokens_est", stats.AfterTokens,
 			"hard_compacted", stats.HardCompacted,
+			"llm_compacted", stats.LLMCompacted,
 			"messages", len(*msgs),
 		)
 	}
@@ -93,7 +104,7 @@ func applyMicroCompact(msgs *[]Message, p ContextPolicy, force bool) bool {
 	return changed
 }
 
-func enforceHardContextBudget(cfg Config, msgs *[]Message) bool {
+func enforceHardContextBudget(ctx context.Context, cfg Config, msgs *[]Message) bool {
 	limit := cfg.ContextPolicy.ContextLimitTokens
 	if limit <= 0 || msgs == nil {
 		return false
@@ -113,6 +124,13 @@ func enforceHardContextBudget(cfg Config, msgs *[]Message) bool {
 	applyMicroCompact(msgs, cfg.ContextPolicy, true)
 	if estimateRequestTokens(cfg, *msgs) <= budget {
 		return true
+	}
+
+	if compacted, ok := llmCompactHistory(ctx, cfg, *msgs, budget, "hard_budget"); ok {
+		*msgs = compacted
+		if estimateRequestTokens(cfg, *msgs) <= budget {
+			return true
+		}
 	}
 
 	*msgs = deterministicCompactToBudget(cfg, *msgs, budget)

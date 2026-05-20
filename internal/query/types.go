@@ -1,16 +1,13 @@
 // Package query 实现 TAOR（思考→行动→观察→汇报）Agent 循环。
 //
-// 架构对标 claude-code 的 query.ts / QueryEngine.ts：
-//
-//	Run()           ← 外层会话入口（QueryEngine.ts）
-//	  └─ queryLoop  ← for{} 状态机（query.ts）
+//	Run()           ← 外层会话入口
+//	  └─ queryLoop  ← for{} 状态机
 //	       ├─ think  T：调用 LLM，流式接收响应
 //	       ├─ act    A：执行工具调用
 //	       ├─ observe O：将工具结果打包为用户消息
 //	       └─ report  R：Stop Hook 检查 + 输出最终答案
 //
-// 上下文治理（对标 claude-code microCompact）由 [Config.PrepareHistory] 与
-// [matrix/internal/session] 包组合实现，query 本包不直接依赖 session 以避免循环引用。
+// 上下文治理（microCompact / autoCompact）见 context_pipeline.go。
 package query
 
 import (
@@ -63,8 +60,6 @@ const (
 	TransitionNextTurn TransitionReason = "next_turn"
 	// TransitionStopHookBlocking 表示 Stop Hook 注入了阻塞错误，强制重新推理。
 	TransitionStopHookBlocking TransitionReason = "stop_hook_blocking"
-	// TransitionMaxOutputTokensRecovery 表示触发输出 token 上限，尝试恢复。
-	TransitionMaxOutputTokensRecovery TransitionReason = "max_output_tokens_recovery"
 )
 
 // state 是循环迭代间传递的可变内部状态。
@@ -73,8 +68,6 @@ type state struct {
 	turnCount int
 	// transition 记录上一轮跃迁原因；首次迭代为 nil。
 	transition *TransitionReason
-	// recoveryAttempts 记录当前连续 max_output_tokens 恢复尝试次数。
-	recoveryAttempts int
 }
 
 // ContextPolicy defines the query-loop owned context management policy.
@@ -98,6 +91,11 @@ type ContextPolicy struct {
 	ContextSafetyMarginTokens int
 	// MaxAsyncResultRunes limits injected async worker result messages.
 	MaxAsyncResultRunes int
+	// AutoCompactThreshold 为估算 token 达到该值时触发 LLM 全量会话摘要（0 禁用）。
+	// 达到该阈值时触发 LLM 全量会话摘要。
+	AutoCompactThreshold int
+	// KeepRecentMessages 为 LLM 全量摘要后保留的最近消息条数（含 user/assistant/tool）。
+	KeepRecentMessages int
 }
 
 // Config 包含一个 TAOR 会话所需的全部配置参数。
@@ -124,7 +122,7 @@ type Config struct {
 	StopHook func(history []Message) string
 	// AsyncResults 为异步子 Agent 完成时注入的 user 消息通道。
 	// queryLoop 在 end_turn 时若 HasPendingAsync() 为 true 则阻塞等待，
-	// 其余时机非阻塞 drain，模仿 claude-code 的 notifyOnCompletion 机制。
+	// 其余时机非阻塞 drain 异步子 Agent 结果。
 	// nil 表示无异步子 Agent 结果通道（嵌入方未使用 [coordinator.AsyncSupport]）。
 	AsyncResults <-chan Message
 	// HasPendingAsync 返回当前是否还有未完成的异步子 Agent。
@@ -153,8 +151,6 @@ const (
 	StopAborted StopReason = "aborted"
 	// StopModelError 表示遭遇不可恢复的 LLM API 错误。
 	StopModelError StopReason = "model_error"
-	// StopHookPause 表示 Stop Hook 返回了硬停止信号。
-	StopHookPause StopReason = "hook_pause"
 )
 
 // Result 是 TAOR 循环退出时返回的最终结果。

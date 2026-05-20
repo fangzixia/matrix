@@ -2,31 +2,32 @@ package desktop
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"matrix/internal/logger"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"matrix/internal/agents"
+	workeragent "matrix/internal/agent"
+	"matrix/internal/coordinator"
 	"matrix/internal/llm"
 	"matrix/internal/mcp"
 	"matrix/internal/query"
+	"matrix/internal/stream"
 	"matrix/internal/tools"
 )
 
 // Bridge 提供前端可调用的 Go 方法
 type Bridge struct {
-	ctx           context.Context
-	config        *Config
-	client        *llm.Client
-	agentRegistry *agents.Registry
-	mcpManager    *mcp.Manager
-	sessions      *sessionRunner
+	ctx              context.Context
+	config           *Config
+	client           *llm.Client
+	subAgentRegistry *workeragent.Registry
+	coordinatorAsync *coordinator.AsyncSupport
+	mcpManager       *mcp.Manager
+	sessions         *sessionRunner
 }
 
 // NewBridge 创建新的 Bridge 实例
@@ -51,10 +52,11 @@ func NewBridge(cfg *Config) *Bridge {
 	}
 
 	return &Bridge{
-		config:        cfg,
-		agentRegistry: agents.NewRegistry(),
-		mcpManager:    mcpManager,
-		sessions:      &sessionRunner{},
+		config:           cfg,
+		subAgentRegistry: coordinator.NewRegistry(),
+		coordinatorAsync: coordinator.NewAsyncSupport(),
+		mcpManager:       mcpManager,
+		sessions:         &sessionRunner{},
 	}
 }
 
@@ -96,55 +98,91 @@ func (b *Bridge) updateClient() {
 	}
 }
 
-// buildQueryConfig 构建查询配置
-func (b *Bridge) buildQueryConfig(agentName, sysPrompt, userPrompt string) (query.Config, error) {
-	// 创建工具注册表
-	reg := tools.DefaultRegistry()
+func (b *Bridge) contextPolicy() query.ContextPolicy {
+	autoTh := b.config.Context.AutoCompactThreshold
+	if autoTh <= 0 {
+		autoTh = b.config.Model.SmartCompressThreshold
+	}
+	keepRecent := b.config.Context.KeepRecentMessages
+	if keepRecent < 1 {
+		keepRecent = 8
+	}
+	return query.ContextPolicy{
+		MicroCompactThreshold:     b.config.Context.MicroCompactThreshold,
+		KeepRecentToolResults:     b.config.Context.KeepRecentToolResults,
+		ContextLimitTokens:        b.config.Context.ContextLimitTokens,
+		ContextSafetyMarginTokens: b.config.Context.ContextSafetyMarginTokens,
+		MaxAsyncResultRunes:       b.config.Context.MaxToolResultRunes,
+		AutoCompactThreshold:      autoTh,
+		KeepRecentMessages:        keepRecent,
+	}
+}
 
-	// 注册 MCP 工具
+func (b *Bridge) canUseTool() tools.CanUseToolFn {
+	return func(name string, _ map[string]any) bool {
+		if len(name) > 4 && name[:4] == "mcp_" {
+			parts := strings.SplitN(name[4:], "_", 2)
+			if len(parts) == 2 {
+				serverName := parts[0]
+				toolName := parts[1]
+				if b.mcpManager.IsAutoApproved(serverName, toolName) {
+					return true
+				}
+				logger.Warnf("MCP tool call requires approval: %s/%s", serverName, toolName)
+				return true
+			}
+		}
+		return true
+	}
+}
+
+// buildWorkerRegistry 创建 Worker 可用工具集（内置 + MCP，不含 Coordinator 编排工具）。
+func (b *Bridge) buildWorkerRegistry() (*tools.Registry, error) {
+	reg := tools.DefaultRegistry()
 	if err := tools.RegisterMCPTools(reg, b.mcpManager); err != nil {
 		logger.Warnf("failed to register MCP tools: %v", err)
 	}
+	return reg, nil
+}
 
-	// 使用统一的全局配置，MaxTurns 由核心模块控制
-	return query.Config{
-		LLM:          b.client,
-		Model:        b.config.Model.Model,
-		SystemPrompt: sysPrompt,
-		Registry:     reg,
-		MaxTurns:     200, // 统一的最大轮次限制
-		MaxTokens:    b.config.Model.MaxTokens,
-		ContextPolicy: query.ContextPolicy{
-			MicroCompactThreshold:     b.config.Context.MicroCompactThreshold,
-			KeepRecentToolResults:     b.config.Context.KeepRecentToolResults,
-			ContextLimitTokens:        b.config.Context.ContextLimitTokens,
-			ContextSafetyMarginTokens: b.config.Context.ContextSafetyMarginTokens,
-			MaxAsyncResultRunes:       b.config.Context.MaxToolResultRunes,
-		},
+// buildQueryConfig 构建 CC 对齐的 Coordinator 会话（父级 agent/send_message/task_stop，Worker 持执行类工具）。
+func (b *Bridge) buildQueryConfig(userPrompt string) (query.Config, error) {
+	workerReg, err := b.buildWorkerRegistry()
+	if err != nil {
+		return query.Config{}, err
+	}
+
+	workerOnly := coordinator.CloneWorkerRegistry(workerReg)
+	coordCfg := coordinator.Config{
+		LLM:                b.client,
+		Model:              b.config.Model.Model,
+		AgentRegistry:      b.subAgentRegistry,
+		ToolRegistry:       workerOnly,
+		CanUseTool:         b.canUseTool(),
+		MaxTurns:           200,
+		MaxTokens:          b.config.Model.MaxTokens,
+		ContextPolicy:      b.contextPolicy(),
 		MaxToolResultRunes: b.config.Context.MaxToolResultRunes,
-		CanUseTool: func(name string, args map[string]any) bool {
-			// 检查是否是 MCP 工具
-			if len(name) > 4 && name[:4] == "mcp_" {
-				// 解析服务器名称和工具名称
-				// 格式: mcp_<serverName>_<toolName>
-				parts := strings.SplitN(name[4:], "_", 2)
-				if len(parts) == 2 {
-					serverName := parts[0]
-					toolName := parts[1]
+		Async:              b.coordinatorAsync,
+	}
 
-					// 检查是否自动批准
-					if b.mcpManager.IsAutoApproved(serverName, toolName) {
-						return true
-					}
+	reg := coordinator.NewParentRegistry(coordCfg)
+	asyncResults, hasPending := b.coordinatorAsync.QueryConfigFields()
+	prompt := coordinator.BuildParentSystemPrompt(workerOnly.Names(), b.connectedMCPServerNames())
+	logger.Infof("buildQueryConfig: parent_tools=%v worker_tools=%d", reg.Names(), len(workerOnly.Names()))
 
-					// TODO: 实现用户确认机制
-					// 目前默认允许所有 MCP 工具调用
-					logger.Warnf("MCP tool call requires approval: %s/%s", serverName, toolName)
-					return true
-				}
-			}
-			return true
-		},
+	return query.Config{
+		LLM:                b.client,
+		Model:              b.config.Model.Model,
+		SystemPrompt:       prompt,
+		Registry:           reg,
+		MaxTurns:           200,
+		MaxTokens:          b.config.Model.MaxTokens,
+		ContextPolicy:      b.contextPolicy(),
+		MaxToolResultRunes: b.config.Context.MaxToolResultRunes,
+		CanUseTool:         b.canUseTool(),
+		AsyncResults:       asyncResults,
+		HasPendingAsync:    hasPending,
 		InitialMessages: []query.Message{
 			{Role: query.RoleUser, Content: userPrompt},
 		},
@@ -158,89 +196,65 @@ type RunResult struct {
 	Error    string `json:"error,omitempty"`
 }
 
-// RunTask 执行任务（非流式）
-func (b *Bridge) RunTask(agentName, task, filePath string) (*RunResult, error) {
-	logger.Infof("RunTask: agent=%s, task=%s, file=%s", agentName, task, filePath)
-
+// RunTask 执行 Agent（非流式）。
+func (b *Bridge) RunTask(task string) (*RunResult, error) {
 	if b.client == nil {
 		return nil, fmt.Errorf("请先配置 API Key")
 	}
+	return b.toRunResult(b.executeAgent(b.ctx, task, stream.NopSink{}))
+}
 
-	// 构建系统提示
-	sysPrompt := b.buildSystemPrompt(agentName)
+// RunAgentSession 执行 Agent 并通过 agent:stream 推送过程消息。
+func (b *Bridge) RunAgentSession(task string) (*RunResult, error) {
+	return b.runAgentSession(task)
+}
 
-	// 构建用户提示
-	userPrompt := b.buildUserPrompt(agentName, task, filePath)
+func (b *Bridge) workspaceRoot() string {
+	if b.config.Workspace.Root == "" {
+		return "."
+	}
+	return b.config.Workspace.Root
+}
 
-	// 构建查询配置
-	cfg, err := b.buildQueryConfig(agentName, sysPrompt, userPrompt)
+func (b *Bridge) executeAgent(ctx context.Context, task string, sink query.StreamSink) query.Result {
+	cfg, err := b.buildQueryConfig(b.formatUserMessage(task))
 	if err != nil {
-		return nil, err
+		return query.Result{StopReason: query.StopModelError, Err: err}
 	}
-
-	result := query.Run(b.ctx, cfg)
-
-	if result.Err != nil {
-		return &RunResult{
-			Output:   "",
-			HasError: true,
-			Error:    result.Err.Error(),
-		}, nil
-	}
-
-	return &RunResult{
-		Output:   result.Answer,
-		HasError: false,
-	}, nil
+	return query.RunSession(ctx, cfg, sink)
 }
 
-// RunAgentSession 执行任务并通过 agent:stream 推送 SDK 过程消息。
-func (b *Bridge) RunAgentSession(agentName, task, filePath string) (*RunResult, error) {
-	logger.Infof("RunAgentSession: agent=%s, task=%s, file=%s", agentName, task, filePath)
-	return b.runAgentSession(agentName, task, filePath)
-}
-
-// RunTaskWithProgress 已弃用，保留别名供 wails 绑定过渡。
-func (b *Bridge) RunTaskWithProgress(agentName, task, filePath string) (*RunResult, error) {
-	return b.RunAgentSession(agentName, task, filePath)
-}
-
-// buildSystemPrompt 构建系统提示（使用 agents 包）
-func (b *Bridge) buildSystemPrompt(agentName string) string {
-	agent, err := b.agentRegistry.Get(agentName)
-	if err != nil {
-		logger.Infof("Agent not found: %s, using default prompt", agentName)
-		return `你是一个有用的 AI 助手，可以使用文件系统工具完成任务。
-调用工具前简要说明意图。收到工具结果后解读并决定下一步。
-掌握足够信息时，给出清晰简洁的最终答案。`
+func (b *Bridge) toRunResult(r query.Result) (*RunResult, error) {
+	if r.Err != nil {
+		return &RunResult{HasError: true, Error: r.Err.Error()}, nil
 	}
-
-	workspaceRoot := b.config.Workspace.Root
-	if workspaceRoot == "" {
-		workspaceRoot = "."
-	}
-
-	return agent.BuildSystemPrompt(workspaceRoot)
+	return &RunResult{Output: r.Answer}, nil
 }
 
-// buildUserPrompt 构建用户提示（使用 agents 包）
-func (b *Bridge) buildUserPrompt(agentName, task, filePath string) string {
-	agent, err := b.agentRegistry.Get(agentName)
-	if err != nil {
-		logger.Infof("Agent not found: %s, using default prompt", agentName)
-		workspaceRoot := b.config.Workspace.Root
-		if workspaceRoot == "" {
-			workspaceRoot = "."
+// formatUserMessage 构建首轮 user 消息（工作区 + prompt）。
+func (b *Bridge) formatUserMessage(task string) string {
+	msg := strings.TrimSpace(task)
+	ws := b.workspaceRoot()
+	if ws == "" || ws == "." {
+		return msg
+	}
+	if msg == "" {
+		return fmt.Sprintf("工作区: %s", ws)
+	}
+	return fmt.Sprintf("工作区: %s\n\n%s", ws, msg)
+}
+
+func (b *Bridge) connectedMCPServerNames() []string {
+	if b.mcpManager == nil {
+		return nil
+	}
+	names := make([]string, 0)
+	for name, st := range b.mcpManager.GetAllServerStatuses() {
+		if st != nil && st.Available {
+			names = append(names, name)
 		}
-		return fmt.Sprintf("工作区: %s\n\n任务描述: %s\n", workspaceRoot, task)
 	}
-
-	workspaceRoot := b.config.Workspace.Root
-	if workspaceRoot == "" {
-		workspaceRoot = "."
-	}
-
-	return agent.BuildUserPrompt(workspaceRoot, task, filePath)
+	return names
 }
 
 // GetSettings 读取用户配置
@@ -479,42 +493,6 @@ func (b *Bridge) resolvePath(path string) string {
 		return path
 	}
 	return filepath.Join(b.config.Workspace.Root, path)
-}
-
-// workspaceEntry 工作区历史条目（兼容性）
-type workspaceEntry struct {
-	Path     string    `json:"path"`
-	LastUsed time.Time `json:"lastUsed"`
-}
-
-// workspaceHistoryPath 返回工作区历史文件路径（兼容旧版）
-func workspaceHistoryPath() string {
-	base, err := os.UserConfigDir()
-	if err != nil {
-		base, _ = os.UserHomeDir()
-	}
-	dir := filepath.Join(base, "matrix")
-	_ = os.MkdirAll(dir, 0755)
-	return filepath.Join(dir, "workspaces.json")
-}
-
-// loadWorkspaceHistory 加载工作区历史（兼容旧版）
-func loadWorkspaceHistory() []workspaceEntry {
-	p := workspaceHistoryPath()
-	if p == "" {
-		return nil
-	}
-	data, err := os.ReadFile(p)
-	if err != nil {
-		return nil
-	}
-	var result struct {
-		Recent []workspaceEntry `json:"recent"`
-	}
-	if err := json.Unmarshal(data, &result); err != nil {
-		return nil
-	}
-	return result.Recent
 }
 
 // TestMCPServer 测试 MCP 服务器连接

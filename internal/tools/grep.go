@@ -19,7 +19,7 @@ import (
 // 职责边界：在文件内容中匹配正则表达式。
 // 按路径/文件名枚举请使用 [NewGlobTool]，二者互补而非同一工具。
 //
-// 对标 claude-code GrepTool：
+// GrepTool：
 //   - 优先调用系统 ripgrep（rg）
 //   - rg 不可用时降级为纯 Go
 //   - output_mode: files_with_matches / content / count

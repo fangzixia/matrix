@@ -17,7 +17,7 @@ import (
 // 职责边界：根据查询词调用搜索引擎 API，返回多条 {标题, URL, 摘要}。
 // 与 [NewWebFetchTool]（对单个已知 URL 做 GET 拉取）无关，勿混用。
 //
-// 对标 claude-code WebSearchTool，但改为通用 HTTP 搜索接口：
+// WebSearchTool：通用 HTTP 搜索接口。
 //   - 使用 Brave Search API（设置 BRAVE_SEARCH_API_KEY 环境变量）
 //   - 未配置 API Key 时返回明确的配置提示
 //

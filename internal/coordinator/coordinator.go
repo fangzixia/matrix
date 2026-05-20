@@ -1,13 +1,5 @@
 // Package coordinator 提供多 Agent 编排工具，包括子 Agent 的派生、续接和停止。
 //
-// 与 claude-code 的对应关系：
-//   - [WorkerContext]      ↔ coordinatorMode.ts getCoordinatorUserContext()
-//   - [CoordinatorSystemPrompt] ↔ coordinatorMode.ts getCoordinatorSystemPrompt()
-//   - [AsyncSupport]       ↔ runAgent.ts notifyOnCompletion + AppState 的任务队列
-//   - [NewAgentTool]       ↔ AgentTool.tsx（配置了 Async 时异步执行子 Agent）
-//   - [NewSendMessageTool] ↔ SendMessageTool.ts
-//   - [NewTaskStopTool]    ↔ TaskStopTool
-//
 // 关键设计：
 //   - AgentTool 始终注册；子 Agent 是否异步由 Coordinator Config.Async 是否非 nil 决定。
 //   - 异步结果以 user-role 消息注入父 TAOR 循环（query.Config.AsyncResults）。
@@ -25,8 +17,6 @@ import (
 	"context"
 	"fmt"
 	"matrix/internal/logger"
-	"sort"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -35,19 +25,6 @@ import (
 	"matrix/internal/query"
 	"matrix/internal/tools"
 )
-
-// WorkerContext 返回追加到系统提示词末尾的 Worker 工具上下文说明。
-// 对应 claude-code 的 getCoordinatorUserContext()：
-// 告知 Coordinator LLM Worker 可以使用哪些工具，无需修改 system prompt 主体。
-func WorkerContext(toolNames []string) string {
-	sorted := make([]string, len(toolNames))
-	copy(sorted, toolNames)
-	sort.Strings(sorted)
-	return fmt.Sprintf(
-		"Workers spawned via the agent tool have access to these tools: %s",
-		strings.Join(sorted, ", "),
-	)
-}
 
 // ── AsyncSupport：异步子 Agent 的通道 + 计数器 ───────────────────────────
 
@@ -136,7 +113,7 @@ const WorkerSystemPrompt = `你是一个专注的 AI 工作单元（Worker Agent
 5. 汇报格式（纯文本，不超过 500 字）：结论 / 关键文件 / 变更摘要 / 问题（若有）`
 
 // CoordinatorSystemPrompt 是 Coordinator 的系统提示词，
-// 对应 claude-code coordinatorMode.ts 的 getCoordinatorSystemPrompt()。
+// 协调者模式的系统提示词。
 // 在 main.go 中追加到基础 system prompt（与 WorkerContext 一起使用）。
 const CoordinatorSystemPrompt = `你是一个 AI 任务协调者（Coordinator）。你的职责是：
 - 将复杂任务分解并委派给 Worker Agent
@@ -144,6 +121,8 @@ const CoordinatorSystemPrompt = `你是一个 AI 任务协调者（Coordinator�
 - 对于无需工具的简单问题，直接回答
 
 ## 你的工具
+
+你没有 read/write/bash/grep 等执行类工具；任何读文件、改代码、跑命令、测都必须通过 **agent** 委派 Worker。
 
 - **agent**：派生新 Worker，返回 <agent_launched> ACK；结果稍后以 <result> XML 形式到达。
 - **send_message**：向已有 Worker 发送后续指令（续接其上下文）。
@@ -177,7 +156,7 @@ const CoordinatorSystemPrompt = `你是一个 AI 任务协调者（Coordinator�
 
 // NewAgentTool 创建派生子 Agent 的工具。
 //
-// 执行策略（对应 claude-code AgentTool.tsx 的 shouldRunAsync 逻辑）：
+// 执行策略：根据配置决定子 Agent 同步或异步执行。
 //   - cfg.Async != nil：异步执行
 //     立即返回 <agent_launched> ACK；Worker 在 goroutine 中运行，
 //     完成后将 <result> XML 注入父 TAOR 循环的 AsyncResults 通道。
@@ -244,7 +223,7 @@ func makeAgentExecute(cfg Config) func(context.Context, map[string]any) (string,
 		subCfg := buildWorkerConfig(cfg, sysPrompt, maxTurns, prompt, string(id))
 
 		// ── 异步路径（已配置 Coordinator Config.Async）────────────────────
-		// 对应 claude-code AgentTool.tsx shouldRunAsync
+		// 异步执行子 Agent
 		if cfg.Async != nil {
 			cfg.Async.Inc()
 			go func() {
@@ -317,7 +296,7 @@ func updateRegistry(reg *agent.Registry, id agent.ID, result query.Result) {
 // ── SendMessageTool ───────────────────────────────────────────────────────
 
 // NewSendMessageTool 创建向已有 Worker Agent 发送后续消息的工具。
-// 对应 claude-code SendMessageTool.ts：续接 Worker 的完整 Transcript 上下文。
+// 续接 Worker 的完整 Transcript 上下文。
 func NewSendMessageTool(cfg Config) *tools.Tool {
 	return &tools.Tool{
 		Name:        "send_message",
@@ -384,7 +363,7 @@ func makeSendMessageExecute(cfg Config) func(context.Context, map[string]any) (s
 // ── TaskStopTool ──────────────────────────────────────────────────────────
 
 // NewTaskStopTool 创建停止 Worker Agent 的工具。
-// 对应 claude-code TaskStopTool：标记 Agent 状态；实际取消依赖 ctx 传播。
+// 标记 Agent 状态；实际取消依赖 ctx 传播。
 func NewTaskStopTool(cfg Config) *tools.Tool {
 	return &tools.Tool{
 		Name:        "task_stop",

@@ -2,7 +2,6 @@ package query
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"matrix/internal/logger"
 	"strings"
@@ -15,9 +14,6 @@ import (
 	"matrix/internal/stream"
 	"matrix/internal/tools"
 )
-
-// maxOutputTokensRecoveryLimit 是单轮内允许触发 max_output_tokens 恢复的最大次数。
-const maxOutputTokensRecoveryLimit = 3
 
 // logLinePrefix 返回非空的日志/事件行前缀（含尾部空格），用于区分父子 Agent 的 TAOR 循环。
 func logLinePrefix(cfg Config) string {
@@ -86,7 +82,7 @@ func publishResult(ctx context.Context, sid string, sink StreamSink, r Result, s
 			errMsg = r.Err.Error()
 		}
 		_ = sink.Publish(ctx, stream.ResultErrorMsg(sid, string(r.StopReason), errMsg, r.TurnCount, dur))
-	case StopModelError, StopHookPause:
+	case StopModelError:
 		errMsg := "模型错误"
 		if r.Err != nil {
 			errMsg = r.Err.Error()
@@ -121,7 +117,7 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 			return Result{StopReason: StopAborted, TurnCount: s.turnCount, Err: err, Messages: s.messages}
 		}
 
-		prepareHistoryForRequest(cfg, &s.messages)
+		prepareHistoryForRequest(ctx, cfg, &s.messages)
 
 		if cfg.MaxTurns > 0 && s.turnCount > cfg.MaxTurns {
 			logger.Info("loop: 达到最大轮次", "turns", s.turnCount)
@@ -410,30 +406,3 @@ func transitionStr(t *TransitionReason) string {
 	}
 	return string(*t)
 }
-
-func toolCallSummary(tc llm.ToolCall) string {
-	args := tc.Function.Arguments
-	return fmt.Sprintf("%s(%s)", tc.Function.Name, args)
-}
-
-func formatToolResults(results []tools.Result) string {
-	var sb strings.Builder
-	for _, r := range results {
-		status := "ok"
-		if r.IsError {
-			status = "error"
-		}
-		preview := r.Output
-		sb.WriteString(fmt.Sprintf("  %s[%s]: %s\n", r.ToolName, status, preview))
-	}
-	return sb.String()
-}
-
-func marshalArgs(args map[string]any) string {
-	b, _ := json.Marshal(args)
-	return string(b)
-}
-
-var _ = toolCallSummary
-var _ = formatToolResults
-var _ = marshalArgs

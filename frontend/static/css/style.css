@@ -575,7 +575,7 @@ body {
     gap: 8px;
 }
 
-/* SessionView（对齐 Claude Code SDK 流） */
+/* SessionView（Agent 流式消息） */
 .session-view-root,
 .chat-session-panel {
     min-height: 120px;

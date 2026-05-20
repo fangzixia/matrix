@@ -23,7 +23,7 @@ type TodoItem struct {
 //
 // 职责边界：任务跟踪与持久化，与 [NewSleepTool] 无关。
 //
-// 对标 claude-code TodoWriteTool：
+// TodoWriteTool：
 //   - merge=false：整表替换；merge=true：按 id 合并
 //   - 持久化到工作目录 .taor-todos.json
 func NewTodoWriteTool() *Tool {

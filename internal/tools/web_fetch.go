@@ -16,7 +16,7 @@ import (
 // 职责边界：已知 URL 时的 HTTP GET 抓取与 HTML→纯文本转换。
 // 与 [NewWebSearchTool]（关键词检索、返回多条搜索结果）无关，勿混用。
 //
-// 对标 claude-code WebFetchTool：
+// WebFetchTool：
 //   - HTTP GET 请求（带 30s 超时）
 //   - HTML 自动转换为纯文本（去除标签和脚本）
 //   - 内容长度上限 200KB（防止 context 爆炸）
@@ -48,7 +48,7 @@ func NewWebFetchTool() *Tool {
 }
 
 const (
-	webFetchMaxBodyBytes = 200 * 1024 // 200 KB，对标源码 MAX_MARKDOWN_LENGTH
+	webFetchMaxBodyBytes = 200 * 1024 // 200 KB 正文上限
 	webFetchTimeout      = 30 * time.Second
 )
 

@@ -1,4 +1,4 @@
-// Package stream 定义 Agent 会话对外推送的 SDK 风格消息（对齐 Claude Code progress / stream_event / assistant / result）。
+// Package stream 定义 Agent 会话对外推送的流式消息（progress / stream_event / assistant / result）。
 package stream
 
 import (

@@ -103,7 +103,7 @@ var ListDir = &Tool{
 }
 
 // Bash 在非 Windows 上执行 `sh -c`；在 Windows 上执行 **CMD**（cmd.exe /C），
-// 对标 claude-code 在 Windows 上对「类 bash」工具采用 cmd 而非误称 bash。
+// Windows 上对「类 bash」工具采用 cmd 而非误称 bash。
 var Bash = &Tool{
 	Name: "bash",
 	Description: `执行 shell 命令，返回合并后的标准输出与标准错误。
@@ -181,7 +181,7 @@ var PowerShell = &Tool{
 
 // DefaultRegistry 返回预装了所有通用工具的 [Registry]。
 //
-// 包含工具（对标 claude-code 第一档通用工具）：
+// 内置通用工具：
 //   - read_file       对应 FileReadTool
 //   - write_file      对应 FileWriteTool
 //   - list_dir        对应 LSDir（简化版）

@@ -10,7 +10,7 @@ import (
 
 // NewFileEditTool 创建文件精确字符串替换工具。
 //
-// 对标 claude-code FileEditTool（工具名 str_replace_editor）。
+// FileEditTool（工具名 str_replace_editor）。
 // 核心设计：old_string → new_string 原地替换，无需重写整个文件。
 //
 // 行为规则（与源码对齐）：
@@ -61,7 +61,7 @@ func execFileEdit(_ context.Context, args map[string]any) (string, error) {
 	newStr, _ := getString(args, "new_string")
 	replaceAll, _ := args["replace_all"].(bool)
 
-	// 统一为绝对路径，与 claude-code 的 expandPath 对应。
+	// 统一为绝对路径。
 	if !filepath.IsAbs(filePath) {
 		cwd, err := os.Getwd()
 		if err != nil {

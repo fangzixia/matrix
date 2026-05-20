@@ -8,7 +8,7 @@ import (
 
 // NewSleepTool 创建等待指定时间的工具。
 //
-// 对标 claude-code SleepTool：
+// SleepTool：
 //   - 参数为 duration_ms（毫秒）
 //   - 主要用于等待异步操作、轮询间隔等
 //   - 最大等待 60 秒

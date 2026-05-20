@@ -1,11 +1,12 @@
 package query
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
 
-func TestPrepareHistoryForRequest_MicroCompact(t *testing.T) {
+func TestPrepareHistory_MicroCompact(t *testing.T) {
 	msgs := []Message{
 		{Role: RoleTool, Content: strings.Repeat("old ", 200), ToolName: "read"},
 		{Role: RoleTool, Content: "recent", ToolName: "read"},
@@ -17,7 +18,7 @@ func TestPrepareHistoryForRequest_MicroCompact(t *testing.T) {
 		},
 	}
 
-	prepareHistoryForRequest(cfg, &msgs)
+	prepareHistoryForRequest(context.Background(), cfg, &msgs)
 
 	if !strings.Contains(msgs[0].Content, "已压缩") {
 		t.Fatalf("expected old tool result to be compacted, got %q", msgs[0].Content)
@@ -27,7 +28,7 @@ func TestPrepareHistoryForRequest_MicroCompact(t *testing.T) {
 	}
 }
 
-func TestPrepareHistoryForRequest_HardBudget(t *testing.T) {
+func TestPrepareHistory_HardBudget(t *testing.T) {
 	msgs := []Message{
 		{Role: RoleUser, Content: strings.Repeat("alpha ", 2000)},
 		{Role: RoleAssistant, Content: strings.Repeat("beta ", 2000)},
@@ -40,7 +41,7 @@ func TestPrepareHistoryForRequest_HardBudget(t *testing.T) {
 		},
 	}
 
-	prepareHistoryForRequest(cfg, &msgs)
+	prepareHistoryForRequest(context.Background(), cfg, &msgs)
 
 	if len(msgs) == 0 || msgs[0].Role != RoleSystem {
 		t.Fatalf("expected compact boundary system message, got %+v", msgs)

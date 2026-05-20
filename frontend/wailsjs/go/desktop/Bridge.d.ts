@@ -28,11 +28,19 @@ export function OpenFolderDialog():Promise<string>;
 
 export function ReadFile(arg1:string):Promise<Record<string, any>>;
 
-export function RunAgentSession(arg1:string,arg2:string,arg3:string):Promise<desktop.RunResult>;
+export function RunAgentSession(arg1:string):Promise<desktop.RunResult>;
 
-export function RunTask(arg1:string,arg2:string,arg3:string):Promise<desktop.RunResult>;
+export function RunBuild(arg1:string,arg2:string):Promise<desktop.RunResult>;
 
-export function RunTaskWithProgress(arg1:string,arg2:string,arg3:string):Promise<desktop.RunResult>;
+export function RunImplement(arg1:string,arg2:string):Promise<desktop.RunResult>;
+
+export function RunSpec(arg1:string,arg2:string):Promise<desktop.RunResult>;
+
+export function RunTask(arg1:string):Promise<desktop.RunResult>;
+
+export function RunUIScan(arg1:string,arg2:string):Promise<desktop.RunResult>;
+
+export function RunVerify(arg1:string,arg2:string):Promise<desktop.RunResult>;
 
 export function SaveFile(arg1:string,arg2:string):Promise<void>;
 

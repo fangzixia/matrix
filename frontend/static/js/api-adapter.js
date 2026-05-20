@@ -46,15 +46,15 @@ const WailsAPI = {
         return { evaluations: result };
     },
 
-    async runTask(agentName, task, filePath = '') {
-        return window.go.desktop.Bridge.RunTask(agentName, task, filePath);
+    async runTask(task) {
+        return window.go.desktop.Bridge.RunTask(task);
     },
 
     /**
-     * 流式 Agent 会话：通过 agent:stream 推送 SDK 消息。
+     * 通用 Agent 流式会话；通过 agent:stream 推送过程消息。
      * @param {function(object): void} onStreamMessage
      */
-    async runAgentSession(agentName, task, filePath = '', onStreamMessage, onDone, onError) {
+    async runAgentSession(task, onStreamMessage, onDone, onError) {
         if (onStreamMessage) {
             window.runtime.EventsOn(STREAM_EVENT, (msg) => {
                 onStreamMessage(msg);
@@ -64,8 +64,7 @@ const WailsAPI = {
         await new Promise((resolve) => setTimeout(resolve, 50));
 
         try {
-            const runFn = window.go.desktop.Bridge.RunAgentSession || window.go.desktop.Bridge.RunTaskWithProgress;
-            const result = await runFn(agentName, task, filePath);
+            const result = await window.go.desktop.Bridge.RunAgentSession(task);
             window.runtime.EventsOff(STREAM_EVENT);
             if (onDone) onDone(result);
         } catch (error) {
@@ -79,9 +78,42 @@ const WailsAPI = {
         }
     },
 
-    /** @deprecated 使用 runAgentSession */
-    async runTaskStreaming(agentName, task, filePath = '', onLog, onDone, onError) {
-        return this.runAgentSession(agentName, task, filePath, onLog, onDone, onError);
+    _taskRunners: {
+        spec: (input, file) => window.go.desktop.Bridge.RunSpec(input, file),
+        implement: (input, file) => window.go.desktop.Bridge.RunImplement(input, file),
+        verify: (input, file) => window.go.desktop.Bridge.RunVerify(input, file),
+        build: (input, file) => window.go.desktop.Bridge.RunBuild(input, file),
+        'ui-scan': (input, file) => window.go.desktop.Bridge.RunUIScan(input, file),
+    },
+
+    async runTaskSession(kind, userInput, filePath = '', onStream, onDone, onError) {
+        const run = this._taskRunners[kind];
+        if (!run) {
+            return this.runAgentSession(userInput, onStream, onDone, onError);
+        }
+        if (onStream) {
+            window.runtime.EventsOn(STREAM_EVENT, (msg) => onStream(msg));
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        try {
+            const result = await run(userInput, filePath);
+            window.runtime.EventsOff(STREAM_EVENT);
+            if (onDone) onDone(result);
+        } catch (error) {
+            window.runtime.EventsOff(STREAM_EVENT);
+            if (onError) onError({ error: error.message || '任务执行失败' });
+            else throw error;
+        }
+    },
+
+    /** 执行任务页：按任务类型路由到对应后端入口 */
+    async runPersonaStreaming(kind, userInput, filePath = '', onStream, onDone, onError) {
+        return this.runTaskSession(kind, userInput, filePath, onStream, onDone, onError);
+    },
+
+    /** @deprecated 使用 runTaskSession */
+    async runTaskStreaming(kind, userInput, filePath = '', onLog, onDone, onError) {
+        return this.runTaskSession(kind, userInput, filePath, onLog, onDone, onError);
     },
 
     async cancelAgentSession() {

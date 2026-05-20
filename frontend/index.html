@@ -110,7 +110,7 @@
                             <div class="chat-messages" id="chat-messages">
                                 <div class="chat-empty" id="chat-empty">
                                     <div class="chat-empty-icon">💬</div>
-                                    <p>输入任何需求，Agent 将直接执行</p>
+                                    <p>输入任何需求，协调者将动态委派 Worker 执行</p>
                                 </div>
                             </div>
                             <div class="chat-session-panel" id="chat-session-panel" style="display:none;"></div>
@@ -130,27 +130,27 @@
 
                     <!-- 快速操作 -->
                     <div class="quick-actions">
-                        <div class="action-card" data-action="requirements">
+                        <div class="action-card" data-persona="spec">
                             <div class="action-icon">📝</div>
                             <div class="action-title">创建需求</div>
                             <div class="action-desc">编写需求和验收标准</div>
                         </div>
-                        <div class="action-card" data-action="code">
+                        <div class="action-card" data-persona="implement">
                             <div class="action-icon">💻</div>
                             <div class="action-title">编码实现</div>
                             <div class="action-desc">根据需求实现代码</div>
                         </div>
-                        <div class="action-card" data-action="eval">
+                        <div class="action-card" data-persona="verify">
                             <div class="action-icon">✓</div>
                             <div class="action-title">验收评测</div>
                             <div class="action-desc">验收实现是否符合需求</div>
                         </div>
-                        <div class="action-card" data-action="build">
+                        <div class="action-card" data-persona="build">
                             <div class="action-icon">🔄</div>
                             <div class="action-title">完整构建</div>
                             <div class="action-desc">编码 → 验收循环直到通过</div>
                         </div>
-                        <div class="action-card" data-action="pagescan">
+                        <div class="action-card" data-persona="ui-scan">
                             <div class="action-icon">🗺️</div>
                             <div class="action-title">页面扫描</div>
                             <div class="action-desc">Playwright 遍历菜单并生成页面结构报告</div>

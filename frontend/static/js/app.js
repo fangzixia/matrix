@@ -7,13 +7,13 @@ console.log('[app.js] Loaded - Version: 2026-05-20-00-35');
 const state = {
     requirements: [],
     evaluations: [],
-    currentAction: null,
+    currentPersona: null,
     currentRequirement: null,
     executionStartTime: null,
-    /** 流式执行所属任务类型（切换卡片时 currentAction 会变，日志须归到发起执行的任务） */
-    streamingAction: null,
+    /** 流式执行所属任务类型（切换卡片时 currentPersona 会变，日志须归到发起执行的任务） */
+    streamingPersona: null,
     /** 每个任务卡片独立的执行过程快照 */
-    executionByAction: {},
+    executionByPersona: {},
 };
 
 // 工具函数
@@ -72,14 +72,14 @@ function getExecutionSessionView() {
 
 function getExecutionSlot(action) {
     if (!action) return createEmptyExecutionSlot();
-    if (!state.executionByAction[action]) {
-        state.executionByAction[action] = createEmptyExecutionSlot();
+    if (!state.executionByPersona[action]) {
+        state.executionByPersona[action] = createEmptyExecutionSlot();
     }
-    return state.executionByAction[action];
+    return state.executionByPersona[action];
 }
 
 /** 切换「执行任务」页内不同卡片时，恢复该卡片对应的进度/结果 UI */
-function applyExecutionViewForAction(action) {
+function applyExecutionViewForPersona(action) {
     const slot = getExecutionSlot(action);
     const progressEl = $('#execution-progress');
     const resultEl = $('#execution-result');
@@ -202,16 +202,16 @@ const api = {
         }
     },
 
-    async runAgent(agent, task, filePath = '') {
-        return await WailsAPI.runTask(agent, task, filePath);
+    async runPersona(personaID, task, filePath = '') {
+        return await WailsAPI.runTaskSession(personaID, task, filePath);
     },
 
-    async runAgentStreaming(agent, task, filePath = '', onStream, onDone, onError) {
-        return await WailsAPI.runAgentSession(agent, task, filePath, onStream, onDone, onError);
+    async runPersonaStreaming(personaID, task, filePath = '', onStream, onDone, onError) {
+        return await WailsAPI.runPersonaStreaming(personaID, task, filePath, onStream, onDone, onError);
     },
 
     async runBuild(task, filePath = '', onStream, onDone, onError) {
-        return await WailsAPI.runAgentSession('build', task, filePath, onStream, onDone, onError);
+        return await WailsAPI.runPersonaStreaming('build', task, filePath, onStream, onDone, onError);
     },
 
     async cancelAgentSession() {
@@ -266,8 +266,8 @@ async function loadPageData(pageName) {
             ChatPage.onShow();
             break;
         case 'execution':
-            if (state.currentAction) {
-                applyExecutionViewForAction(state.currentAction);
+            if (state.currentPersona) {
+                applyExecutionViewForPersona(state.currentPersona);
             } else {
                 $('#execution-progress').style.display = 'none';
                 $('#execution-result').style.display = 'none';
@@ -428,8 +428,8 @@ function initExecution() {
     // 快速操作卡片
     $$('.action-card').forEach(card => {
         card.addEventListener('click', () => {
-            const action = card.dataset.action;
-            showExecutionForm(action);
+            const persona = card.dataset.persona;
+            showExecutionForm(persona);
         });
     });
 
@@ -443,64 +443,65 @@ function initExecution() {
     });
 }
 
-async function showExecutionForm(action) {
-    state.currentAction = action;
-    applyExecutionViewForAction(action);
+async function showExecutionForm(persona) {
+    state.currentPersona = persona;
+    applyExecutionViewForPersona(persona);
 
     const titles = {
-        requirements: '创建需求',
-        code: '编码实现',
-        eval: '验收评测',
+        spec: '创建需求',
+        implement: '编码实现',
+        verify: '验收评测',
         build: '完整构建',
-        pagescan: '页面扫描',
-        chat: '自由对话',
+        'ui-scan': '页面扫描',
+        dialogue: '自由对话',
     };
 
     const placeholders = {
-        requirements: '请描述需求...',
-        code: '（可选）指定实现重点...',
-        eval: '（可选）指定验收重点...',
+        spec: '请描述需求...',
+        implement: '（可选）指定实现重点...',
+        verify: '（可选）指定验收重点...',
         build: '（可选）指定构建参数...',
-        pagescan: '请用自然语言描述，例如：访问 https://app.example.com ，用户名 admin 密码 ***，登录后遍历左侧菜单，记录路由、子 Tab 和按钮，跳过「日志」菜单…',
-        chat: '请输入你的需求或问题，Agent 将直接执行...',
+        'ui-scan': '请用自然语言描述，例如：访问 https://app.example.com ，用户名 admin 密码 ***，登录后遍历左侧菜单，记录路由、子 Tab 和按钮，跳过「日志」菜单…',
+        dialogue: '请输入你的需求或问题，Agent 将直接执行...',
     };
 
-    $('#execution-form-title').textContent = titles[action] || '执行任务';
+    $('#execution-form-title').textContent = titles[persona] || '执行任务';
     $('#task-input').value = '';
-    $('#task-input').placeholder = placeholders[action] || '请输入任务描述...';
-    
-    // 除 requirements 外，任务描述均为可选
-    const taskOptional = action !== 'requirements' && action !== 'chat' && action !== 'pagescan';
+    $('#task-input').placeholder = placeholders[persona] || '请输入任务描述...';
+
+    // 除 spec / dialogue / ui-scan 外，任务描述均为可选
+    const taskOptional = persona !== 'spec' && persona !== 'dialogue' && persona !== 'ui-scan';
     const label = $('#task-input').previousElementSibling;
     if (label && label.tagName === 'LABEL') {
-        if (action === 'pagescan') {
+        if (persona === 'ui-scan') {
             label.textContent = '扫描说明';
         } else {
             label.textContent = taskOptional ? '任务描述（可选）' : '任务描述';
         }
     }
-    
-    // 根据不同的 action 显示不同的表单字段
-    await setupFormFields(action);
-    
+
+    // 根据不同的 persona 显示不同的表单字段
+    await setupFormFields(persona);
+
     $('#execution-form').style.display = 'block';
     const taskInput = $('#task-input');
     if (taskInput) {
-        taskInput.rows = action === 'pagescan' ? 8 : 4;
+        taskInput.rows = persona === 'ui-scan' ? 8 : 4;
     }
     $('#task-input').focus();
 
     $$('.action-card').forEach((c) => {
-        c.classList.toggle('action-card--active', c.dataset.action === action);
+        c.classList.toggle('action-card--active', c.dataset.persona === persona);
     });
 }
+
 
 function hideExecutionForm() {
     $('#execution-form').style.display = 'none';
 }
 
 // 设置表单字段
-async function setupFormFields(action) {
+async function setupFormFields(persona) {
     // 清除之前的动态字段
     const existingDynamicFields = $('#execution-form .form-body').querySelectorAll('.dynamic-field');
     existingDynamicFields.forEach(field => field.remove());
@@ -508,20 +509,20 @@ async function setupFormFields(action) {
     const formBody = $('#execution-form .form-body');
     const actionsDiv = formBody.querySelector('.form-actions');
     
-    if (action === 'requirements') {
+    if (persona === 'spec') {
         // 创建需求：显示已有需求文件选择
         await addRequirementsFields(formBody, actionsDiv);
-    } else if (action === 'code') {
+    } else if (persona === 'implement') {
         // 编码实现：需求文件下拉框
         await addCodeFields(formBody, actionsDiv);
-    } else if (action === 'eval') {
+    } else if (persona === 'verify') {
         // 验收评测：需求文件下拉框 + 评测文件下拉框（只读）
         await addEvalFields(formBody, actionsDiv);
-    } else if (action === 'build') {
+    } else if (persona === 'build') {
         // 完整构建：需求文件下拉框
         await addBuildFields(formBody, actionsDiv);
     }
-    // pagescan / chat: 仅文本输入框，无额外动态字段
+    // ui-scan / dialogue: 无额外动态字段
 }
 
 // 创建需求的字段
@@ -808,22 +809,22 @@ async function submitExecution() {
     const task = $('#task-input').value.trim();
     let filePath = '';
 
-    if (state.currentAction === 'pagescan' && !task) {
+    if (state.currentPersona === 'ui-scan' && !task) {
         showNotification('请用自然语言描述扫描目标、访问地址、登录方式与范围', 'error');
         return;
     }
 
-    // 根据不同的 action 获取需求路径
-    if (state.currentAction === 'requirements') {
+    // 根据不同的 persona 获取需求路径
+    if (state.currentPersona === 'spec') {
         const selectEl = $('#existing-req-select');
         filePath = selectEl ? selectEl.value : '';
-    } else if (state.currentAction === 'code') {
+    } else if (state.currentPersona === 'implement') {
         const selectEl = $('#code-req-select');
         filePath = selectEl ? selectEl.value : '';
-    } else if (state.currentAction === 'eval') {
+    } else if (state.currentPersona === 'verify') {
         const selectEl = $('#eval-req-select');
         filePath = selectEl ? selectEl.value : '';
-    } else if (state.currentAction === 'build') {
+    } else if (state.currentPersona === 'build') {
         const selectEl = $('#build-req-select');
         filePath = selectEl ? selectEl.value : '';
     }
@@ -831,9 +832,9 @@ async function submitExecution() {
     hideExecutionForm();
     showExecutionProgress();
 
-    console.log('[App] Starting execution:', state.currentAction, task, filePath);
+    console.log('[App] Starting execution:', state.currentPersona, task, filePath);
 
-    const action = state.currentAction;
+    const action = state.currentPersona;
     const view = getExecutionSessionView();
     const stopBtn = $('#stop-execution-btn');
     if (stopBtn) {
@@ -842,13 +843,13 @@ async function submitExecution() {
     }
 
     try {
-        await api.runAgentStreaming(
+        await api.runPersonaStreaming(
             action,
             task,
             filePath,
             (msg) => {
                 const slot = getExecutionSlot(action);
-                if (state.currentAction === action && view) {
+                if (state.currentPersona === action && view) {
                     view.apply(msg);
                 }
                 if (view) slot.sessionSnapshot = view.getSnapshot();
@@ -869,8 +870,8 @@ async function submitExecution() {
 }
 
 function showExecutionProgress() {
-    state.streamingAction = state.currentAction;
-    const action = state.streamingAction;
+    state.streamingPersona = state.currentPersona;
+    const action = state.streamingPersona;
     const slot = getExecutionSlot(action);
     slot.running = true;
     slot.result = null;
@@ -891,11 +892,11 @@ function hideExecutionProgress() {
 }
 
 function showExecutionResult(result, hasError) {
-    const action = state.streamingAction || state.currentAction;
+    const action = state.streamingPersona || state.currentPersona;
     const slot = getExecutionSlot(action);
     const view = getExecutionSessionView();
     slot.running = false;
-    state.streamingAction = null;
+    state.streamingPersona = null;
 
     if (view) slot.sessionSnapshot = view.getSnapshot();
 
@@ -913,7 +914,7 @@ function showExecutionResult(result, hasError) {
     const stopBtn = $('#stop-execution-btn');
     if (stopBtn) stopBtn.disabled = true;
 
-    if (state.currentAction === action) {
+    if (state.currentPersona === action) {
         if (view && slot.sessionSnapshot) view.loadSnapshot(slot.sessionSnapshot);
         renderResultToDOM(slot);
         $('#execution-result').style.display = 'block';
@@ -1930,7 +1931,7 @@ const ChatPage = (() => {
 
         try {
             await window.WailsAPI.runAgentSession(
-                'chat', text, '',
+                text,
                 (msg) => {
                     if (view) view.apply(msg);
                     if (view) snapshot = view.getSnapshot();

@@ -1,7 +1,6 @@
 // Package agent 提供子 Agent 的生命周期管理，包括 ID 生成、状态追踪和 Transcript 持久化。
 //
-// 设计对标 claude-code 的 AgentTool/runAgent.ts：
-//   - 每个子 Agent 拥有全局唯一 ID，注册于 [Registry]。
+// 每个子 Agent 拥有全局唯一 ID，注册于 [Registry]。
 //   - 完整消息历史（Transcript）保存在内存中，供 SendMessage 续接使用。
 //   - [FormatResult] 生成 <result> XML，注入父 Agent 对话历史作为 user 消息。
 package agent

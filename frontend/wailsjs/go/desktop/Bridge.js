@@ -54,16 +54,32 @@ export function ReadFile(arg1) {
   return window['go']['desktop']['Bridge']['ReadFile'](arg1);
 }
 
-export function RunAgentSession(arg1, arg2, arg3) {
-  return window['go']['desktop']['Bridge']['RunAgentSession'](arg1, arg2, arg3);
+export function RunAgentSession(arg1) {
+  return window['go']['desktop']['Bridge']['RunAgentSession'](arg1);
 }
 
-export function RunTask(arg1, arg2, arg3) {
-  return window['go']['desktop']['Bridge']['RunTask'](arg1, arg2, arg3);
+export function RunBuild(arg1, arg2) {
+  return window['go']['desktop']['Bridge']['RunBuild'](arg1, arg2);
 }
 
-export function RunTaskWithProgress(arg1, arg2, arg3) {
-  return window['go']['desktop']['Bridge']['RunTaskWithProgress'](arg1, arg2, arg3);
+export function RunImplement(arg1, arg2) {
+  return window['go']['desktop']['Bridge']['RunImplement'](arg1, arg2);
+}
+
+export function RunSpec(arg1, arg2) {
+  return window['go']['desktop']['Bridge']['RunSpec'](arg1, arg2);
+}
+
+export function RunTask(arg1) {
+  return window['go']['desktop']['Bridge']['RunTask'](arg1);
+}
+
+export function RunUIScan(arg1, arg2) {
+  return window['go']['desktop']['Bridge']['RunUIScan'](arg1, arg2);
+}
+
+export function RunVerify(arg1, arg2) {
+  return window['go']['desktop']['Bridge']['RunVerify'](arg1, arg2);
 }
 
 export function SaveFile(arg1, arg2) {
