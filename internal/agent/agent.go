@@ -101,7 +101,9 @@ func (r *Registry) Update(id ID, fn func(*Record)) bool {
 // 从而让父 Agent LLM 在下一轮 Think 阶段看到子 Agent 的输出。
 func FormatResult(id ID, description string, result query.Result) string {
 	status := string(result.StopReason)
-	if result.Err != nil {
+	if result.StopReason == query.StopAborted {
+		status = "stopped"
+	} else if result.Err != nil {
 		status = fmt.Sprintf("failed: %v", result.Err)
 	}
 	summary := fmt.Sprintf(`Agent "%s" %s（共 %d 轮）`, description, status, result.TurnCount)

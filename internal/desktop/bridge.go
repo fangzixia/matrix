@@ -26,6 +26,7 @@ type Bridge struct {
 	client           *llm.Client
 	subAgentRegistry *workeragent.Registry
 	coordinatorAsync *coordinator.AsyncSupport
+	workerRun        *coordinator.RunControl
 	mcpManager       *mcp.Manager
 	sessions         *sessionRunner
 }
@@ -55,6 +56,7 @@ func NewBridge(cfg *Config) *Bridge {
 		config:           cfg,
 		subAgentRegistry: coordinator.NewRegistry(),
 		coordinatorAsync: coordinator.NewAsyncSupport(),
+		workerRun:        coordinator.NewRunControl(),
 		mcpManager:       mcpManager,
 		sessions:         &sessionRunner{},
 	}
@@ -164,6 +166,7 @@ func (b *Bridge) buildQueryConfig(userPrompt string) (query.Config, error) {
 		ContextPolicy:      b.contextPolicy(),
 		MaxToolResultRunes: b.config.Context.MaxToolResultRunes,
 		Async:              b.coordinatorAsync,
+		RunControl:         b.workerRun,
 	}
 
 	reg := coordinator.NewParentRegistry(coordCfg)
@@ -217,6 +220,10 @@ func (b *Bridge) workspaceRoot() string {
 }
 
 func (b *Bridge) executeAgent(ctx context.Context, task string, sink query.StreamSink) query.Result {
+	if b.workerRun != nil {
+		b.workerRun.SetParent(ctx)
+		defer b.workerRun.SetParent(context.Background())
+	}
 	cfg, err := b.buildQueryConfig(b.formatUserMessage(task))
 	if err != nil {
 		return query.Result{StopReason: query.StopModelError, Err: err}

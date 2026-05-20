@@ -58,6 +58,10 @@ func (b *Bridge) runAgentSession(task string) (*RunResult, error) {
 	defer coalesced.close()
 
 	logger.Infof("SessionRunner: start session=%s", sessionID)
+	if b.workerRun != nil {
+		b.workerRun.SetParent(runCtx)
+		defer b.workerRun.SetParent(context.Background())
+	}
 	cfg, err := b.buildQueryConfig(b.formatUserMessage(task))
 	if err != nil {
 		return nil, err
