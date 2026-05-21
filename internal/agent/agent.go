@@ -48,11 +48,19 @@ type Record struct {
 	SystemPrompt string
 	// Status 是当前运行状态。
 	Status Status
+	// ParentAgentID 为派生本 Agent 的父 Worker（嵌套时非空）。
+	ParentAgentID ID
+	// ParentToolUseID 为父会话中触发 agent 工具的 tool_use id。
+	ParentToolUseID string
+	// Progress 为运行中进度（完成后仍保留最后快照）。
+	Progress Progress
 	// Result 在 Agent 完成后设置，包含最终输出和终止原因。
 	Result *query.Result
 	// Transcript 是 Agent 完成后的完整消息历史（含 assistant + tool 消息），
 	// 供 SendMessage 续接时作为 InitialMessages 传入新的 query.Run。
 	Transcript []query.Message
+	// SidechainPath 为 JSONL 旁路 transcript 路径（若已启用持久化）。
+	SidechainPath string
 	// CreatedAt 是 Agent 启动的时间戳。
 	CreatedAt time.Time
 }
@@ -80,6 +88,49 @@ func (r *Registry) Get(id ID) *Record {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.records[id]
+}
+
+// List 返回当前注册表内所有 Agent 记录的快照（按 ID 排序不稳定，调用方自行排序）。
+func (r *Registry) List() []*Record {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]*Record, 0, len(r.records))
+	for _, rec := range r.records {
+		cp := *rec
+		out = append(out, &cp)
+	}
+	return out
+}
+
+// ToSnapshot 将 Record 转为前端 DTO。
+func ToSnapshot(rec *Record) Snapshot {
+	if rec == nil {
+		return Snapshot{}
+	}
+	s := Snapshot{
+		ID:              string(rec.ID),
+		Description:     rec.Description,
+		Status:          rec.Status,
+		ParentAgentID:   string(rec.ParentAgentID),
+		ParentToolUseID: rec.ParentToolUseID,
+		Progress:        rec.Progress,
+		CreatedAt:       rec.CreatedAt.Unix(),
+		SidechainPath:   rec.SidechainPath,
+	}
+	if rec.Result != nil {
+		s.TurnCount = rec.Result.TurnCount
+		if rec.Result.Answer != "" {
+			s.AnswerPreview = truncateRunes(rec.Result.Answer, 400)
+		}
+	}
+	return s
+}
+
+func truncateRunes(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
 }
 
 // Update 通过回调函数修改已有 Agent 记录的字段；记录不存在时返回 false。

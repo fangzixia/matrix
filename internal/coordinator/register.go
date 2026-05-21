@@ -1,6 +1,9 @@
 package coordinator
 
-import "matrix/internal/tools"
+import (
+	"matrix/internal/agent"
+	"matrix/internal/tools"
+)
 
 // RegisterTools 将 Coordinator 编排工具注册到 parent 工具表。
 func RegisterTools(reg *tools.Registry, cfg Config) {
@@ -23,5 +26,20 @@ func CloneWorkerRegistry(base *tools.Registry) *tools.Registry {
 			out.Register(t)
 		}
 	}
+	return out
+}
+
+// BuildWorkerRegistry 构造 Worker 工具表；嵌套开启时为该 Worker 注册 agent/send_message/task_stop。
+func BuildWorkerRegistry(base *tools.Registry, cfg Config, workerID agent.ID) *tools.Registry {
+	out := CloneWorkerRegistry(base)
+	if !cfg.EnableNestedAgents || workerID == "" {
+		return out
+	}
+	nested := cfg
+	nested.SpawnerAgentID = workerID
+	if cfg.StreamHub != nil {
+		nested.Async = cfg.StreamHub.EnsureWorkerAsync(workerID)
+	}
+	RegisterTools(out, nested)
 	return out
 }

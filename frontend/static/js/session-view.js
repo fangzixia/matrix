@@ -36,6 +36,9 @@
         return {
             type: pick(msg, 'type', 'Type'),
             session_id: pick(msg, 'session_id', 'sessionId', 'SessionID'),
+            scope: pick(msg, 'scope', 'Scope') || 'coordinator',
+            agent_id: pick(msg, 'agent_id', 'agentId', 'AgentID'),
+            parent_agent_id: pick(msg, 'parent_agent_id', 'parentAgentId', 'ParentAgentID'),
             tool_use_id: pick(msg, 'tool_use_id', 'toolUseId', 'ToolUseID'),
             data,
             event: event ? {
@@ -74,6 +77,13 @@
             feed: [],
             result: null,
         };
+    }
+
+    function emptyWorkerState(agentId) {
+        const s = emptyState();
+        s.agentId = agentId;
+        s.status = 'streaming';
+        return s;
     }
 
     function toolStorageKey(toolUseId) {
@@ -128,7 +138,9 @@
 
     function createSessionView(rootEl, options = {}) {
         const compact = !!options.compact;
+        const subagentPanel = options.subagentPanel || null;
         const state = emptyState();
+        const workers = {};
         let markdownThrottle = null;
 
         if (!rootEl) {
@@ -156,11 +168,85 @@
 
         streamEl.appendChild(thinkingWrap);
         streamEl.appendChild(assistantEl);
+        const workersEl = document.createElement('div');
+        workersEl.className = 'session-workers';
+        workersEl.hidden = true;
+
         rootEl.appendChild(phaseEl);
+        rootEl.appendChild(workersEl);
         rootEl.appendChild(streamEl);
         rootEl.appendChild(feedEl);
 
         const thinkingBody = thinkingWrap.querySelector('.session-thinking-body');
+
+        function getWorkerUI(agentId) {
+            if (!agentId) return null;
+            if (workers[agentId]) return workers[agentId];
+            const wrap = document.createElement('details');
+            wrap.className = 'worker-stream-panel';
+            wrap.open = true;
+            wrap.innerHTML = `
+                <summary class="worker-stream-summary">
+                    <span class="worker-stream-label">Worker</span>
+                    <code class="worker-stream-id"></code>
+                </summary>
+                <div class="worker-stream-body">
+                    <div class="worker-phase"></div>
+                    <div class="worker-feed"></div>
+                </div>
+            `;
+            wrap.querySelector('.worker-stream-id').textContent = agentId;
+            workersEl.appendChild(wrap);
+            workersEl.hidden = false;
+            const ui = {
+                el: wrap,
+                state: emptyWorkerState(agentId),
+                phaseEl: wrap.querySelector('.worker-phase'),
+                feedEl: wrap.querySelector('.worker-feed'),
+            };
+            workers[agentId] = ui;
+            return ui;
+        }
+
+        function renderWorkerPhase(ui) {
+            const s = ui.state;
+            const phaseLabel = s.status === 'done' ? '已完成' : s.status === 'error' ? '失败' : '执行中';
+            const turnPart = s.turn > 0 ? `第 ${s.turn} 轮` : '';
+            ui.phaseEl.textContent = `${phaseLabel}${turnPart ? ' · ' + turnPart : ''}`;
+        }
+
+        function renderWorkerFeed(ui) {
+            ui.feedEl.innerHTML = '';
+            (ui.state.feed || []).forEach((entry) => {
+                if (entry.kind === 'tool') {
+                    const t = ui.state.tools[entry.toolKey];
+                    if (t) ui.feedEl.appendChild(createToolCardEl(t));
+                    return;
+                }
+                const row = document.createElement('div');
+                row.className = `timeline-entry timeline-${entry.kind || 'turn'}`;
+                row.innerHTML = `<span class="timeline-time">${escapeHtml(entry.time || '')}</span><span class="timeline-text">${escapeHtml(entry.summary || '')}</span>`;
+                ui.feedEl.appendChild(row);
+            });
+            ui.feedEl.scrollTop = ui.feedEl.scrollHeight;
+        }
+
+        function applyToState(targetState, targetTools, feed, msg, handlers) {
+            const data = msg.data || {};
+            if (data.type === 'turn_progress') {
+                targetState.status = 'streaming';
+                targetState.turn = data.turn || targetState.turn;
+                targetState.transition = data.transition || '';
+                if (data.summary) {
+                    const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+                    feed.push({ kind: 'turn', time, summary: `[${msg.agent_id || 'worker'}] ${data.summary}` });
+                }
+                return;
+            }
+            const toolUseId = msg.tool_use_id;
+            if (!toolUseId) return;
+            handlers.toolProgress(targetState, targetTools, feed, toolUseId, data, msg);
+        }
 
         function renderPhase() {
             const phaseLabel = state.status === 'done' ? '已完成' : state.status === 'error' ? '失败' : '执行中';
@@ -272,11 +358,66 @@
             return t;
         }
 
+        const toolProgressHandlers = {
+            toolProgress(targetState, targetTools, feed, toolUseId, data, msg) {
+                if (data.type === 'mcp_progress') {
+                    let t = targetTools[toolStorageKey(toolUseId)];
+                    if (!t) {
+                        t = {
+                            id: toolUseId,
+                            name: data.tool_name || 'tool',
+                            serverName: data.server_name || '',
+                            status: 'running',
+                            log: '',
+                        };
+                        targetTools[toolStorageKey(toolUseId)] = t;
+                        feed.push({ kind: 'tool', toolKey: toolStorageKey(toolUseId) });
+                    }
+                    if (data.status === 'failed') t.status = 'failed';
+                    else if (data.status === 'completed') t.status = 'success';
+                    else t.status = 'running';
+                    return;
+                }
+                const isToolProgress = data.type === 'tool_progress'
+                    || (data.status && data.type !== 'turn_progress' && data.type !== 'mcp_progress');
+                if (!isToolProgress) return;
+                const key = toolStorageKey(toolUseId);
+                let t = targetTools[key];
+                if (!t) {
+                    t = { id: toolUseId, name: data.tool_name || 'tool', serverName: data.server_name || '', status: 'running', log: '' };
+                    targetTools[key] = t;
+                    feed.push({ kind: 'tool', toolKey: key });
+                }
+                if (data.status === 'started') {
+                    t.status = 'running';
+                    if (data.message) appendToolLog(t, data.message);
+                } else if (data.status === 'completed' || data.status === 'failed') {
+                    t.status = data.status === 'failed' ? 'failed' : 'success';
+                    if (data.message) appendToolLog(t, data.message, data.status === 'failed' ? OUTPUT_PREVIEW_MAX : LOG_PREVIEW_MAX);
+                }
+            },
+        };
+
         function apply(rawMsg) {
             const msg = normalizeStreamMsg(rawMsg);
             if (!msg || !msg.type) return;
 
             if (msg.session_id) state.sessionId = msg.session_id;
+
+            if (msg.scope === 'worker' && msg.agent_id) {
+                const ui = getWorkerUI(msg.agent_id);
+                if (msg.type === 'progress') {
+                    applyToState(ui.state, ui.state.tools, ui.state.feed, msg, toolProgressHandlers);
+                    renderWorkerPhase(ui);
+                    renderWorkerFeed(ui);
+                    return;
+                }
+                if (msg.type === 'result') {
+                    ui.state.status = msg.is_error ? 'error' : 'done';
+                    renderWorkerPhase(ui);
+                    return;
+                }
+            }
 
             switch (msg.type) {
                 case 'progress':
@@ -421,6 +562,10 @@
             thinkingBody.textContent = '';
             assistantEl.innerHTML = '';
             feedEl.innerHTML = '';
+            workersEl.innerHTML = '';
+            workersEl.hidden = true;
+            Object.keys(workers).forEach((k) => delete workers[k]);
+            if (subagentPanel) subagentPanel.clear();
             state.status = 'streaming';
             renderPhase();
         }

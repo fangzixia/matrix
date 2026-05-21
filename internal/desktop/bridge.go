@@ -11,6 +11,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	workeragent "matrix/internal/agent"
+	"matrix/internal/audit"
 	"matrix/internal/coordinator"
 	"matrix/internal/llm"
 	"matrix/internal/mcp"
@@ -148,7 +149,7 @@ func (b *Bridge) buildWorkerRegistry() (*tools.Registry, error) {
 }
 
 // buildQueryConfig 构建 CC 对齐的 Coordinator 会话（父级 agent/send_message/task_stop，Worker 持执行类工具）。
-func (b *Bridge) buildQueryConfig(userPrompt string) (query.Config, error) {
+func (b *Bridge) buildQueryConfig(userPrompt string, sessionID string, hub *coordinator.StreamHub, auditWriter *audit.Writer) (query.Config, error) {
 	workerReg, err := b.buildWorkerRegistry()
 	if err != nil {
 		return query.Config{}, err
@@ -167,12 +168,20 @@ func (b *Bridge) buildQueryConfig(userPrompt string) (query.Config, error) {
 		MaxToolResultRunes: b.config.Context.MaxToolResultRunes,
 		Async:              b.coordinatorAsync,
 		RunControl:         b.workerRun,
+		StreamHub:          hub,
+		EnableNestedAgents: true,
+		SessionID:          sessionID,
+		Audit:              auditWriter,
 	}
 
 	reg := coordinator.NewParentRegistry(coordCfg)
 	asyncResults, hasPending := b.coordinatorAsync.QueryConfigFields()
 	prompt := coordinator.BuildParentSystemPrompt(workerOnly.Names(), b.connectedMCPServerNames())
-	logger.Infof("buildQueryConfig: parent_tools=%v worker_tools=%d", reg.Names(), len(workerOnly.Names()))
+	logger.Info("buildQueryConfig",
+		"session_id", sessionID,
+		"parent_tools", reg.Names(),
+		"worker_tools", len(workerOnly.Names()),
+	)
 
 	return query.Config{
 		LLM:                b.client,
@@ -186,6 +195,8 @@ func (b *Bridge) buildQueryConfig(userPrompt string) (query.Config, error) {
 		CanUseTool:         b.canUseTool(),
 		AsyncResults:       asyncResults,
 		HasPendingAsync:    hasPending,
+		SessionID:          sessionID,
+		Audit:              auditWriter,
 		InitialMessages: []query.Message{
 			{Role: query.RoleUser, Content: userPrompt},
 		},
@@ -224,7 +235,7 @@ func (b *Bridge) executeAgent(ctx context.Context, task string, sink query.Strea
 		b.workerRun.SetParent(ctx)
 		defer b.workerRun.SetParent(context.Background())
 	}
-	cfg, err := b.buildQueryConfig(b.formatUserMessage(task))
+	cfg, err := b.buildQueryConfig(b.formatUserMessage(task), "", nil, nil)
 	if err != nil {
 		return query.Result{StopReason: query.StopModelError, Err: err}
 	}

@@ -291,7 +291,7 @@ func execOne(
 	}
 
 	start := time.Now()
-	output, execErr := t.Execute(ctx, args)
+	output, execErr := t.Execute(ContextWithToolCallID(ctx, call.ID), args)
 	elapsed := time.Since(start).Milliseconds()
 	if execErr != nil {
 		out := execErr.Error()

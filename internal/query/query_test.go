@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -55,7 +56,7 @@ func TestObserve(t *testing.T) {
 		{ToolCallID: "id1", ToolName: "read_file", Output: "内容", IsError: false},
 		{ToolCallID: "id2", ToolName: "bash", Output: "退出异常", IsError: true},
 	}
-	msgs := observe(results, Config{})
+	msgs := observe(context.Background(), Config{}, 1, results)
 
 	if len(msgs) != 2 {
 		t.Fatalf("期望 2 条消息，实际 %d", len(msgs))
@@ -77,7 +78,7 @@ func TestObserve_Truncate(t *testing.T) {
 	results := []tools.Result{
 		{ToolCallID: "id1", ToolName: "x", Output: long},
 	}
-	msgs := observe(results, Config{MaxToolResultRunes: 20})
+	msgs := observe(context.Background(), Config{MaxToolResultRunes: 20}, 1, results)
 	if len(msgs) != 1 {
 		t.Fatalf("期望 1 条消息")
 	}

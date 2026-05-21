@@ -11,6 +11,7 @@
 package query
 
 import (
+	"matrix/internal/audit"
 	"matrix/internal/llm"
 	"matrix/internal/stream"
 	"matrix/internal/tools"
@@ -137,6 +138,8 @@ type Config struct {
 	LogPrefix string
 	// SessionID 为流式 SDK 消息的会话标识；空则由 RunSession 生成。
 	SessionID string
+	// Audit 为会话诊断 JSONL 写入器；nil 时不记录诊断事件。
+	Audit *audit.Writer
 }
 
 // StopReason 描述 TAOR 循环终止的原因。

@@ -10,6 +10,10 @@ export function CancelAgentSession() {
   return window['go']['desktop']['Bridge']['CancelAgentSession']();
 }
 
+export function ExportSessionDiagnosticToFile(arg1, arg2) {
+  return window['go']['desktop']['Bridge']['ExportSessionDiagnosticToFile'](arg1, arg2);
+}
+
 export function GetAllMCPServerStatuses() {
   return window['go']['desktop']['Bridge']['GetAllMCPServerStatuses']();
 }
@@ -26,8 +30,16 @@ export function GetRequirements() {
   return window['go']['desktop']['Bridge']['GetRequirements']();
 }
 
+export function GetSessionDiagnostic(arg1) {
+  return window['go']['desktop']['Bridge']['GetSessionDiagnostic'](arg1);
+}
+
 export function GetSettings() {
   return window['go']['desktop']['Bridge']['GetSettings']();
+}
+
+export function GetSubAgent(arg1) {
+  return window['go']['desktop']['Bridge']['GetSubAgent'](arg1);
 }
 
 export function GetWorkspace() {
@@ -46,12 +58,24 @@ export function ListMCPTools(arg1) {
   return window['go']['desktop']['Bridge']['ListMCPTools'](arg1);
 }
 
+export function ListSessionDiagnostics(arg1) {
+  return window['go']['desktop']['Bridge']['ListSessionDiagnostics'](arg1);
+}
+
+export function ListSubAgents() {
+  return window['go']['desktop']['Bridge']['ListSubAgents']();
+}
+
 export function OpenFolderDialog() {
   return window['go']['desktop']['Bridge']['OpenFolderDialog']();
 }
 
 export function ReadFile(arg1) {
   return window['go']['desktop']['Bridge']['ReadFile'](arg1);
+}
+
+export function ReadSubAgentTranscript(arg1, arg2) {
+  return window['go']['desktop']['Bridge']['ReadSubAgentTranscript'](arg1, arg2);
 }
 
 export function RunAgentSession(arg1) {
@@ -74,8 +98,8 @@ export function RunTask(arg1) {
   return window['go']['desktop']['Bridge']['RunTask'](arg1);
 }
 
-export function RunUIScan(arg1, arg2) {
-  return window['go']['desktop']['Bridge']['RunUIScan'](arg1, arg2);
+export function RunUIScan(arg1) {
+  return window['go']['desktop']['Bridge']['RunUIScan'](arg1);
 }
 
 export function RunVerify(arg1, arg2) {
@@ -92,6 +116,10 @@ export function SaveSettings(arg1) {
 
 export function SetWorkspace(arg1) {
   return window['go']['desktop']['Bridge']['SetWorkspace'](arg1);
+}
+
+export function StopSubAgent(arg1, arg2) {
+  return window['go']['desktop']['Bridge']['StopSubAgent'](arg1, arg2);
 }
 
 export function TestAllMCPServers() {

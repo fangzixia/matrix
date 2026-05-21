@@ -3,13 +3,17 @@ package desktop
 import (
 	"context"
 	"fmt"
+	"matrix/internal/audit"
 	"matrix/internal/logger"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"matrix/internal/agent"
+	"matrix/internal/coordinator"
 	"matrix/internal/query"
 	"matrix/internal/stream"
 )
@@ -21,6 +25,9 @@ type sessionRunner struct {
 	mu        sync.Mutex
 	runCancel context.CancelFunc
 	sessionID string
+	hub       *coordinator.StreamHub
+	sidechain *agent.SidechainWriter
+	audit     *audit.Writer
 }
 
 func (b *Bridge) runAgentSession(task string) (*RunResult, error) {
@@ -57,17 +64,80 @@ func (b *Bridge) runAgentSession(task string) (*RunResult, error) {
 	coalesced := newCoalesceSink(base, sessionID, 100*time.Millisecond)
 	defer coalesced.close()
 
-	logger.Infof("SessionRunner: start session=%s", sessionID)
+	ws := b.workspaceRoot()
+	sidechainRoot := filepath.Join(ws, ".matrix")
+	sidechain := agent.NewSidechainWriter(sidechainRoot)
+	auditWriter := audit.NewWriter(ws, sessionID)
+	auditWriter.UpdateMeta(audit.SessionMeta{
+		Workspace:   ws,
+		Model:       b.config.Model.Model,
+		TaskPreview: audit.Preview(task, 500),
+	})
+	auditWriter.Emit("session.start", 0, "desktop", map[string]any{
+		"task_preview": audit.Preview(task, 500),
+		"model":        b.config.Model.Model,
+		"workspace":    ws,
+	})
+
+	hub := coordinator.NewStreamHub(
+		sessionID,
+		b.subAgentRegistry,
+		sidechain,
+		coalesced,
+		nil,
+		func(snap agent.Snapshot) {
+			runtime.EventsEmit(b.ctx, subAgentUpdateEvent, toSubAgentDTO(snap))
+		},
+		func(snap agent.Snapshot) {
+			runtime.EventsEmit(b.ctx, subAgentDoneEvent, toSubAgentDTO(snap))
+		},
+	)
+	hub.Audit = auditWriter
+
+	b.sessions.mu.Lock()
+	b.sessions.hub = hub
+	b.sessions.sidechain = sidechain
+	b.sessions.audit = auditWriter
+	b.sessions.mu.Unlock()
+	defer func() {
+		b.sessions.mu.Lock()
+		b.sessions.hub = nil
+		b.sessions.sidechain = nil
+		b.sessions.audit = nil
+		b.sessions.mu.Unlock()
+	}()
+
+	runCtx = logger.With(runCtx, logger.Fields{SessionID: sessionID, Component: "desktop"})
+	logger.InfoCtx(runCtx, "SessionRunner: start", "session_id", sessionID)
+	b.subAgentRegistry = coordinator.NewRegistry()
 	if b.workerRun != nil {
 		b.workerRun.SetParent(runCtx)
 		defer b.workerRun.SetParent(context.Background())
 	}
-	cfg, err := b.buildQueryConfig(b.formatUserMessage(task))
+	cfg, err := b.buildQueryConfig(b.formatUserMessage(task), sessionID, hub, auditWriter)
 	if err != nil {
 		return nil, err
 	}
-	cfg.SessionID = sessionID
-	return b.toRunResult(query.RunSession(runCtx, cfg, coalesced))
+	start := time.Now()
+	result := query.RunSession(runCtx, cfg, coalesced)
+	dur := time.Since(start)
+	errMsg := ""
+	if result.Err != nil {
+		errMsg = result.Err.Error()
+	}
+	auditWriter.Emit("session.end", 0, "desktop", map[string]any{
+		"stop_reason": string(result.StopReason),
+		"turns":       result.TurnCount,
+		"duration_ms": dur.Milliseconds(),
+		"error":       errMsg,
+	})
+	_ = auditWriter.Close(audit.SessionMeta{
+		StopReason: string(result.StopReason),
+		TurnCount:  result.TurnCount,
+		DurationMs: dur.Milliseconds(),
+		Error:      errMsg,
+	})
+	return b.toRunResult(result)
 }
 
 // CancelAgentSession 取消当前正在运行的 Agent 会话。

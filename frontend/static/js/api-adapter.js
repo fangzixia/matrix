@@ -1,6 +1,8 @@
 // API Adapter - 桌面模式，直接调用 Go Bridge
 
 const STREAM_EVENT = 'agent:stream';
+const SUBAGENT_UPDATE = 'subagent:update';
+const SUBAGENT_DONE = 'subagent:done';
 
 const WailsAPI = {
     getMode: () => 'desktop',
@@ -54,22 +56,16 @@ const WailsAPI = {
      * 通用 Agent 流式会话；通过 agent:stream 推送过程消息。
      * @param {function(object): void} onStreamMessage
      */
-    async runAgentSession(task, onStreamMessage, onDone, onError) {
-        if (onStreamMessage) {
-            window.runtime.EventsOn(STREAM_EVENT, (msg) => {
-                onStreamMessage(msg);
-            });
-        }
-
+    async runAgentSession(task, onStreamMessage, onDone, onError, hooks = {}) {
+        this._bindStreamHooks(onStreamMessage, hooks);
         await new Promise((resolve) => setTimeout(resolve, 50));
-
         try {
             const result = await window.go.desktop.Bridge.RunAgentSession(task);
-            window.runtime.EventsOff(STREAM_EVENT);
+            this._offStreamHooks();
             if (onDone) onDone(result);
         } catch (error) {
             console.error('[API Adapter] Session error:', error);
-            window.runtime.EventsOff(STREAM_EVENT);
+            this._offStreamHooks();
             if (onError) {
                 onError({ error: error.message || '任务执行失败' });
             } else {
@@ -86,29 +82,45 @@ const WailsAPI = {
         'ui-scan': (input, file) => window.go.desktop.Bridge.RunUIScan(input, file),
     },
 
-    async runTaskSession(kind, userInput, filePath = '', onStream, onDone, onError) {
-        const run = this._taskRunners[kind];
-        if (!run) {
-            return this.runAgentSession(userInput, onStream, onDone, onError);
-        }
+    _bindStreamHooks(onStream, hooks = {}) {
         if (onStream) {
             window.runtime.EventsOn(STREAM_EVENT, (msg) => onStream(msg));
         }
+        const { onSubAgentUpdate, onSubAgentDone } = hooks;
+        if (onSubAgentUpdate) {
+            window.runtime.EventsOn(SUBAGENT_UPDATE, (snap) => onSubAgentUpdate(snap));
+        }
+        if (onSubAgentDone) {
+            window.runtime.EventsOn(SUBAGENT_DONE, (snap) => onSubAgentDone(snap));
+        }
+    },
+
+    _offStreamHooks() {
+        window.runtime.EventsOff(STREAM_EVENT);
+        window.runtime.EventsOff(SUBAGENT_UPDATE);
+        window.runtime.EventsOff(SUBAGENT_DONE);
+    },
+
+    async runTaskSession(kind, userInput, filePath = '', onStream, onDone, onError, hooks = {}) {
+        const run = this._taskRunners[kind];
+        this._bindStreamHooks(onStream, hooks);
         await new Promise((resolve) => setTimeout(resolve, 50));
         try {
-            const result = await run(userInput, filePath);
-            window.runtime.EventsOff(STREAM_EVENT);
+            const result = run
+                ? await run(userInput, filePath)
+                : await window.go.desktop.Bridge.RunAgentSession(userInput);
+            this._offStreamHooks();
             if (onDone) onDone(result);
         } catch (error) {
-            window.runtime.EventsOff(STREAM_EVENT);
+            this._offStreamHooks();
             if (onError) onError({ error: error.message || '任务执行失败' });
             else throw error;
         }
     },
 
     /** 执行任务页：按任务类型路由到对应后端入口 */
-    async runPersonaStreaming(kind, userInput, filePath = '', onStream, onDone, onError) {
-        return this.runTaskSession(kind, userInput, filePath, onStream, onDone, onError);
+    async runPersonaStreaming(kind, userInput, filePath = '', onStream, onDone, onError, hooks = {}) {
+        return this.runTaskSession(kind, userInput, filePath, onStream, onDone, onError, hooks);
     },
 
     /** @deprecated 使用 runTaskSession */
@@ -120,6 +132,25 @@ const WailsAPI = {
         if (window.go.desktop.Bridge.CancelAgentSession) {
             return window.go.desktop.Bridge.CancelAgentSession();
         }
+    },
+
+    async listSubAgents() {
+        if (window.go.desktop.Bridge.ListSubAgents) {
+            return window.go.desktop.Bridge.ListSubAgents();
+        }
+        return [];
+    },
+
+    async getSubAgent(id) {
+        return window.go.desktop.Bridge.GetSubAgent(id);
+    },
+
+    async stopSubAgent(id, reason) {
+        return window.go.desktop.Bridge.StopSubAgent(id, reason || '');
+    },
+
+    async readSubAgentTranscript(id, maxLines) {
+        return window.go.desktop.Bridge.ReadSubAgentTranscript(id, maxLines || 80);
     },
 
     async testMCPServer(serverName) {

@@ -21,8 +21,10 @@ import (
 	"time"
 
 	"matrix/internal/agent"
+	"matrix/internal/audit"
 	"matrix/internal/llm"
 	"matrix/internal/query"
+	"matrix/internal/stream"
 	"matrix/internal/tools"
 )
 
@@ -99,6 +101,16 @@ type Config struct {
 	// RunControl 跟踪 Worker 的取消函数；task_stop 与父会话取消时终止 query.Run。
 	// 由 Bridge 持有并在每次会话开始时 SetParent(sessionCtx)。
 	RunControl *RunControl
+	// StreamHub 将 Worker 过程消息推到 UI，并更新 Registry 进度（可选）。
+	StreamHub SubAgentStreamHub
+	// EnableNestedAgents 为 true 时 Worker 可再派生子 Agent（独立 Async + 编排工具）。
+	EnableNestedAgents bool
+	// SpawnerAgentID 为调用 agent 工具的 Agent（嵌套 Worker）；空表示 Coordinator 顶层派生。
+	SpawnerAgentID agent.ID
+	// SessionID 与父会话流式 channel 对齐（Worker RunSession 用）。
+	SessionID string
+	// Audit 会话诊断写入器（与父 query.Config.Audit 共享）。
+	Audit *audit.Writer
 }
 
 // ── System Prompts ────────────────────────────────────────────────────────
@@ -315,78 +327,108 @@ func makeAgentExecute(cfg Config) func(context.Context, map[string]any) (string,
 			maxTurns = int(mt)
 		}
 
+		parentAgentID := cfg.SpawnerAgentID
+		parentToolUseID := tools.ToolCallIDFromContext(ctx)
 		id := agent.NewID()
-		cfg.AgentRegistry.Register(&agent.Record{
-			ID:           id,
-			Description:  description,
-			SystemPrompt: sysPrompt,
-			Status:       agent.StatusRunning,
-			CreatedAt:    time.Now(),
-		})
 
-		// Workers 运行时不继承父级的 AsyncResults（避免注入到错误的通道）。
-		// 若需要 Worker 内部也支持异步子 Agent，需为其创建独立的 AsyncSupport。
-		subCfg := buildWorkerConfig(cfg, sysPrompt, maxTurns, prompt, string(id))
+		rec := &agent.Record{
+			ID:              id,
+			Description:     description,
+			SystemPrompt:    sysPrompt,
+			Status:          agent.StatusRunning,
+			ParentAgentID:   parentAgentID,
+			ParentToolUseID: parentToolUseID,
+			CreatedAt:       time.Now(),
+		}
+		rec.SidechainPath = SidechainPath(cfg.StreamHub, id)
+		cfg.AgentRegistry.Register(rec)
+		if cfg.StreamHub != nil {
+			cfg.StreamHub.NotifySpawn(rec)
+		}
+
+		workerReg := BuildWorkerRegistry(cfg.ToolRegistry, cfg, id)
+		var workerSink query.StreamSink = stream.NopSink{}
+		if cfg.StreamHub != nil {
+			workerSink = cfg.StreamHub.WorkerSink(string(id), string(parentAgentID), parentToolUseID)
+		}
+		subCfg := buildWorkerConfig(cfg, workerReg, sysPrompt, maxTurns, prompt, string(id), workerSink)
+
 		runWorker := func() query.Result {
 			workerCtx, end := cfg.RunControl.Begin(id)
 			defer end()
-			return query.Run(workerCtx, subCfg)
+			return query.RunSession(workerCtx, subCfg, workerSink)
+		}
+
+		finish := func(result query.Result) {
+			updateRegistry(cfg.AgentRegistry, id, result)
+			if cfg.StreamHub != nil {
+				cfg.StreamHub.NotifyDone(id)
+			}
 		}
 
 		// ── 异步路径（已配置 Coordinator Config.Async）────────────────────
-		// 异步执行子 Agent
 		if cfg.Async != nil {
 			cfg.Async.Inc()
 			go func() {
-				logger.Info("coordinator: [异步] 子 Agent 启动", "id", id, "description", description)
+				logger.Info("coordinator: async sub-agent start", "agent_id", id, "description", description)
 				result := runWorker()
-				updateRegistry(cfg.AgentRegistry, id, result)
-				logger.Info("coordinator: [异步] 子 Agent 完成",
-					"id", id, "turns", result.TurnCount, "stop", result.StopReason)
-				// 将 <result> XML 注入父 TAOR 循环（user-role 消息）
+				finish(result)
+				logger.Info("coordinator: async sub-agent done",
+					"agent_id", id, "turns", result.TurnCount, "stop_reason", result.StopReason)
 				cfg.Async.Send(query.Message{
 					Role:    query.RoleUser,
 					Content: agent.FormatResult(id, description, result),
 				})
 				cfg.Async.Dec()
 			}()
-			// 立即返回启动 ACK，不阻塞父 TAOR 循环
 			return fmt.Sprintf(
 				`<agent_launched><agent_id>%s</agent_id><description>%s</description></agent_launched>`,
 				id, description,
 			), nil
 		}
 
-		// ── 同步路径（Config.Async 为 nil）──────────────────────────────
-		logger.Info("coordinator: [同步] 子 Agent 启动", "id", id, "description", description)
+		logger.Info("coordinator: sync sub-agent start", "agent_id", id, "description", description)
 		result := runWorker()
-		updateRegistry(cfg.AgentRegistry, id, result)
-		logger.Info("coordinator: [同步] 子 Agent 完成",
-			"id", id, "turns", result.TurnCount)
+		finish(result)
+		logger.Info("coordinator: sync sub-agent done", "agent_id", id, "turns", result.TurnCount)
 		return agent.FormatResult(id, description, result), nil
 	}
 }
 
 // buildWorkerConfig 构造 Worker 的 query.Config。
-// Worker 不继承父级 AsyncResults，避免结果注入到错误的通道。
-// logLabel 用于日志与事件前缀（通常为 agent_id），便于区分父子 TAOR 循环输出。
-func buildWorkerConfig(cfg Config, sysPrompt string, maxTurns int, prompt, logLabel string) query.Config {
-	return query.Config{
+func buildWorkerConfig(
+	cfg Config,
+	workerReg *tools.Registry,
+	sysPrompt string,
+	maxTurns int,
+	prompt, logLabel string,
+	sink query.StreamSink,
+) query.Config {
+	qc := query.Config{
 		LLM:                cfg.LLM,
 		Model:              cfg.Model,
 		SystemPrompt:       sysPrompt,
-		Registry:           cfg.ToolRegistry,
+		Registry:           workerReg,
 		CanUseTool:         cfg.CanUseTool,
 		MaxTurns:           maxTurns,
 		MaxTokens:          cfg.MaxTokens,
 		ContextPolicy:      cfg.ContextPolicy,
 		MaxToolResultRunes: cfg.MaxToolResultRunes,
 		LogPrefix:          logLabel,
+		SessionID:          cfg.SessionID,
+		Audit:              cfg.Audit,
 		InitialMessages: []query.Message{
 			{Role: query.RoleUser, Content: prompt},
 		},
-		// AsyncResults 和 HasPendingAsync 故意不传：Worker 内部同步执行。
 	}
+	if cfg.EnableNestedAgents && cfg.StreamHub != nil {
+		wid := agent.ID(logLabel)
+		async := cfg.StreamHub.EnsureWorkerAsync(wid)
+		asyncResults, hasPending := async.QueryConfigFields()
+		qc.AsyncResults = asyncResults
+		qc.HasPendingAsync = hasPending
+	}
+	return qc
 }
 
 // updateRegistry 将 Agent 执行结果同步回注册表。
@@ -449,24 +491,21 @@ func makeSendMessageExecute(cfg Config) func(context.Context, map[string]any) (s
 		copy(history, rec.Transcript)
 		history = append(history, query.Message{Role: query.RoleUser, Content: message})
 
-		subCfg := query.Config{
-			LLM:                cfg.LLM,
-			Model:              cfg.Model,
-			SystemPrompt:       rec.SystemPrompt,
-			Registry:           cfg.ToolRegistry,
-			CanUseTool:         cfg.CanUseTool,
-			MaxTurns:           cfg.MaxTurns,
-			MaxTokens:          cfg.MaxTokens,
-			ContextPolicy:      cfg.ContextPolicy,
-			MaxToolResultRunes: cfg.MaxToolResultRunes,
-			LogPrefix:          string(agentID),
-			InitialMessages:    history,
+		workerReg := BuildWorkerRegistry(cfg.ToolRegistry, cfg, agentID)
+		var workerSink query.StreamSink = stream.NopSink{}
+		if cfg.StreamHub != nil {
+			workerSink = cfg.StreamHub.WorkerSink(string(agentID), string(rec.ParentAgentID), rec.ParentToolUseID)
 		}
+		subCfg := buildWorkerConfig(cfg, workerReg, rec.SystemPrompt, cfg.MaxTurns, message, string(agentID), workerSink)
+		subCfg.InitialMessages = history
 
 		workerCtx, end := cfg.RunControl.Begin(agentID)
 		defer end()
-		result := query.Run(workerCtx, subCfg)
+		result := query.RunSession(workerCtx, subCfg, workerSink)
 		updateRegistry(cfg.AgentRegistry, agentID, result)
+		if cfg.StreamHub != nil {
+			cfg.StreamHub.NotifyDone(agentID)
+		}
 
 		logger.Info("coordinator: 续接完成", "id", agentID, "turns", result.TurnCount, "stop", result.StopReason)
 		return agent.FormatResult(agentID, rec.Description+"（续接）", result), nil

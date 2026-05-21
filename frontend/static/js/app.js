@@ -60,14 +60,34 @@ function createEmptyExecutionSlot() {
 }
 
 let executionSessionView = null;
+let executionSubAgentPanel = null;
+
+function getExecutionSubAgentPanel() {
+    const root = $('#subagent-panel-root');
+    if (!root || !window.SubAgentPanel) return null;
+    if (!executionSubAgentPanel) {
+        executionSubAgentPanel = window.SubAgentPanel.create(root);
+    }
+    return executionSubAgentPanel;
+}
 
 function getExecutionSessionView() {
     const root = $('#session-view-root');
     if (!root || !window.SessionView) return null;
     if (!executionSessionView) {
-        executionSessionView = window.SessionView.create(root);
+        executionSessionView = window.SessionView.create(root, {
+            subagentPanel: getExecutionSubAgentPanel(),
+        });
     }
     return executionSessionView;
+}
+
+function subAgentStreamHooks(panel) {
+    if (!panel) return {};
+    return {
+        onSubAgentUpdate: (snap) => panel.upsert(snap),
+        onSubAgentDone: (snap) => panel.upsert(snap),
+    };
 }
 
 function getExecutionSlot(action) {
@@ -843,6 +863,7 @@ async function submitExecution() {
     }
 
     try {
+        const panel = getExecutionSubAgentPanel();
         await api.runPersonaStreaming(
             action,
             task,
@@ -861,7 +882,8 @@ async function submitExecution() {
             (error) => {
                 if (stopBtn) stopBtn.disabled = true;
                 showExecutionResult(error, true);
-            }
+            },
+            subAgentStreamHooks(panel)
         );
     } catch (error) {
         if (stopBtn) stopBtn.disabled = true;
@@ -883,6 +905,12 @@ function showExecutionProgress() {
 
     const view = getExecutionSessionView();
     if (view) view.reset();
+    const panel = getExecutionSubAgentPanel();
+    if (panel && api.listSubAgents) {
+        api.listSubAgents().then((list) => {
+            (list || []).forEach((s) => panel.upsert(s));
+        }).catch(() => {});
+    }
 }
 
 function hideExecutionProgress() {
@@ -1759,6 +1787,16 @@ const ChatPage = (() => {
     let activeId = null;
     let isRunning = false;
     let chatSessionView = null;
+    let chatSubAgentPanel = null;
+
+    function getChatSubAgentPanel() {
+        const root = document.querySelector('#chat-subagent-panel-root');
+        if (!root || !window.SubAgentPanel) return null;
+        if (!chatSubAgentPanel) {
+            chatSubAgentPanel = window.SubAgentPanel.create(root);
+        }
+        return chatSubAgentPanel;
+    }
 
     function getChatSessionView() {
         const panel = document.querySelector('#chat-session-panel');
@@ -1930,6 +1968,8 @@ const ChatPage = (() => {
         let snapshot = null;
 
         try {
+            const chatSubPanel = getChatSubAgentPanel();
+            if (chatSubPanel) chatSubPanel.clear();
             await window.WailsAPI.runAgentSession(
                 text,
                 (msg) => {
@@ -1964,7 +2004,8 @@ const ChatPage = (() => {
                     renderMessages();
                     isRunning = false;
                     setSendDisabled(false);
-                }
+                },
+                subAgentStreamHooks(chatSubPanel)
             );
         } catch (e) {
             if (panelEl) panelEl.style.display = 'none';

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Build Agent - Web 项目开发闭环</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/style.css?v=20260520-feed">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260521-layoutfix">
 </head>
 <body>
     <div class="app">
@@ -107,13 +107,16 @@
                         </div>
                         <!-- 右侧对话区 -->
                         <div class="chat-main">
-                            <div class="chat-messages" id="chat-messages">
-                                <div class="chat-empty" id="chat-empty">
-                                    <div class="chat-empty-icon">💬</div>
-                                    <p>输入任何需求，协调者将动态委派 Worker 执行</p>
+                            <div class="chat-scroll-area">
+                                <div class="chat-messages" id="chat-messages">
+                                    <div class="chat-empty" id="chat-empty">
+                                        <div class="chat-empty-icon">💬</div>
+                                        <p>输入任何需求，协调者将动态委派 Worker 执行</p>
+                                    </div>
                                 </div>
+                                <div id="chat-subagent-panel-root" class="subagent-panel-root"></div>
+                                <div class="chat-session-panel" id="chat-session-panel" style="display:none;"></div>
                             </div>
-                            <div class="chat-session-panel" id="chat-session-panel" style="display:none;"></div>
                             <div class="chat-input-area">
                                 <textarea class="chat-input" id="chat-input" rows="3" placeholder="输入需求或问题，Shift+Enter 换行，Enter 发送..."></textarea>
                                 <button class="btn btn-primary chat-send-btn" id="chat-send-btn">
@@ -186,7 +189,10 @@
                                 <button class="btn btn-secondary btn-sm" id="stop-execution-btn" disabled>停止</button>
                             </div>
                         </div>
-                        <div id="session-view-root" class="session-view-root"></div>
+                        <div class="execution-progress-body">
+                            <div id="subagent-panel-root" class="subagent-panel-root"></div>
+                            <div id="session-view-root" class="session-view-root"></div>
+                        </div>
                     </div>
 
                     <!-- 执行结果 -->
@@ -440,8 +446,9 @@
     </div>
 
     <script src="/static/js/marked.min.js"></script>
-    <script src="/static/js/session-view.js?v=20260520-feedfix"></script>
-    <script src="/static/js/api-adapter.js?v=20260520-stream"></script>
+    <script src="/static/js/subagent-panel.js?v=20260521-layoutfix"></script>
+    <script src="/static/js/session-view.js?v=20260521-layoutfix"></script>
+    <script src="/static/js/api-adapter.js?v=20260521-subagent"></script>
     <script src="/static/js/app.js?v=20260520-chatmd"></script>
 </body>
 </html>

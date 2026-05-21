@@ -13,8 +13,12 @@ import (
 
 func TestLLMCompactHistory(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"choices":[{"message":{"content":"用户要修登录 bug"},"finish_reason":"stop"}]}`)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w,
+			`data: {"choices":[{"delta":{"content":"用户要修登录 bug"},"finish_reason":null}]}`+"\n\n",
+			`data: {"choices":[{"delta":{},"finish_reason":"stop"}]}`+"\n\n",
+			"data: [DONE]\n\n",
+		)
 	}))
 	defer srv.Close()
 

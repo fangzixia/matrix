@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"fmt"
+	"matrix/internal/audit"
 	"matrix/internal/logger"
 	"strings"
 	"time"
@@ -31,22 +32,6 @@ func sessionID(cfg Config) string {
 	return uuid.NewString()
 }
 
-// drainAsyncResults 非阻塞地消费 ch 中所有已就绪的消息，
-// 将其作为 user 消息追加到 msgs 并返回更新后的切片。
-func drainAsyncResults(msgs []Message, ch <-chan Message, maxRunes int) []Message {
-	if ch == nil {
-		return msgs
-	}
-	for {
-		select {
-		case msg := <-ch:
-			msgs = append(msgs, truncateAsyncMessage(msg, maxRunes))
-		default:
-			return msgs
-		}
-	}
-}
-
 // Run 启动 TAOR 会话并阻塞直到循环终止（不推送流式消息）。
 func Run(ctx context.Context, cfg Config) Result {
 	return RunSession(ctx, cfg, stream.NopSink{})
@@ -60,10 +45,21 @@ func RunSession(ctx context.Context, cfg Config, sink StreamSink) Result {
 	if cfg.SessionID == "" {
 		cfg.SessionID = sessionID(cfg)
 	}
+	ctx = logger.With(ctx, logger.Fields{
+		SessionID: cfg.SessionID,
+		Component: auditComponent(cfg),
+	})
 	start := time.Now()
 	result := queryLoop(ctx, cfg, sink)
 	publishResult(ctx, cfg.SessionID, sink, result, start)
 	return result
+}
+
+func auditComponent(cfg Config) string {
+	if strings.TrimSpace(cfg.LogPrefix) != "" {
+		return "coordinator:" + cfg.LogPrefix
+	}
+	return "query"
 }
 
 func publishResult(ctx context.Context, sid string, sink StreamSink, r Result, start time.Time) {
@@ -120,7 +116,7 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 		prepareHistoryForRequest(ctx, cfg, &s.messages)
 
 		if cfg.MaxTurns > 0 && s.turnCount > cfg.MaxTurns {
-			logger.Info("loop: 达到最大轮次", "turns", s.turnCount)
+			logger.InfoCtx(ctx, "loop: max turns reached", "turns", s.turnCount)
 			return Result{StopReason: StopMaxTurns, TurnCount: s.turnCount, Messages: s.messages}
 		}
 
@@ -128,14 +124,25 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 		summary := fmt.Sprintf("%s第 %d 轮（跃迁: %s）", logLinePrefix(cfg), s.turnCount, trans)
 		publish(ctx, sink, stream.TurnProgress(sid, s.turnCount, trans, summary))
 
-		logger.Info("loop: 循环迭代",
-			"标签", cfg.LogPrefix,
-			"轮次", s.turnCount,
-			"消息数", len(s.messages),
-			"跃迁", trans,
+		ctx = logger.With(ctx, logger.Fields{
+			SessionID: sid,
+			Turn:      s.turnCount,
+			Component: auditComponent(cfg),
+		})
+		if cfg.Audit != nil {
+			cfg.Audit.Emit("turn.iteration", s.turnCount, auditComponent(cfg), map[string]any{
+				"transition":    trans,
+				"message_count": len(s.messages),
+				"log_prefix":    cfg.LogPrefix,
+			})
+		}
+		logger.InfoCtx(ctx, "loop: iteration",
+			"log_prefix", cfg.LogPrefix,
+			"message_count", len(s.messages),
+			"transition", trans,
 		)
 
-		turn, err := think(ctx, cfg, s.messages, sink)
+		turn, err := think(ctx, cfg, s.turnCount, s.messages, sink)
 		if err != nil {
 			return Result{StopReason: StopModelError, TurnCount: s.turnCount, Err: err, Messages: s.messages}
 		}
@@ -155,7 +162,7 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 
 		if !needsFollowUp {
 			if blockingErr := report(s.messages, cfg.StopHook); blockingErr != "" {
-				logger.Info("loop: stop hook 阻塞，重新进入循环", "error", blockingErr)
+				logger.InfoCtx(ctx, "loop: stop hook blocking", "error", blockingErr)
 				reason := TransitionStopHookBlocking
 				s = state{
 					messages: append(s.messages, Message{
@@ -169,25 +176,24 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 			}
 
 			prevLen := len(s.messages)
-			s.messages = drainAsyncResults(s.messages, cfg.AsyncResults, cfg.ContextPolicy.MaxAsyncResultRunes)
+			s.messages = drainAsyncResults(cfg, s.turnCount, s.messages, cfg.AsyncResults, cfg.ContextPolicy.MaxAsyncResultRunes)
 
 			if len(s.messages) > prevLen {
-				logger.Info("loop: 收到异步 Agent 结果，继续循环",
-					"新消息数", len(s.messages)-prevLen)
+				logger.InfoCtx(ctx, "loop: async results drained", "new_messages", len(s.messages)-prevLen)
 				continue
 			}
 
 			if cfg.HasPendingAsync != nil && cfg.HasPendingAsync() {
-				logger.Info("loop: 等待异步子 Agent 完成...")
+				logger.InfoCtx(ctx, "loop: waiting for async sub-agents")
 				select {
 				case <-ctx.Done():
 					return Result{StopReason: StopAborted, TurnCount: s.turnCount,
 						Err: ctx.Err(), Messages: s.messages}
 				case msg := <-cfg.AsyncResults:
+					emitAsyncAudit(cfg, s.turnCount, msg)
 					s.messages = append(s.messages, truncateAsyncMessage(msg, cfg.ContextPolicy.MaxAsyncResultRunes))
-					s.messages = drainAsyncResults(s.messages, cfg.AsyncResults, cfg.ContextPolicy.MaxAsyncResultRunes)
-					logger.Info("loop: 异步结果已注入，继续循环",
-						"当前消息数", len(s.messages))
+					s.messages = drainAsyncResults(cfg, s.turnCount, s.messages, cfg.AsyncResults, cfg.ContextPolicy.MaxAsyncResultRunes)
+					logger.InfoCtx(ctx, "loop: async result injected", "message_count", len(s.messages))
 					continue
 				}
 			}
@@ -200,22 +206,46 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 			}
 		}
 
-		toolResults := act(ctx, cfg, turn.ToolCalls, sink)
-		observeMsgs := observe(toolResults, cfg)
+		toolResults := act(ctx, cfg, s.turnCount, turn.ToolCalls, sink)
+		observeMsgs := observe(ctx, cfg, s.turnCount, toolResults)
 
 		next := TransitionNextTurn
 		allMsgs := append(s.messages, observeMsgs...)
-		allMsgs = drainAsyncResults(allMsgs, cfg.AsyncResults, cfg.ContextPolicy.MaxAsyncResultRunes)
+		allMsgs = drainAsyncResults(cfg, s.turnCount, allMsgs, cfg.AsyncResults, cfg.ContextPolicy.MaxAsyncResultRunes)
 		s = state{
 			messages:   allMsgs,
 			turnCount:  s.turnCount + 1,
 			transition: &next,
 		}
 
-		logger.Info("loop: 本轮完成",
-			"轮次", s.turnCount-1,
-			"工具调用数", len(turn.ToolCalls),
+		logger.InfoCtx(ctx, "loop: turn completed",
+			"completed_turn", s.turnCount-1,
+			"tool_calls", len(turn.ToolCalls),
 		)
+	}
+}
+
+func emitAsyncAudit(cfg Config, turn int, msg Message) {
+	if cfg.Audit == nil {
+		return
+	}
+	cfg.Audit.Emit("async.result", turn, auditComponent(cfg), map[string]any{
+		"result_preview": audit.Preview(msg.Content, 500),
+	})
+}
+
+func drainAsyncResults(cfg Config, turn int, msgs []Message, ch <-chan Message, maxRunes int) []Message {
+	if ch == nil {
+		return msgs
+	}
+	for {
+		select {
+		case msg := <-ch:
+			emitAsyncAudit(cfg, turn, msg)
+			msgs = append(msgs, truncateAsyncMessage(msg, maxRunes))
+		default:
+			return msgs
+		}
 	}
 }
 
@@ -234,11 +264,20 @@ func toolCallsToBlocks(calls []llm.ToolCall) []stream.ToolUseBlock {
 func think(
 	ctx context.Context,
 	cfg Config,
+	turn int,
 	history []Message,
 	sink StreamSink,
 ) (*llm.AssistantTurn, error) {
 	sid := cfg.SessionID
-	logger.Info("loop: T — 调用模型", "model", cfg.Model, "历史长度", len(history))
+	tokensEst := estimateRequestTokens(cfg, history)
+	if cfg.Audit != nil {
+		cfg.Audit.Emit("turn.llm_request", turn, auditComponent(cfg), map[string]any{
+			"model":       cfg.Model,
+			"history_len": len(history),
+			"tokens_est":  tokensEst,
+		})
+	}
+	logger.InfoCtx(ctx, "loop: llm request", "model", cfg.Model, "history_len", len(history), "tokens_est", tokensEst)
 
 	req := llm.ChatRequest{
 		Model:     cfg.Model,
@@ -274,10 +313,18 @@ func think(
 		return nil, fmt.Errorf("loop: 模型流结束但未收到完整 turn")
 	}
 
-	logger.Info("loop: T — 完成",
+	if cfg.Audit != nil {
+		cfg.Audit.Emit("turn.llm_response", turn, auditComponent(cfg), map[string]any{
+			"finish_reason":    finalTurn.FinishReason,
+			"tool_calls":       len(finalTurn.ToolCalls),
+			"content_preview":  audit.Preview(finalTurn.Content, 300),
+			"thinking_preview": audit.Preview(finalTurn.Thinking, 300),
+		})
+	}
+	logger.InfoCtx(ctx, "loop: llm response",
 		"finish_reason", finalTurn.FinishReason,
-		"工具调用数", len(finalTurn.ToolCalls),
-		"文本长度", len(finalTurn.Content),
+		"tool_calls", len(finalTurn.ToolCalls),
+		"content_len", len(finalTurn.Content),
 	)
 	return finalTurn, nil
 }
@@ -285,6 +332,7 @@ func think(
 func act(
 	ctx context.Context,
 	cfg Config,
+	turn int,
 	toolCalls []llm.ToolCall,
 	sink StreamSink,
 ) []tools.Result {
@@ -292,7 +340,15 @@ func act(
 		return nil
 	}
 	sid := cfg.SessionID
-	logger.Info("loop: A — 执行工具", "数量", len(toolCalls))
+	logger.InfoCtx(ctx, "loop: tool execution", "count", len(toolCalls))
+	for _, tc := range toolCalls {
+		if cfg.Audit != nil {
+			cfg.Audit.EmitWithTool("turn.tool_call", turn, auditComponent(cfg), tc.ID, map[string]any{
+				"tool_name":     tc.Function.Name,
+				"input_preview": audit.Preview(tc.Function.Arguments, 500),
+			})
+		}
+	}
 
 	onProgress := func(toolUseID string, data stream.ToolProgressData) {
 		msg := stream.Message{
@@ -307,17 +363,24 @@ func act(
 
 	results := tools.RunTools(ctx, toolCalls, cfg.Registry, cfg.CanUseTool, onProgress)
 	for _, r := range results {
-		logger.Info("loop: A — 工具结果", "工具", r.ToolName, "错误", r.IsError)
+		logger.InfoCtx(ctx, "loop: tool result", "tool_name", r.ToolName, "is_error", r.IsError)
 	}
 	return results
 }
 
-func observe(results []tools.Result, cfg Config) []Message {
+func observe(ctx context.Context, cfg Config, turn int, results []tools.Result) []Message {
 	msgs := make([]Message, 0, len(results))
 	for _, r := range results {
 		out := r.Output
 		if cfg.MaxToolResultRunes > 0 {
 			out = truncateRunes(out, cfg.MaxToolResultRunes)
+		}
+		if cfg.Audit != nil {
+			cfg.Audit.EmitWithTool("turn.tool_result", turn, auditComponent(cfg), r.ToolCallID, map[string]any{
+				"tool_name":      r.ToolName,
+				"is_error":       r.IsError,
+				"output_preview": audit.Preview(r.Output, 500),
+			})
 		}
 		msgs = append(msgs, Message{
 			Role:       RoleTool,
@@ -327,7 +390,7 @@ func observe(results []tools.Result, cfg Config) []Message {
 			IsError:    r.IsError,
 		})
 	}
-	logger.Info("loop: O — 观察完成", "结果数", len(msgs))
+	logger.InfoCtx(ctx, "loop: observe done", "result_count", len(msgs))
 	return msgs
 }
 

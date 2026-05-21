@@ -2,6 +2,7 @@
 package stream
 
 import (
+	"context"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,11 +44,22 @@ const (
 	ResultError         = "error"
 )
 
+// Scope 区分 Coordinator 主会话与子 Worker 流式消息。
+type Scope string
+
+const (
+	ScopeCoordinator Scope = "coordinator"
+	ScopeWorker      Scope = "worker"
+)
+
 // Message 为 Wails agent:stream 事件的 JSON 载荷。
 type Message struct {
 	Type            string  `json:"type"`
 	SessionID       string  `json:"session_id,omitempty"`
 	UUID            string  `json:"uuid,omitempty"`
+	Scope           Scope   `json:"scope,omitempty"`
+	AgentID         string  `json:"agent_id,omitempty"`
+	ParentAgentID   string  `json:"parent_agent_id,omitempty"`
 	ParentToolUseID *string `json:"parent_tool_use_id,omitempty"`
 
 	// progress
@@ -128,7 +140,34 @@ func base(sessionID string) Message {
 	return Message{
 		SessionID: sessionID,
 		UUID:      newUUID(),
+		Scope:     ScopeCoordinator,
 	}
+}
+
+// WithAgent 为消息打上子 Agent 归属标签（供 Worker 流式推送）。
+func WithAgent(m Message, agentID, parentAgentID, parentToolUseID string) Message {
+	m.Scope = ScopeWorker
+	m.AgentID = agentID
+	m.ParentAgentID = parentAgentID
+	if parentToolUseID != "" {
+		m.ParentToolUseID = &parentToolUseID
+	}
+	return m
+}
+
+// TagSink 包装 Sink，为每条出站消息附加 Agent 元数据。
+type TagSink struct {
+	Inner           Sink
+	AgentID         string
+	ParentAgentID   string
+	ParentToolUseID string
+}
+
+func (t TagSink) Publish(ctx context.Context, msg Message) error {
+	if t.Inner == nil {
+		return nil
+	}
+	return t.Inner.Publish(ctx, WithAgent(msg, t.AgentID, t.ParentAgentID, t.ParentToolUseID))
 }
 
 // TurnProgress 新一轮 TAOR 迭代开始。

@@ -475,6 +475,29 @@ body {
     border-radius: var(--border-radius);
     box-shadow: var(--shadow-lg);
     padding: 24px;
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 220px);
+    min-height: 0;
+}
+
+.execution-progress-body {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow: hidden;
+}
+
+.execution-progress .session-view-root {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--border-radius);
+    padding: 12px;
+    background: var(--gray-50);
 }
 
 .progress-header {
@@ -575,16 +598,204 @@ body {
     gap: 8px;
 }
 
+/* SubAgent 后台任务面板 */
+.subagent-panel-root {
+    margin-bottom: 0;
+    flex-shrink: 0;
+}
+
+.execution-progress .subagent-panel-root,
+.chat-scroll-area .subagent-panel-root {
+    flex-shrink: 0;
+}
+
+.subagent-panel {
+    border: 1px solid var(--gray-200);
+    border-radius: var(--border-radius);
+    background: #f8fafc;
+    padding: 10px 12px;
+}
+
+.subagent-panel-empty .subagent-list {
+    display: none;
+}
+
+.subagent-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gray-700);
+}
+
+.subagent-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.subagent-card {
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 12px;
+}
+
+.subagent-card.subagent-running {
+    border-left: 3px solid var(--primary-color);
+}
+
+.subagent-card.subagent-completed {
+    border-left: 3px solid #10b981;
+}
+
+.subagent-card.subagent-failed,
+.subagent-card.subagent-stopped {
+    border-left: 3px solid #ef4444;
+}
+
+.subagent-card-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.subagent-id {
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+}
+
+.subagent-desc {
+    margin-top: 4px;
+    color: var(--gray-700);
+}
+
+.subagent-meta {
+    margin-top: 4px;
+    color: var(--gray-500);
+}
+
+.subagent-parent {
+    display: block;
+    font-size: 11px;
+    color: var(--gray-500);
+    margin-top: 2px;
+}
+
+.subagent-actions {
+    margin-top: 6px;
+    display: flex;
+    gap: 6px;
+}
+
+.subagent-transcript {
+    margin-top: 8px;
+    max-height: 160px;
+    overflow: auto;
+    font-size: 10px;
+    background: var(--gray-50);
+    padding: 6px;
+    border-radius: 4px;
+    white-space: pre-wrap;
+}
+
+.subagent-empty {
+    font-size: 12px;
+    color: var(--gray-500);
+}
+
+/* Worker 流式嵌套面板 */
+.session-workers {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.worker-stream-panel {
+    border: 1px dashed var(--gray-300);
+    border-radius: var(--border-radius);
+    background: #fffbeb;
+    padding: 8px 10px;
+}
+
+.worker-stream-summary {
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.worker-stream-id {
+    margin-left: 6px;
+    font-size: 11px;
+}
+
+.worker-stream-body {
+    margin-top: 8px;
+}
+
+.worker-phase {
+    font-size: 12px;
+    color: #b45309;
+    margin-bottom: 6px;
+}
+
+.worker-feed {
+    max-height: 180px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.worker-feed .tool-card {
+    width: 100%;
+    box-sizing: border-box;
+}
+
 /* SessionView（Agent 流式消息） */
-.session-view-root,
+.session-view-root {
+    min-height: 0;
+}
+
 .chat-session-panel {
-    min-height: 120px;
+    flex-shrink: 0;
+    min-height: 0;
 }
 
 .session-view {
     display: flex;
     flex-direction: column;
     gap: 12px;
+    min-height: 0;
+    max-height: min(52vh, 480px);
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.session-view-compact {
+    max-height: min(42vh, 360px);
+    gap: 8px;
+    font-size: 13px;
+}
+
+.session-view-compact .session-stream {
+    max-height: 140px;
+}
+
+.session-view-compact .session-feed {
+    max-height: 180px;
+}
+
+.session-view-compact .session-workers {
+    max-height: 200px;
+    overflow-y: auto;
 }
 
 .session-phase {
@@ -626,8 +837,10 @@ body {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    max-height: 360px;
+    max-height: 280px;
     overflow-y: auto;
+    overflow-x: hidden;
+    position: relative;
 }
 
 .session-feed .timeline-entry {
@@ -738,10 +951,27 @@ body {
 }
 
 .chat-session-panel {
-    margin: 8px 16px;
+    flex-shrink: 0;
+    margin: 0 16px 12px;
     padding: 12px;
     background: var(--gray-50);
+    border: 1px solid var(--gray-200);
     border-radius: var(--border-radius);
+    max-height: min(45vh, 400px);
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.chat-scroll-area .subagent-panel-root {
+    margin: 0 16px 8px;
+}
+
+.chat-scroll-area .subagent-panel {
+    max-height: 180px;
+}
+
+.chat-scroll-area .subagent-list {
+    max-height: 140px;
 }
 
 /* 执行结果 */
@@ -1904,16 +2134,26 @@ body {
     flex: 1;
     display: flex;
     flex-direction: column;
+    min-height: 0;
     background: white;
     border-radius: var(--border-radius);
     box-shadow: var(--shadow);
     overflow: hidden;
 }
 
-.chat-messages {
-    flex: 1;
+.chat-scroll-area {
+    flex: 1 1 0;
+    min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.chat-messages {
+    flex: 0 1 auto;
+    min-height: 80px;
+    overflow: visible;
     padding: 20px;
     display: flex;
     flex-direction: column;
@@ -2034,11 +2274,16 @@ body {
 }
 
 .chat-input-area {
+    flex-shrink: 0;
     display: flex;
     gap: 10px;
     padding: 16px;
     border-top: 1px solid var(--gray-200);
-    align-items: center;
+    align-items: flex-end;
+    background: white;
+    position: relative;
+    z-index: 4;
+    box-shadow: 0 -4px 12px rgba(15, 23, 42, 0.06);
 }
 
 .chat-input {

@@ -50,7 +50,17 @@ func prepareHistoryForRequest(ctx context.Context, cfg Config, msgs *[]Message) 
 	stats.AfterTokens = estimateRequestTokens(cfg, *msgs)
 
 	if stats.Compacted {
-		logger.Info("query: context pipeline compacted history",
+		data := map[string]any{
+			"before_tokens_est": stats.BeforeTokens,
+			"after_tokens_est":  stats.AfterTokens,
+			"hard_compacted":    stats.HardCompacted,
+			"llm_compacted":     stats.LLMCompacted,
+			"messages":          len(*msgs),
+		}
+		if cfg.Audit != nil {
+			cfg.Audit.Emit("context.compact", 0, auditComponent(cfg), data)
+		}
+		logger.InfoCtx(ctx, "query: context pipeline compacted",
 			"before_tokens_est", stats.BeforeTokens,
 			"after_tokens_est", stats.AfterTokens,
 			"hard_compacted", stats.HardCompacted,

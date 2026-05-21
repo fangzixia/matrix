@@ -56,15 +56,35 @@ func initLogger() error {
 		opts.AddSource = true
 	}
 
-	h := slog.NewTextHandler(w, opts)
+	useJSON := false
+	switch logFormat() {
+	case "json":
+		useJSON = true
+	case "text":
+		useJSON = false
+	default:
+		useJSON = !dev
+	}
+	var h slog.Handler
+	if useJSON {
+		h = slog.NewJSONHandler(w, opts)
+	} else {
+		h = slog.NewTextHandler(w, opts)
+	}
 	slog.SetDefault(slog.New(h))
 
 	slog.Info("logger: initialized",
 		"dev", dev,
 		"file", logFile,
 		"dual_write", dev,
+		"format", map[bool]string{true: "json", false: "text"}[useJSON],
 	)
 	return nil
+}
+
+// logFormat reads MATRIX_LOG_FORMAT (text|json); empty defaults to json in prod path above.
+func logFormat() string {
+	return strings.ToLower(strings.TrimSpace(os.Getenv("MATRIX_LOG_FORMAT")))
 }
 
 func logFilePath() (dir, file string, err error) {
