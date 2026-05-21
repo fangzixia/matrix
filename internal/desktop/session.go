@@ -30,12 +30,18 @@ type sessionRunner struct {
 	audit     *audit.Writer
 }
 
-func (b *Bridge) runAgentSession(task string) (*RunResult, error) {
+// persistChatFn 在 Agent 成功结束后持久化多轮 transcript。
+type persistChatFn func(query.Result) error
+
+func (b *Bridge) runAgentSession(initial []query.Message, chatSessionID string, persist persistChatFn) (*RunResult, error) {
 	if b.sessions == nil {
 		b.sessions = &sessionRunner{}
 	}
 	if b.client == nil {
 		return nil, errNoAPIKey()
+	}
+	if len(initial) == 0 {
+		return nil, fmt.Errorf("会话消息不能为空")
 	}
 
 	b.sessions.mu.Lock()
@@ -44,7 +50,10 @@ func (b *Bridge) runAgentSession(task string) (*RunResult, error) {
 	}
 	runCtx, cancel := context.WithCancel(b.ctx)
 	b.sessions.runCancel = cancel
-	sessionID := uuid.NewString()
+	sessionID := chatSessionID
+	if sessionID == "" {
+		sessionID = uuid.NewString()
+	}
 	b.sessions.sessionID = sessionID
 	b.sessions.mu.Unlock()
 
@@ -68,15 +77,18 @@ func (b *Bridge) runAgentSession(task string) (*RunResult, error) {
 	sidechainRoot := filepath.Join(ws, ".matrix")
 	sidechain := agent.NewSidechainWriter(sidechainRoot)
 	auditWriter := audit.NewWriter(ws, sessionID)
+	taskPreview := audit.Preview(initial[len(initial)-1].Content, 500)
 	auditWriter.UpdateMeta(audit.SessionMeta{
 		Workspace:   ws,
 		Model:       b.config.Model.Model,
-		TaskPreview: audit.Preview(task, 500),
+		TaskPreview: taskPreview,
 	})
 	auditWriter.Emit("session.start", 0, "desktop", map[string]any{
-		"task_preview": audit.Preview(task, 500),
-		"model":        b.config.Model.Model,
-		"workspace":    ws,
+		"task_preview":    taskPreview,
+		"model":           b.config.Model.Model,
+		"workspace":       ws,
+		"chat_session_id": chatSessionID,
+		"history_len":     len(initial),
 	})
 
 	hub := coordinator.NewStreamHub(
@@ -108,13 +120,17 @@ func (b *Bridge) runAgentSession(task string) (*RunResult, error) {
 	}()
 
 	runCtx = logger.With(runCtx, logger.Fields{SessionID: sessionID, Component: "desktop"})
-	logger.InfoCtx(runCtx, "SessionRunner: start", "session_id", sessionID)
+	logger.InfoCtx(runCtx, "SessionRunner: start",
+		"session_id", sessionID,
+		"chat_session_id", chatSessionID,
+		"initial_messages", len(initial),
+	)
 	b.subAgentRegistry = coordinator.NewRegistry()
 	if b.workerRun != nil {
 		b.workerRun.SetParent(runCtx)
 		defer b.workerRun.SetParent(context.Background())
 	}
-	cfg, err := b.buildQueryConfig(b.formatUserMessage(task), sessionID, hub, auditWriter)
+	cfg, err := b.buildQueryConfig(initial, sessionID, hub, auditWriter)
 	if err != nil {
 		return nil, err
 	}
@@ -137,6 +153,13 @@ func (b *Bridge) runAgentSession(task string) (*RunResult, error) {
 		DurationMs: dur.Milliseconds(),
 		Error:      errMsg,
 	})
+
+	if persist != nil && result.Err == nil && result.StopReason != query.StopAborted && len(result.Messages) > 0 {
+		if err := persist(result); err != nil {
+			logger.Warnf("chat transcript persist failed: %v", err)
+		}
+	}
+
 	return b.toRunResult(result)
 }
 

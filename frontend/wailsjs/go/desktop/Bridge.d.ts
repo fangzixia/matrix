@@ -7,6 +7,8 @@ export function CallMCPTool(arg1:string,arg2:string,arg3:Record<string, any>):Pr
 
 export function CancelAgentSession():Promise<void>;
 
+export function ClearChatSession(arg1:string):Promise<void>;
+
 export function ExportSessionDiagnosticToFile(arg1:string,arg2:string):Promise<string>;
 
 export function GetAllMCPServerStatuses():Promise<Record<string, desktop.MCPServerStatus>>;
@@ -44,6 +46,8 @@ export function ReadSubAgentTranscript(arg1:string,arg2:number):Promise<string>;
 export function RunAgentSession(arg1:string):Promise<desktop.RunResult>;
 
 export function RunBuild(arg1:string,arg2:string):Promise<desktop.RunResult>;
+
+export function RunChatSession(arg1:desktop.ChatSessionRequest):Promise<desktop.RunResult>;
 
 export function RunImplement(arg1:string,arg2:string):Promise<desktop.RunResult>;
 

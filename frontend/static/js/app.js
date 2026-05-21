@@ -1838,8 +1838,19 @@ const ChatPage = (() => {
         sessions = sessions.filter(s => s.id !== id);
         if (activeId === id) activeId = sessions.length > 0 ? sessions[0].id : null;
         save();
+        if (window.WailsAPI.clearChatSession) {
+            window.WailsAPI.clearChatSession(id).catch(() => {});
+        }
         renderSidebar();
         renderMessages();
+    }
+
+    function bootstrapTurns(session) {
+        if (!session || !session.messages) return [];
+        return session.messages.map(m => ({
+            role: m.role,
+            content: m.content || '',
+        }));
     }
 
     function renderSidebar() {
@@ -1970,8 +1981,11 @@ const ChatPage = (() => {
         try {
             const chatSubPanel = getChatSubAgentPanel();
             if (chatSubPanel) chatSubPanel.clear();
-            await window.WailsAPI.runAgentSession(
+            const bootstrap = bootstrapTurns(session);
+            await window.WailsAPI.runChatSession(
+                session.id,
                 text,
+                bootstrap.slice(0, -1),
                 (msg) => {
                     if (view) view.apply(msg);
                     if (view) snapshot = view.getSnapshot();
@@ -2038,9 +2052,15 @@ const ChatPage = (() => {
         document.querySelector('#chat-new-btn')?.addEventListener('click', () => newSession());
         document.querySelector('#chat-clear-btn')?.addEventListener('click', () => {
             if (confirm('清空所有会话历史？')) {
+                const ids = sessions.map(s => s.id);
                 sessions = [];
                 activeId = null;
                 save();
+                ids.forEach(id => {
+                    if (window.WailsAPI.clearChatSession) {
+                        window.WailsAPI.clearChatSession(id).catch(() => {});
+                    }
+                });
                 newSession();
             }
         });

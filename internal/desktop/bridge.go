@@ -30,6 +30,7 @@ type Bridge struct {
 	workerRun        *coordinator.RunControl
 	mcpManager       *mcp.Manager
 	sessions         *sessionRunner
+	chatStore        *chatTranscriptStore
 }
 
 // NewBridge 创建新的 Bridge 实例
@@ -60,6 +61,7 @@ func NewBridge(cfg *Config) *Bridge {
 		workerRun:        coordinator.NewRunControl(),
 		mcpManager:       mcpManager,
 		sessions:         &sessionRunner{},
+		chatStore:        newChatTranscriptStore(),
 	}
 }
 
@@ -149,7 +151,7 @@ func (b *Bridge) buildWorkerRegistry() (*tools.Registry, error) {
 }
 
 // buildQueryConfig 构建 CC 对齐的 Coordinator 会话（父级 agent/send_message/task_stop，Worker 持执行类工具）。
-func (b *Bridge) buildQueryConfig(userPrompt string, sessionID string, hub *coordinator.StreamHub, auditWriter *audit.Writer) (query.Config, error) {
+func (b *Bridge) buildQueryConfig(initial []query.Message, sessionID string, hub *coordinator.StreamHub, auditWriter *audit.Writer) (query.Config, error) {
 	workerReg, err := b.buildWorkerRegistry()
 	if err != nil {
 		return query.Config{}, err
@@ -197,9 +199,7 @@ func (b *Bridge) buildQueryConfig(userPrompt string, sessionID string, hub *coor
 		HasPendingAsync:    hasPending,
 		SessionID:          sessionID,
 		Audit:              auditWriter,
-		InitialMessages: []query.Message{
-			{Role: query.RoleUser, Content: userPrompt},
-		},
+		InitialMessages:    append([]query.Message(nil), initial...),
 	}, nil
 }
 
@@ -218,9 +218,34 @@ func (b *Bridge) RunTask(task string) (*RunResult, error) {
 	return b.toRunResult(b.executeAgent(b.ctx, task, stream.NopSink{}))
 }
 
-// RunAgentSession 执行 Agent 并通过 agent:stream 推送过程消息。
+// RunAgentSession 执行 Agent 并通过 agent:stream 推送过程消息（单轮任务，无历史）。
 func (b *Bridge) RunAgentSession(task string) (*RunResult, error) {
-	return b.runAgentSession(task)
+	return b.runAgentSession([]query.Message{
+		{Role: query.RoleUser, Content: b.formatUserMessage(task)},
+	}, "", nil)
+}
+
+// RunChatSession 自由对话多轮：在同一 chatSessionId 上续接完整 Agent transcript。
+func (b *Bridge) RunChatSession(req ChatSessionRequest) (*RunResult, error) {
+	msg := strings.TrimSpace(req.Message)
+	if msg == "" {
+		return nil, fmt.Errorf("消息不能为空")
+	}
+	history, err := b.loadChatTranscript(req.ChatSessionID, req.Bootstrap)
+	if err != nil {
+		return nil, err
+	}
+	userContent := msg
+	if len(history) == 0 {
+		userContent = b.formatUserMessage(msg)
+	}
+	initial := append(append([]query.Message(nil), history...), query.Message{
+		Role:    query.RoleUser,
+		Content: userContent,
+	})
+	return b.runAgentSession(initial, req.ChatSessionID, func(result query.Result) error {
+		return b.saveChatTranscript(req.ChatSessionID, result.Messages)
+	})
 }
 
 func (b *Bridge) workspaceRoot() string {
@@ -236,7 +261,9 @@ func (b *Bridge) executeAgent(ctx context.Context, task string, sink query.Strea
 		b.workerRun.SetParent(ctx)
 		defer b.workerRun.SetParent(context.Background())
 	}
-	cfg, err := b.buildQueryConfig(b.formatUserMessage(task), "", nil, nil)
+	cfg, err := b.buildQueryConfig([]query.Message{
+		{Role: query.RoleUser, Content: b.formatUserMessage(task)},
+	}, "", nil, nil)
 	if err != nil {
 		return query.Result{StopReason: query.StopModelError, Err: err}
 	}

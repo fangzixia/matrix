@@ -74,6 +74,40 @@ const WailsAPI = {
         }
     },
 
+    /**
+     * 自由对话多轮会话：同一 chatSessionId 在后端续接完整 Agent transcript。
+     * @param {string} chatSessionId
+     * @param {string} message 本轮用户输入
+     * @param {Array<{role:string,content:string}>} bootstrap 无后端缓存时由前端提供的历史
+     */
+    async runChatSession(chatSessionId, message, bootstrap, onStreamMessage, onDone, onError, hooks = {}) {
+        this._bindStreamHooks(onStreamMessage, hooks);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        try {
+            const result = await window.go.desktop.Bridge.RunChatSession({
+                chatSessionId,
+                message,
+                bootstrap: bootstrap || [],
+            });
+            this._offStreamHooks();
+            if (onDone) onDone(result);
+        } catch (error) {
+            console.error('[API Adapter] Chat session error:', error);
+            this._offStreamHooks();
+            if (onError) {
+                onError({ error: error.message || '对话执行失败' });
+            } else {
+                throw error;
+            }
+        }
+    },
+
+    async clearChatSession(chatSessionId) {
+        if (window.go.desktop.Bridge.ClearChatSession) {
+            await window.go.desktop.Bridge.ClearChatSession(chatSessionId);
+        }
+    },
+
     _taskRunners: {
         spec: (input, file) => window.go.desktop.Bridge.RunSpec(input, file),
         implement: (input, file) => window.go.desktop.Bridge.RunImplement(input, file),

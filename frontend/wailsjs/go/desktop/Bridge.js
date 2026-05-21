@@ -10,6 +10,10 @@ export function CancelAgentSession() {
   return window['go']['desktop']['Bridge']['CancelAgentSession']();
 }
 
+export function ClearChatSession(arg1) {
+  return window['go']['desktop']['Bridge']['ClearChatSession'](arg1);
+}
+
 export function ExportSessionDiagnosticToFile(arg1, arg2) {
   return window['go']['desktop']['Bridge']['ExportSessionDiagnosticToFile'](arg1, arg2);
 }
@@ -84,6 +88,10 @@ export function RunAgentSession(arg1) {
 
 export function RunBuild(arg1, arg2) {
   return window['go']['desktop']['Bridge']['RunBuild'](arg1, arg2);
+}
+
+export function RunChatSession(arg1) {
+  return window['go']['desktop']['Bridge']['RunChatSession'](arg1);
 }
 
 export function RunImplement(arg1, arg2) {
