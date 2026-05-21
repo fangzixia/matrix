@@ -231,6 +231,7 @@ func (b *Bridge) workspaceRoot() string {
 }
 
 func (b *Bridge) executeAgent(ctx context.Context, task string, sink query.StreamSink) query.Result {
+	tools.SetWorkspaceRoot(b.workspaceRoot())
 	if b.workerRun != nil {
 		b.workerRun.SetParent(ctx)
 		defer b.workerRun.SetParent(context.Background())

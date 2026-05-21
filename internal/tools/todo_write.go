@@ -68,8 +68,12 @@ func NewTodoWriteTool() *Tool {
 }
 
 func todoWriteFilePath() string {
-	cwd, _ := os.Getwd()
-	return filepath.Join(cwd, ".matrix-todos.json")
+	root := getWorkspaceRoot()
+	if root == "" {
+		cwd, _ := os.Getwd()
+		root = cwd
+	}
+	return filepath.Join(root, ".matrix-todos.json")
 }
 
 func decodeTodos(raw any) ([]TodoItem, error) {
@@ -153,6 +157,12 @@ func execTodoWrite(_ context.Context, args map[string]any) (string, error) {
 		finalItems = newItems
 	}
 
+	todoPath := todoWriteFilePath()
+	if _, err := os.Stat(todoPath); os.IsNotExist(err) {
+		if err := requireNewFileInWorkspace(todoPath); err != nil {
+			return "", fmt.Errorf("todo_write: %w", err)
+		}
+	}
 	if err := todoWriteSave(finalItems); err != nil {
 		return "", fmt.Errorf("todo_write: 保存失败: %w", err)
 	}

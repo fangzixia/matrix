@@ -9,6 +9,7 @@ import (
 
 func TestFileEditTool_Create(t *testing.T) {
 	dir := t.TempDir()
+	SetWorkspaceRoot(dir)
 	tool := NewFileEditTool()
 	path := filepath.Join(dir, "new.txt")
 
@@ -132,11 +133,8 @@ func TestSleepTool(t *testing.T) {
 }
 
 func TestTodoWriteTool(t *testing.T) {
-	// 切换到临时目录，避免污染工作目录
 	dir := t.TempDir()
-	old, _ := os.Getwd()
-	_ = os.Chdir(dir)
-	defer os.Chdir(old)
+	SetWorkspaceRoot(dir)
 
 	tool := NewTodoWriteTool()
 	out, err := tool.Execute(context.Background(), map[string]any{

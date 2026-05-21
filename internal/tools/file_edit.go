@@ -61,21 +61,7 @@ func execFileEdit(_ context.Context, args map[string]any) (string, error) {
 	newStr, _ := getString(args, "new_string")
 	replaceAll, _ := args["replace_all"].(bool)
 
-	// 统一为绝对路径。
-	if !filepath.IsAbs(filePath) {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("str_replace_editor: 获取工作目录失败: %w", err)
-		}
-		filePath = filepath.Join(cwd, filePath)
-	}
-
-	// 确保父目录存在（对应源码的 fs.mkdir(dirname(absoluteFilePath))）。
-	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
-		return "", fmt.Errorf("str_replace_editor: 创建目录失败: %w", err)
-	}
-
-	// 读取现有内容。
+	// 读取现有内容（路径按调用方传入解析，修改已有文件不做工作区限制）。
 	content, fileExists, err := readTextFile(filePath)
 	if err != nil {
 		return "", fmt.Errorf("str_replace_editor: 读取文件失败: %w", err)
@@ -88,6 +74,26 @@ func execFileEdit(_ context.Context, args map[string]any) (string, error) {
 				"str_replace_editor: 文件 %s 已存在且非空。若要替换内容，请提供非空 old_string",
 				filePath)
 		}
+		if !fileExists {
+			resolved, resolveErr := resolveToolPathForNewFile(filePath)
+			if resolveErr != nil {
+				return "", fmt.Errorf("str_replace_editor: %w", resolveErr)
+			}
+			if err := requireNewFileInWorkspace(resolved); err != nil {
+				return "", fmt.Errorf("str_replace_editor: %w", err)
+			}
+			filePath = resolved
+		} else if !filepath.IsAbs(filePath) {
+			cwd, cwdErr := os.Getwd()
+			if cwdErr != nil {
+				return "", fmt.Errorf("str_replace_editor: 获取工作目录失败: %w", cwdErr)
+			}
+			filePath = filepath.Join(cwd, filePath)
+		}
+
+		if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+			return "", fmt.Errorf("str_replace_editor: 创建目录失败: %w", err)
+		}
 		if err := os.WriteFile(filePath, []byte(newStr), 0o644); err != nil {
 			return "", fmt.Errorf("str_replace_editor: 写入失败: %w", err)
 		}
@@ -97,9 +103,22 @@ func execFileEdit(_ context.Context, args map[string]any) (string, error) {
 		return fmt.Sprintf("已创建 %s", filePath), nil
 	}
 
+	// 修改已有文件：统一为绝对路径，不校验工作区边界。
+	if !filepath.IsAbs(filePath) {
+		cwd, cwdErr := os.Getwd()
+		if cwdErr != nil {
+			return "", fmt.Errorf("str_replace_editor: 获取工作目录失败: %w", cwdErr)
+		}
+		filePath = filepath.Join(cwd, filePath)
+	}
+
 	// ── 文件不存在 ─────────────────────────────────────────────────────
 	if !fileExists {
 		return "", fmt.Errorf("str_replace_editor: 文件不存在: %s", filePath)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		return "", fmt.Errorf("str_replace_editor: 创建目录失败: %w", err)
 	}
 
 	// ── 检查 old_string 是否存在 ────────────────────────────────────────

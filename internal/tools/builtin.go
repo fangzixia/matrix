@@ -55,13 +55,30 @@ var WriteFile = &Tool{
 		if path == "" {
 			return "", fmt.Errorf("write_file: 缺少必需参数 'path'")
 		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+
+		targetPath := path
+		if _, err := os.Stat(path); err != nil {
+			if os.IsNotExist(err) {
+				resolved, resolveErr := resolveToolPathForNewFile(path)
+				if resolveErr != nil {
+					return "", fmt.Errorf("write_file: %w", resolveErr)
+				}
+				if err := requireNewFileInWorkspace(resolved); err != nil {
+					return "", fmt.Errorf("write_file: %w", err)
+				}
+				targetPath = resolved
+			} else {
+				return "", fmt.Errorf("write_file: %w", err)
+			}
+		}
+
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 			return "", fmt.Errorf("write_file: 创建父目录失败: %w", err)
 		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		if err := os.WriteFile(targetPath, []byte(content), 0o644); err != nil {
 			return "", fmt.Errorf("write_file: %w", err)
 		}
-		return fmt.Sprintf("已写入 %d 字节到 %s", len(content), path), nil
+		return fmt.Sprintf("已写入 %d 字节到 %s", len(content), targetPath), nil
 	},
 }
 
