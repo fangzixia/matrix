@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"matrix/internal/matrixpaths"
 )
 
 func TestFileEditTool_Create(t *testing.T) {
@@ -134,6 +136,8 @@ func TestSleepTool(t *testing.T) {
 
 func TestTodoWriteTool(t *testing.T) {
 	dir := t.TempDir()
+	matrixpaths.SetDataRootForTest(t.TempDir())
+	t.Cleanup(func() { matrixpaths.SetDataRootForTest("") })
 	SetWorkspaceRoot(dir)
 
 	tool := NewTodoWriteTool()

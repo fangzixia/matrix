@@ -14,6 +14,7 @@ import (
 	"matrix/internal/audit"
 	"matrix/internal/coordinator"
 	"matrix/internal/llm"
+	"matrix/internal/matrixpaths"
 	"matrix/internal/mcp"
 	"matrix/internal/query"
 	"matrix/internal/stream"
@@ -30,7 +31,8 @@ type Bridge struct {
 	workerRun        *coordinator.RunControl
 	mcpManager       *mcp.Manager
 	sessions         *sessionRunner
-	chatStore        *chatTranscriptStore
+	chatTranscripts  *ChatTranscriptStore
+	chatSessionStore *ChatSessionStore
 }
 
 // NewBridge 创建新的 Bridge 实例
@@ -54,21 +56,28 @@ func NewBridge(cfg *Config) *Bridge {
 		mcpManager.UpdateConfigs(mcpConfigs)
 	}
 
-	return &Bridge{
+	b := &Bridge{
 		config:           cfg,
 		subAgentRegistry: coordinator.NewRegistry(),
 		coordinatorAsync: coordinator.NewAsyncSupport(),
 		workerRun:        coordinator.NewRunControl(),
 		mcpManager:       mcpManager,
 		sessions:         &sessionRunner{},
-		chatStore:        newChatTranscriptStore(),
 	}
+	b.chatTranscripts = NewChatTranscriptStore(b.workspaceRoot)
+	b.chatSessionStore = NewChatSessionStore(b.workspaceRoot)
+	return b
 }
 
 // Startup Wails 启动回调
 func (b *Bridge) Startup(ctx context.Context) {
 	b.ctx = ctx
 	b.updateClient()
+	if root := b.workspaceRoot(); root != "" {
+		if err := matrixpaths.EnsureWorkspaceStore(root); err != nil {
+			logger.Warnf("workspace store init: %v", err)
+		}
+	}
 	logger.Info("Matrix Desktop started")
 	go b.autoConnectMCPServers()
 }
@@ -225,34 +234,8 @@ func (b *Bridge) RunAgentSession(task string) (*RunResult, error) {
 	}, "", nil)
 }
 
-// RunChatSession 自由对话多轮：在同一 chatSessionId 上续接完整 Agent transcript。
-func (b *Bridge) RunChatSession(req ChatSessionRequest) (*RunResult, error) {
-	msg := strings.TrimSpace(req.Message)
-	if msg == "" {
-		return nil, fmt.Errorf("消息不能为空")
-	}
-	history, err := b.loadChatTranscript(req.ChatSessionID, req.Bootstrap)
-	if err != nil {
-		return nil, err
-	}
-	userContent := msg
-	if len(history) == 0 {
-		userContent = b.formatUserMessage(msg)
-	}
-	initial := append(append([]query.Message(nil), history...), query.Message{
-		Role:    query.RoleUser,
-		Content: userContent,
-	})
-	return b.runAgentSession(initial, req.ChatSessionID, func(result query.Result) error {
-		return b.saveChatTranscript(req.ChatSessionID, result.Messages)
-	})
-}
-
 func (b *Bridge) workspaceRoot() string {
-	if b.config.Workspace.Root == "" {
-		return "."
-	}
-	return b.config.Workspace.Root
+	return matrixpaths.NormalizeWorkspacePath(b.config.Workspace.Root)
 }
 
 func (b *Bridge) executeAgent(ctx context.Context, task string, sink query.StreamSink) query.Result {
@@ -344,11 +327,16 @@ func (b *Bridge) SaveSettings(s *Settings) error {
 
 // GetWorkspace 返回当前工作区和最近列表
 func (b *Bridge) GetWorkspace() (map[string]interface{}, error) {
-	logger.Infof("GetWorkspace: current=%s", b.config.Workspace.Root)
-	return map[string]interface{}{
-		"current": b.config.Workspace.Root,
+	root := b.workspaceRoot()
+	logger.Infof("GetWorkspace: current=%s", root)
+	out := map[string]interface{}{
+		"current": root,
 		"recent":  b.config.Workspace.Recent,
-	}, nil
+	}
+	if root != "" && root != "." {
+		out["workspaceId"] = matrixpaths.WorkspaceID(root)
+	}
+	return out, nil
 }
 
 // SetWorkspace 切换工作区
@@ -365,7 +353,15 @@ func (b *Bridge) SetWorkspace(path string) error {
 		return fmt.Errorf("无效路径")
 	}
 
+	oldRoot := b.config.Workspace.Root
+	if oldAbs, err := filepath.Abs(oldRoot); err == nil && oldRoot != "" {
+		oldRoot = oldAbs
+	}
 	b.config.Workspace.Root = abs
+	if b.chatTranscripts != nil && oldRoot != abs {
+		b.chatTranscripts.InvalidateCache()
+	}
+	tools.SetWorkspaceRoot(matrixpaths.NormalizeWorkspacePath(abs))
 
 	// 更新最近列表
 	recent := []string{abs}
@@ -378,6 +374,10 @@ func (b *Bridge) SetWorkspace(path string) error {
 
 	if err := SaveConfig(b.config); err != nil {
 		return err
+	}
+
+	if err := matrixpaths.EnsureWorkspaceStore(abs); err != nil {
+		logger.Warnf("workspace store: %v", err)
 	}
 
 	return nil

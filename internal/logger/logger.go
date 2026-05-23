@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"matrix/internal/matrixpaths"
 )
 
 var (
@@ -88,12 +90,11 @@ func logFormat() string {
 }
 
 func logFilePath() (dir, file string, err error) {
-	base, err := os.UserConfigDir()
+	file, err = matrixpaths.LogFile()
 	if err != nil {
-		return "", "", fmt.Errorf("logger: user config dir: %w", err)
+		return "", "", fmt.Errorf("logger: log file: %w", err)
 	}
-	dir = filepath.Join(base, "matrix", "logs")
-	file = filepath.Join(dir, "matrix.log")
+	dir, _ = matrixpaths.LogsDir()
 	return dir, file, nil
 }
 

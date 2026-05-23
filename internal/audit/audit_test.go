@@ -5,7 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
+
+	"matrix/internal/matrixpaths"
 )
 
 func TestRedactString(t *testing.T) {
@@ -20,13 +21,16 @@ func TestRedactString(t *testing.T) {
 }
 
 func TestWriterEmitAndClose(t *testing.T) {
+	matrixpaths.SetDataRootForTest(t.TempDir())
+	t.Cleanup(func() { matrixpaths.SetDataRootForTest("") })
+
 	dir := t.TempDir()
 	w := NewWriter(dir, "sess-1")
 	w.Emit("session.start", 0, "desktop", map[string]any{"model": "test-model"})
 	w.Emit("turn.iteration", 1, "query", map[string]any{"message_count": 3})
 	_ = w.Close(SessionMeta{StopReason: "completed", TurnCount: 1, DurationMs: 100})
 
-	jsonl := filepath.Join(dir, ".matrix", "sessions", "sess-1.jsonl")
+	jsonl := filepath.Join(matrixpaths.SessionsDir(dir), "sess-1.jsonl")
 	data, err := os.ReadFile(jsonl)
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +42,7 @@ func TestWriterEmitAndClose(t *testing.T) {
 		t.Fatalf("missing turn.iteration: %s", data)
 	}
 
-	metaPath := filepath.Join(dir, ".matrix", "sessions", "sess-1.meta.json")
+	metaPath := filepath.Join(matrixpaths.SessionsDir(dir), "sess-1.meta.json")
 	metaData, err := os.ReadFile(metaPath)
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +56,7 @@ func TestFormatForLLM(t *testing.T) {
 	bundle := ExportBundle{
 		Meta: SessionMeta{
 			SessionID:   "abc",
-			StartedAt:   time.Date(2026, 5, 21, 9, 0, 0, 0, time.UTC),
+			StartedAt:   "2026-05-21T09:00:00Z",
 			StopReason:  "model_error",
 			TaskPreview: "fix the bug",
 			Error:       "timeout",
@@ -74,6 +78,9 @@ func TestFormatForLLM(t *testing.T) {
 }
 
 func TestListSessions(t *testing.T) {
+	matrixpaths.SetDataRootForTest(t.TempDir())
+	t.Cleanup(func() { matrixpaths.SetDataRootForTest("") })
+
 	dir := t.TempDir()
 	w := NewWriter(dir, "s-a")
 	w.UpdateMeta(SessionMeta{Model: "m1"})

@@ -2,9 +2,9 @@ package desktop
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"matrix/internal/audit"
+	"matrix/internal/matrixpaths"
 )
 
 // ListSessionDiagnostics 列出工作区下最近的会话诊断记录。
@@ -39,7 +39,7 @@ func (b *Bridge) ExportSessionDiagnosticToFile(sessionID, destDir string) (mdPat
 		return "", "", fmt.Errorf("session_id 不能为空")
 	}
 	if destDir == "" {
-		destDir = filepath.Join(b.workspaceRoot(), ".matrix", "exports")
+		destDir = matrixpaths.ExportsDir(b.workspaceRoot())
 	}
 	bundle, err := audit.ReadSession(b.workspaceRoot(), sessionID, audit.ExportOptions{})
 	if err != nil {

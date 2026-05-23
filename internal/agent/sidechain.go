@@ -8,26 +8,26 @@ import (
 	"sync"
 )
 
-// SidechainWriter 将子 Agent 流式事件追加到 JSONL 旁路 transcript。
+// SidechainWriter 将子 Agent 流式事件追加到 subagents 目录下的 JSONL 旁路 transcript。
 type SidechainWriter struct {
-	mu   sync.Mutex
-	root string
+	mu  sync.Mutex
+	dir string // subagents 目录绝对路径
 }
 
-// NewSidechainWriter 在 root 下创建 subagents 目录；root 为空则禁用持久化。
-func NewSidechainWriter(root string) *SidechainWriter {
-	if root == "" {
+// NewSidechainWriter 在 subagentsDir 下写入 sidechain；空路径则禁用持久化。
+func NewSidechainWriter(subagentsDir string) *SidechainWriter {
+	if subagentsDir == "" {
 		return &SidechainWriter{}
 	}
-	_ = os.MkdirAll(filepath.Join(root, "subagents"), 0o755)
-	return &SidechainWriter{root: root}
+	_ = os.MkdirAll(subagentsDir, 0o755)
+	return &SidechainWriter{dir: subagentsDir}
 }
 
 func (w *SidechainWriter) path(id ID) string {
-	if w == nil || w.root == "" {
+	if w == nil || w.dir == "" {
 		return ""
 	}
-	return filepath.Join(w.root, "subagents", string(id)+".jsonl")
+	return filepath.Join(w.dir, string(id)+".jsonl")
 }
 
 // Path 返回某 Agent 的 sidechain 文件路径。
@@ -37,7 +37,7 @@ func (w *SidechainWriter) Path(id ID) string {
 
 // Append 追加一行 JSON 记录；失败时静默（不阻塞 Agent）。
 func (w *SidechainWriter) Append(id ID, record any) {
-	if w == nil || w.root == "" {
+	if w == nil || w.dir == "" {
 		return
 	}
 	p := w.path(id)

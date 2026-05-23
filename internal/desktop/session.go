@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"matrix/internal/audit"
 	"matrix/internal/logger"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -14,8 +13,10 @@ import (
 
 	"matrix/internal/agent"
 	"matrix/internal/coordinator"
+	"matrix/internal/matrixpaths"
 	"matrix/internal/query"
 	"matrix/internal/stream"
+	"matrix/internal/tools"
 )
 
 const streamEventName = "agent:stream"
@@ -33,6 +34,8 @@ type sessionRunner struct {
 // persistChatFn 在 Agent 成功结束后持久化多轮 transcript。
 type persistChatFn func(query.Result) error
 
+// runAgentSession 执行单次 Agent 运行。chatSessionID 非空时同时用作流式事件与 audit 的 sessionID
+// （与 ChatTranscriptStore 的 chatSessionID 键相同）；单轮任务传空字符串时自动生成独立 UUID。
 func (b *Bridge) runAgentSession(initial []query.Message, chatSessionID string, persist persistChatFn) (*RunResult, error) {
 	if b.sessions == nil {
 		b.sessions = &sessionRunner{}
@@ -74,8 +77,8 @@ func (b *Bridge) runAgentSession(initial []query.Message, chatSessionID string, 
 	defer coalesced.close()
 
 	ws := b.workspaceRoot()
-	sidechainRoot := filepath.Join(ws, ".matrix")
-	sidechain := agent.NewSidechainWriter(sidechainRoot)
+	tools.SetWorkspaceRoot(ws)
+	sidechain := agent.NewSidechainWriter(matrixpaths.SubagentsDir(ws))
 	auditWriter := audit.NewWriter(ws, sessionID)
 	taskPreview := audit.Preview(initial[len(initial)-1].Content, 500)
 	auditWriter.UpdateMeta(audit.SessionMeta{

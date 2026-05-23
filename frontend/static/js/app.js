@@ -62,11 +62,19 @@ function createEmptyExecutionSlot() {
 let executionSessionView = null;
 let executionSubAgentPanel = null;
 
+/** 自由对话与执行任务共用：同一 SessionView 行为，仅挂载容器不同 */
+function createSubAgentPanel(rootEl, getSessionView) {
+    if (!rootEl || !window.SubAgentPanel) return null;
+    return window.SubAgentPanel.create(rootEl, {
+        onJumpToWorker: (id) => getSessionView()?.scrollToWorker?.(id),
+    });
+}
+
 function getExecutionSubAgentPanel() {
     const root = $('#subagent-panel-root');
-    if (!root || !window.SubAgentPanel) return null;
+    if (!root) return null;
     if (!executionSubAgentPanel) {
-        executionSubAgentPanel = window.SubAgentPanel.create(root);
+        executionSubAgentPanel = createSubAgentPanel(root, getExecutionSessionView);
     }
     return executionSubAgentPanel;
 }
@@ -926,7 +934,10 @@ function showExecutionResult(result, hasError) {
     slot.running = false;
     state.streamingPersona = null;
 
-    if (view) slot.sessionSnapshot = view.getSnapshot();
+    if (view) {
+        view.finalizeRunningTools(hasError ? 'error' : 'done');
+        slot.sessionSnapshot = view.getSnapshot();
+    }
 
     if (hasError) {
         slot.hasError = true;
@@ -1781,19 +1792,35 @@ loadPageData = async function(pageName) {
 // ==================== 自由对话页面 ====================
 
 const ChatPage = (() => {
-    const STORAGE_KEY = 'chat_sessions';
+    const STORAGE_KEY_PREFIX = 'chat_sessions';
 
     let sessions = [];
     let activeId = null;
+    let workspacePath = '';
+    let workspaceId = '';
+    /** 已从存储加载过的工作区 key；未 hydrate 前禁止 save，避免启动时用空列表覆盖 chat-history.json */
+    let hydratedKey = null;
     let isRunning = false;
     let chatSessionView = null;
     let chatSubAgentPanel = null;
+
+    function normalizeWorkspacePath(p) {
+        if (!p || typeof p !== 'string') return '';
+        return p.trim().replace(/\\/g, '/');
+    }
+
+    function storageKey() {
+        if (workspaceId) return `${STORAGE_KEY_PREFIX}:${workspaceId}`;
+        const ws = normalizeWorkspacePath(workspacePath || WorkspaceSelector.currentPath || '');
+        if (!ws) return `${STORAGE_KEY_PREFIX}:default`;
+        return `${STORAGE_KEY_PREFIX}:${ws}`;
+    }
 
     function getChatSubAgentPanel() {
         const root = document.querySelector('#chat-subagent-panel-root');
         if (!root || !window.SubAgentPanel) return null;
         if (!chatSubAgentPanel) {
-            chatSubAgentPanel = window.SubAgentPanel.create(root);
+            chatSubAgentPanel = createSubAgentPanel(root, getChatSessionView);
         }
         return chatSubAgentPanel;
     }
@@ -1802,17 +1829,170 @@ const ChatPage = (() => {
         const panel = document.querySelector('#chat-session-panel');
         if (!panel || !window.SessionView) return null;
         if (!chatSessionView) {
-            chatSessionView = window.SessionView.create(panel, { compact: true });
+            // 与执行任务页相同组件与选项；仅外层布局（live strip）不同
+            chatSessionView = window.SessionView.create(panel, {
+                subagentPanel: getChatSubAgentPanel(),
+            });
+            bindChatSessionPanelResize(panel);
         }
         return chatSessionView;
     }
 
-    function load() {
-        try { sessions = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch { sessions = []; }
+    const CHAT_PANEL_HEIGHT_KEY = 'matrix:chat-session-panel-height';
+
+    function restoreChatSessionPanelHeight(panel) {
+        if (!panel) return;
+        try {
+            const saved = localStorage.getItem(CHAT_PANEL_HEIGHT_KEY);
+            if (saved && /^\d+$/.test(saved)) {
+                panel.style.setProperty('--chat-session-panel-height', `${saved}px`);
+            }
+        } catch { /* ignore */ }
     }
 
-    function save() {
-        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions)); } catch {}
+    function bindChatSessionPanelResize(panel) {
+        if (!panel || panel.dataset.resizeBound) return;
+        panel.dataset.resizeBound = '1';
+        restoreChatSessionPanelHeight(panel);
+        let saveTimer = null;
+        const ro = new ResizeObserver((entries) => {
+            const h = Math.round(entries[0]?.contentRect?.height || 0);
+            if (h < 100) return;
+            clearTimeout(saveTimer);
+            saveTimer = setTimeout(() => {
+                try {
+                    localStorage.setItem(CHAT_PANEL_HEIGHT_KEY, String(h));
+                    panel.style.setProperty('--chat-session-panel-height', `${h}px`);
+                } catch { /* ignore */ }
+            }, 200);
+        });
+        ro.observe(panel);
+    }
+
+    function syncChatLiveStrip() {
+        const strip = document.querySelector('#chat-live-strip');
+        const sessionPanel = document.querySelector('#chat-session-panel');
+        const subRoot = document.querySelector('#chat-subagent-panel-root');
+        if (!strip) return;
+        const sessionVisible = sessionPanel && sessionPanel.style.display !== 'none';
+        const hasAgents = subRoot?.classList.contains('has-agents');
+        strip.hidden = !sessionVisible && !hasAgents;
+        strip.classList.toggle('has-session-panel', !!sessionVisible);
+        if (sessionVisible) bindChatSessionPanelResize(sessionPanel);
+        if (!strip.hidden) {
+            scrollChatToBottom();
+        }
+    }
+
+    function scrollChatToBottom() {
+        const scrollArea = document.querySelector('.chat-scroll-area');
+        if (!scrollArea) return;
+        requestAnimationFrame(() => {
+            scrollArea.scrollTop = scrollArea.scrollHeight;
+        });
+    }
+
+    window.syncChatLiveStrip = syncChatLiveStrip;
+
+    function snapshotStepLabel(snap) {
+        if (!snap) return '0 步';
+        if (snap.stats && window.SessionView?.formatStepCountLabel) {
+            return window.SessionView.formatStepCountLabel(snap.stats);
+        }
+        const feed = snap.feed || snap.timeline || [];
+        const toolCount = snap.tools ? Object.keys(snap.tools).length : 0;
+        let workerTools = 0;
+        if (snap.workers) {
+            Object.values(snap.workers).forEach((w) => {
+                workerTools += Object.keys(w.state?.tools || {}).length;
+            });
+        }
+        const turns = snap.turn || 0;
+        const parts = [];
+        if (turns > 0) parts.push(`${turns} 轮`);
+        const tools = toolCount + workerTools;
+        if (tools > 0) parts.push(`${tools} 次工具`);
+        if (snap.workers && Object.keys(snap.workers).length > 0) {
+            parts.push(`${Object.keys(snap.workers).length} 个 Worker`);
+        }
+        return parts.length ? parts.join(' · ') : `${Math.max(feed.length, toolCount)} 步`;
+    }
+
+    function snapshotStepCount(snap) {
+        if (!snap) return 0;
+        if (snap.stats) {
+            return (snap.stats.toolCalls || 0) + (snap.stats.turns || 0);
+        }
+        const feed = snap.feed || snap.timeline || [];
+        const toolCount = snap.tools ? Object.keys(snap.tools).length : 0;
+        return Math.max(feed.length, toolCount);
+    }
+
+    function hasMeaningfulSnapshot(snap) {
+        if (!snap) return false;
+        if (snap.thinkingText?.trim()) return true;
+        if ((snap.feed || snap.timeline || []).length > 0) return true;
+        if (snap.tools && Object.keys(snap.tools).length > 0) return true;
+        if (snap.workers && Object.keys(snap.workers).length > 0) return true;
+        if (snap.todos?.length > 0) return true;
+        return false;
+    }
+
+    async function load() {
+        sessions = [];
+        try {
+            if (window.WailsAPI?.getChatSessions) {
+                const fromBackend = await window.WailsAPI.getChatSessions();
+                sessions = Array.isArray(fromBackend) ? fromBackend : [];
+                return;
+            }
+        } catch (e) {
+            console.warn('[ChatPage] load from backend failed:', e);
+        }
+        const key = storageKey();
+        let raw = null;
+        try { raw = localStorage.getItem(key); } catch { raw = null; }
+        try { sessions = JSON.parse(raw || '[]'); } catch { sessions = []; }
+    }
+
+    async function save() {
+        if (!hydratedKey) return;
+        try {
+            if (window.WailsAPI?.saveChatSessions) {
+                await window.WailsAPI.saveChatSessions(sessions);
+                return;
+            }
+        } catch (e) {
+            console.warn('[ChatPage] save to backend failed:', e);
+        }
+        try { localStorage.setItem(storageKey(), JSON.stringify(sessions)); } catch {}
+    }
+
+    /** 切换工作区前持久化当前内存中的会话（须在 SetWorkspace 之前调用） */
+    async function persistIfLoaded() {
+        const key = storageKey();
+        if (!hydratedKey || hydratedKey !== key) return;
+        await save();
+    }
+
+    function markHydrated() {
+        hydratedKey = storageKey();
+    }
+
+    async function onWorkspaceChanged(path, id) {
+        workspacePath = normalizeWorkspacePath(path || WorkspaceSelector.currentPath || '');
+        workspaceId = id || WorkspaceSelector.workspaceId || '';
+        activeId = null;
+        hydratedKey = null;
+        await load();
+        markHydrated();
+        if (sessions.length === 0) {
+            newSession();
+        } else {
+            activeId = sessions[0].id;
+            renderSidebar();
+            renderMessages();
+        }
     }
 
     function activeSession() {
@@ -1900,7 +2080,7 @@ const ChatPage = (() => {
         if (empty) empty.style.display = 'none';
 
         msgs.forEach(msg => container.appendChild(buildMessageEl(msg)));
-        container.scrollTop = container.scrollHeight;
+        scrollChatToBottom();
     }
 
     function buildMessageEl(msg) {
@@ -1916,16 +2096,17 @@ const ChatPage = (() => {
             mdDiv.className = 'chat-output markdown-content';
             mdDiv.innerHTML = formatChatMarkdown(msg.content || '（无输出）');
             bubble.appendChild(mdDiv);
-            if (msg.sessionSnapshot) {
+            if (hasMeaningfulSnapshot(msg.sessionSnapshot)) {
                 const details = document.createElement('details');
                 details.className = 'chat-logs-details';
                 const summary = document.createElement('summary');
-                const n = (msg.sessionSnapshot.timeline || []).length;
-                summary.textContent = `查看执行过程（${n} 步）`;
+                const label = snapshotStepLabel(msg.sessionSnapshot);
+                summary.textContent = `查看执行过程（${label}）`;
                 details.appendChild(summary);
                 const inner = document.createElement('div');
-                inner.className = 'chat-logs-inner session-view';
-                window.SessionView.create(inner).loadSnapshot(msg.sessionSnapshot);
+                inner.className = 'chat-logs-inner session-view session-view-compact session-view-in-bubble';
+                // 气泡内复盘用 compact；实时执行区与执行任务页一致，不用 compact
+                window.SessionView.create(inner, { compact: true }).loadSnapshot(msg.sessionSnapshot);
                 details.appendChild(inner);
                 bubble.appendChild(details);
             }
@@ -1973,13 +2154,16 @@ const ChatPage = (() => {
 
         const panelEl = document.querySelector('#chat-session-panel');
         const view = getChatSessionView();
-        if (panelEl) panelEl.style.display = 'block';
+        if (panelEl) {
+            panelEl.style.display = 'block';
+            syncChatLiveStrip();
+        }
         if (view) view.reset();
 
         let snapshot = null;
+        const chatSubPanel = getChatSubAgentPanel();
 
         try {
-            const chatSubPanel = getChatSubAgentPanel();
             if (chatSubPanel) chatSubPanel.clear();
             const bootstrap = bootstrapTurns(session);
             await window.WailsAPI.runChatSession(
@@ -1989,15 +2173,42 @@ const ChatPage = (() => {
                 (msg) => {
                     if (view) view.apply(msg);
                     if (view) snapshot = view.getSnapshot();
+                    scrollChatToBottom();
                 },
                 (result) => {
-                    setTimeout(() => { if (panelEl) panelEl.style.display = 'none'; }, 400);
+                    if (result?.has_error) {
+                    if (panelEl) {
+                        panelEl.style.display = 'none';
+                        syncChatLiveStrip();
+                    }
+                    if (chatSubPanel) chatSubPanel.clear();
+                    if (view) view.finalizeRunningTools('error');
+                    session.messages.push({
+                        role: 'assistant',
+                        content: `执行失败: ${result.error || '未知错误'}`,
+                            time: nowTime(),
+                            sessionSnapshot: view ? view.getSnapshot() : snapshot,
+                        });
+                        save();
+                        renderSidebar();
+                        renderMessages();
+                        isRunning = false;
+                        setSendDisabled(false);
+                        return;
+                    }
+                    setTimeout(() => {
+                        if (panelEl) panelEl.style.display = 'none';
+                        if (chatSubPanel) chatSubPanel.clear();
+                        syncChatLiveStrip();
+                    }, 400);
+                    if (view) view.finalizeRunningTools('done');
                     const content = (view && view.getState().assistantText) || result.output || '（任务完成，无文本输出）';
+                    const finalSnap = snapshot || (view ? view.getSnapshot() : null);
                     session.messages.push({
                         role: 'assistant',
                         content,
                         time: nowTime(),
-                        sessionSnapshot: snapshot || (view ? view.getSnapshot() : null),
+                        sessionSnapshot: hasMeaningfulSnapshot(finalSnap) ? finalSnap : null,
                     });
                     save();
                     renderSidebar();
@@ -2006,12 +2217,17 @@ const ChatPage = (() => {
                     setSendDisabled(false);
                 },
                 (err) => {
-                    if (panelEl) panelEl.style.display = 'none';
+                    if (panelEl) {
+                        panelEl.style.display = 'none';
+                        syncChatLiveStrip();
+                    }
+                    if (chatSubPanel) chatSubPanel.clear();
+                    if (view) view.finalizeRunningTools('error');
                     session.messages.push({
                         role: 'assistant',
                         content: `执行失败: ${err.error || '未知错误'}`,
                         time: nowTime(),
-                        sessionSnapshot: snapshot,
+                        sessionSnapshot: view ? view.getSnapshot() : snapshot,
                     });
                     save();
                     renderSidebar();
@@ -2022,12 +2238,18 @@ const ChatPage = (() => {
                 subAgentStreamHooks(chatSubPanel)
             );
         } catch (e) {
-            if (panelEl) panelEl.style.display = 'none';
+            if (panelEl) {
+                panelEl.style.display = 'none';
+                syncChatLiveStrip();
+            }
+            getChatSubAgentPanel()?.clear();
+            const failView = getChatSessionView();
+            if (failView) failView.finalizeRunningTools('error');
             session.messages.push({
                 role: 'assistant',
                 content: `执行失败: ${e.message}`,
                 time: nowTime(),
-                sessionSnapshot: snapshot,
+                sessionSnapshot: failView ? failView.getSnapshot() : snapshot,
             });
             save();
             renderSidebar();
@@ -2045,10 +2267,6 @@ const ChatPage = (() => {
     }
 
     function init() {
-        load();
-        if (sessions.length === 0) newSession();
-        else activeId = sessions[0].id;
-
         document.querySelector('#chat-new-btn')?.addEventListener('click', () => newSession());
         document.querySelector('#chat-clear-btn')?.addEventListener('click', () => {
             if (confirm('清空所有会话历史？')) {
@@ -2073,13 +2291,33 @@ const ChatPage = (() => {
         });
     }
 
-    return { init, onShow() { renderSidebar(); renderMessages(); } };
+    return {
+        init,
+        persistIfLoaded,
+        onShow() {
+            workspacePath = normalizeWorkspacePath(WorkspaceSelector.currentPath || workspacePath);
+            workspaceId = WorkspaceSelector.workspaceId || workspaceId;
+            syncChatLiveStrip();
+            load().then(() => {
+                markHydrated();
+                if (sessions.length === 0) {
+                    newSession();
+                } else if (!activeId || !sessions.some(s => s.id === activeId)) {
+                    activeId = sessions[0].id;
+                }
+                renderSidebar();
+                renderMessages();
+            });
+        },
+        onWorkspaceChanged,
+    };
 })();
 
 // ==================== 工作区选择器 ====================
 
 const WorkspaceSelector = {
     currentPath: '',
+    workspaceId: '',
 
     bindEvents() {
         $('#workspace-browse-btn').style.display = '';
@@ -2102,8 +2340,10 @@ const WorkspaceSelector = {
         try {
             const data = await WailsAPI.getWorkspace();
             this.currentPath = data.current || '';
+            this.workspaceId = data.workspaceId || '';
             this.updateDisplay();
             this.renderRecentList(data.recent || []);
+            ChatPage.onWorkspaceChanged(this.currentPath, this.workspaceId);
         } catch (e) {
             console.error('Failed to load workspace:', e);
         }
@@ -2124,22 +2364,20 @@ const WorkspaceSelector = {
     renderRecentList(recent) {
         const container = $('#recent-workspaces-list');
         if (!container) return;
-        if (!recent || recent.length === 0) {
+        const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+        const paths = (recent || [])
+            .map(entry => (typeof entry === 'string' ? entry : entry?.path))
+            .filter(Boolean);
+        if (paths.length === 0) {
             container.innerHTML = '<div class="empty-state">暂无最近记录</div>';
             return;
         }
-        // 过滤掉 undefined 或空值
-        const validRecent = recent.filter(entry => entry && entry.path);
-        if (validRecent.length === 0) {
-            container.innerHTML = '<div class="empty-state">暂无最近记录</div>';
-            return;
-        }
-        container.innerHTML = validRecent.map(entry => `
-            <div class="recent-workspace-item" data-path="${entry.path}">
+        container.innerHTML = paths.map(path => `
+            <div class="recent-workspace-item" data-path="${esc(path)}">
                 <span class="recent-workspace-icon">📁</span>
                 <div class="recent-workspace-info">
-                    <div class="recent-workspace-name">${entry.path.replace(/\\/g, '/').split('/').pop()}</div>
-                    <div class="recent-workspace-path">${entry.path}</div>
+                    <div class="recent-workspace-name">${esc(path.replace(/\\/g, '/').split('/').pop())}</div>
+                    <div class="recent-workspace-path">${esc(path)}</div>
                 </div>
             </div>
         `).join('');
@@ -2178,9 +2416,15 @@ const WorkspaceSelector = {
         const errEl = $('#workspace-error');
         errEl.style.display = 'none';
         try {
-            await WailsAPI.setWorkspace({ path });
-            this.currentPath = path;
+            await ChatPage.persistIfLoaded();
+            const result = await WailsAPI.setWorkspace({ path });
+            this.currentPath = result.path || path;
+            this.workspaceId = result.workspaceId || '';
             this.updateDisplay();
+            if (result.recent) {
+                this.renderRecentList(result.recent);
+            }
+            ChatPage.onWorkspaceChanged(this.currentPath, this.workspaceId);
             this.hide();
             loadDashboard();
         } catch (e) {
@@ -2191,5 +2435,5 @@ const WorkspaceSelector = {
 };
 
 
-// 版本标记 - 用于强制刷新缓存 - 2026-05-19-23-45
-console.log('app.js loaded - Version: 2026-05-19-23-45');
+// 版本标记 - 用于强制刷新缓存
+console.log('app.js loaded - Version: 2026-05-24-chat-hydrate-fix');

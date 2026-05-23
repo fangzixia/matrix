@@ -6,9 +6,11 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"matrix/internal/matrixpaths"
 )
 
-// Writer appends session diagnostic events to workspace/.matrix/sessions/.
+// Writer appends session diagnostic events to AppData/workspaces/{id}/sessions/.
 type Writer struct {
 	mu        sync.Mutex
 	root      string
@@ -20,17 +22,17 @@ type Writer struct {
 	parentID  string
 }
 
-// NewWriter creates a writer under workspaceRoot/.matrix/sessions/{sessionID}.
-// workspaceRoot or sessionID empty disables persistence (nil-safe no-ops).
-func NewWriter(workspaceRoot, sessionID string) *Writer {
-	if workspaceRoot == "" || sessionID == "" {
+// NewWriter creates a writer under AppData/workspaces/{id}/sessions/{sessionID}.
+// workspacePath 为用户项目绝对路径（用作 workspace_id 查找键）；空 workspacePath 或 sessionID 时禁用持久化。
+func NewWriter(workspacePath, sessionID string) *Writer {
+	if workspacePath == "" || sessionID == "" {
 		return &Writer{}
 	}
-	dir := filepath.Join(workspaceRoot, ".matrix", "sessions")
+	dir := matrixpaths.SessionsDir(workspacePath)
 	_ = os.MkdirAll(dir, 0o755)
 	now := time.Now().UTC()
 	w := &Writer{
-		root:      workspaceRoot,
+		root:      workspacePath,
 		sessionID: sessionID,
 		jsonlPath: filepath.Join(dir, sessionID+".jsonl"),
 		metaPath:  filepath.Join(dir, sessionID+".meta.json"),
@@ -38,8 +40,8 @@ func NewWriter(workspaceRoot, sessionID string) *Writer {
 	}
 	w.writeMeta(SessionMeta{
 		SessionID: sessionID,
-		StartedAt: now,
-		Workspace: workspaceRoot,
+		StartedAt: formatTimeUTC(now),
+		Workspace: workspacePath,
 	})
 	return w
 }
@@ -129,7 +131,7 @@ func (w *Writer) UpdateMeta(patch SessionMeta) {
 	if patch.Workspace != "" {
 		meta.Workspace = patch.Workspace
 	}
-	if !patch.StartedAt.IsZero() {
+	if patch.StartedAt != "" {
 		meta.StartedAt = patch.StartedAt
 	}
 	w.writeMetaLocked(meta)
@@ -155,10 +157,10 @@ func (w *Writer) Close(meta SessionMeta) error {
 	if meta.Error != "" {
 		m.Error = RedactString(meta.Error)
 	}
-	if !meta.EndedAt.IsZero() {
-		m.EndedAt = meta.EndedAt.UTC()
+	if meta.EndedAt != "" {
+		m.EndedAt = meta.EndedAt
 	} else {
-		m.EndedAt = time.Now().UTC()
+		m.EndedAt = formatTimeUTC(time.Now())
 	}
 	w.writeMetaLocked(m)
 	return nil
@@ -183,7 +185,7 @@ func (w *Writer) writeMeta(meta SessionMeta) {
 }
 
 func (w *Writer) readMetaLocked() SessionMeta {
-	meta := SessionMeta{SessionID: w.sessionID, StartedAt: w.started}
+	meta := SessionMeta{SessionID: w.sessionID, StartedAt: formatTimeUTC(w.started)}
 	data, err := os.ReadFile(w.metaPath)
 	if err != nil {
 		return meta
@@ -199,8 +201,8 @@ func (w *Writer) writeMetaLocked(meta SessionMeta) {
 	if meta.SessionID == "" {
 		meta.SessionID = w.sessionID
 	}
-	if meta.StartedAt.IsZero() {
-		meta.StartedAt = w.started
+	if meta.StartedAt == "" {
+		meta.StartedAt = formatTimeUTC(w.started)
 	}
 	b, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {

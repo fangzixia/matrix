@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"matrix/internal/matrixpaths"
 )
 
 // TodoItem 表示单条 TODO 项。
@@ -25,7 +27,7 @@ type TodoItem struct {
 //
 // TodoWriteTool：
 //   - merge=false：整表替换；merge=true：按 id 合并
-//   - 持久化到工作目录 .taor-todos.json
+//   - 持久化到 AppData/workspaces/{id}/todos.json
 func NewTodoWriteTool() *Tool {
 	return &Tool{
 		Name: "todo_write",
@@ -67,13 +69,12 @@ func NewTodoWriteTool() *Tool {
 	}
 }
 
-func todoWriteFilePath() string {
+func todoWriteFilePath() (string, error) {
 	root := getWorkspaceRoot()
 	if root == "" {
-		cwd, _ := os.Getwd()
-		root = cwd
+		return "", fmt.Errorf("未配置工作区")
 	}
-	return filepath.Join(root, ".matrix-todos.json")
+	return matrixpaths.TodosFile(root), nil
 }
 
 func decodeTodos(raw any) ([]TodoItem, error) {
@@ -157,11 +158,12 @@ func execTodoWrite(_ context.Context, args map[string]any) (string, error) {
 		finalItems = newItems
 	}
 
-	todoPath := todoWriteFilePath()
-	if _, err := os.Stat(todoPath); os.IsNotExist(err) {
-		if err := requireNewFileInWorkspace(todoPath); err != nil {
-			return "", fmt.Errorf("todo_write: %w", err)
-		}
+	todoPath, err := todoWriteFilePath()
+	if err != nil {
+		return "", fmt.Errorf("todo_write: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(todoPath), 0o755); err != nil {
+		return "", fmt.Errorf("todo_write: 创建目录失败: %w", err)
 	}
 	if err := todoWriteSave(finalItems); err != nil {
 		return "", fmt.Errorf("todo_write: 保存失败: %w", err)
@@ -170,7 +172,11 @@ func execTodoWrite(_ context.Context, args map[string]any) (string, error) {
 }
 
 func todoWriteLoad() []TodoItem {
-	data, err := os.ReadFile(todoWriteFilePath())
+	path, err := todoWriteFilePath()
+	if err != nil {
+		return nil
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
@@ -182,11 +188,15 @@ func todoWriteLoad() []TodoItem {
 }
 
 func todoWriteSave(items []TodoItem) error {
+	path, err := todoWriteFilePath()
+	if err != nil {
+		return err
+	}
 	data, err := json.MarshalIndent(items, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(todoWriteFilePath(), data, 0o644)
+	return os.WriteFile(path, data, 0o644)
 }
 
 func todoWriteFormat(items []TodoItem) string {

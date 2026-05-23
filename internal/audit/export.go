@@ -8,16 +8,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
+
+	"matrix/internal/matrixpaths"
 )
 
-func sessionsDir(workspaceRoot string) string {
-	return filepath.Join(workspaceRoot, ".matrix", "sessions")
-}
-
 // ListSessions returns recent session indexes (newest first).
-func ListSessions(workspaceRoot string, limit int) ([]SessionIndex, error) {
-	dir := sessionsDir(workspaceRoot)
+func ListSessions(workspacePath string, limit int) ([]SessionIndex, error) {
+	dir := matrixpaths.SessionsDir(workspacePath)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -50,7 +47,7 @@ func ListSessions(workspaceRoot string, limit int) ([]SessionIndex, error) {
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
-		return out[i].StartedAt.After(out[j].StartedAt)
+		return timeRFC3339After(out[i].StartedAt, out[j].StartedAt)
 	})
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
@@ -59,11 +56,11 @@ func ListSessions(workspaceRoot string, limit int) ([]SessionIndex, error) {
 }
 
 // ReadSession loads meta and events for a session.
-func ReadSession(workspaceRoot, sessionID string, opts ExportOptions) (ExportBundle, error) {
-	if workspaceRoot == "" || sessionID == "" {
+func ReadSession(workspacePath, sessionID string, opts ExportOptions) (ExportBundle, error) {
+	if workspacePath == "" || sessionID == "" {
 		return ExportBundle{}, fmt.Errorf("audit: workspace or session_id empty")
 	}
-	dir := sessionsDir(workspaceRoot)
+	dir := matrixpaths.SessionsDir(workspacePath)
 	metaPath := filepath.Join(dir, sessionID+".meta.json")
 	jsonlPath := filepath.Join(dir, sessionID+".jsonl")
 
@@ -83,7 +80,7 @@ func ReadSession(workspaceRoot, sessionID string, opts ExportOptions) (ExportBun
 		Events:    events,
 		JSONLPath: jsonlPath,
 		MetaPath:  metaPath,
-		Subagents: filepath.Join(workspaceRoot, ".matrix", "subagents"),
+		Subagents: matrixpaths.SubagentsDir(workspacePath),
 	}, nil
 }
 
@@ -127,11 +124,11 @@ func FormatForLLM(bundle ExportBundle) string {
 	b.WriteString("# Matrix Session Diagnostic\n\n")
 	b.WriteString("## Summary\n\n")
 	b.WriteString(fmt.Sprintf("- **session_id**: %s\n", m.SessionID))
-	if !m.StartedAt.IsZero() {
-		b.WriteString(fmt.Sprintf("- **started_at**: %s\n", m.StartedAt.UTC().Format(time.RFC3339)))
+	if m.StartedAt != "" {
+		b.WriteString(fmt.Sprintf("- **started_at**: %s\n", m.StartedAt))
 	}
-	if !m.EndedAt.IsZero() {
-		b.WriteString(fmt.Sprintf("- **ended_at**: %s\n", m.EndedAt.UTC().Format(time.RFC3339)))
+	if m.EndedAt != "" {
+		b.WriteString(fmt.Sprintf("- **ended_at**: %s\n", m.EndedAt))
 	}
 	if m.Model != "" {
 		b.WriteString(fmt.Sprintf("- **model**: %s\n", m.Model))

@@ -4,6 +4,16 @@ const STREAM_EVENT = 'agent:stream';
 const SUBAGENT_UPDATE = 'subagent:update';
 const SUBAGENT_DONE = 'subagent:done';
 
+function wailsErrorMessage(error, fallback) {
+    if (typeof error === 'string' && error.trim()) return error.trim();
+    if (error?.message) return error.message;
+    try {
+        const s = String(error);
+        if (s && s !== '[object Object]') return s;
+    } catch { /* ignore */ }
+    return fallback;
+}
+
 const WailsAPI = {
     getMode: () => 'desktop',
 
@@ -12,7 +22,12 @@ const WailsAPI = {
     },
     async setWorkspace(req) {
         await window.go.desktop.Bridge.SetWorkspace(req.path || req);
-        return { path: req.path || req };
+        const ws = await window.go.desktop.Bridge.GetWorkspace();
+        return {
+            path: ws.current || req.path || req,
+            workspaceId: ws.workspaceId || '',
+            recent: ws.recent || [],
+        };
     },
     async openFolderDialog() {
         return window.go.desktop.Bridge.OpenFolderDialog();
@@ -67,7 +82,7 @@ const WailsAPI = {
             console.error('[API Adapter] Session error:', error);
             this._offStreamHooks();
             if (onError) {
-                onError({ error: error.message || '任务执行失败' });
+                onError({ error: wailsErrorMessage(error, '任务执行失败') });
             } else {
                 throw error;
             }
@@ -95,10 +110,22 @@ const WailsAPI = {
             console.error('[API Adapter] Chat session error:', error);
             this._offStreamHooks();
             if (onError) {
-                onError({ error: error.message || '对话执行失败' });
+                onError({ error: wailsErrorMessage(error, '对话执行失败') });
             } else {
                 throw error;
             }
+        }
+    },
+
+    async getChatSessions() {
+        if (window.go.desktop.Bridge.GetChatSessions) {
+            return window.go.desktop.Bridge.GetChatSessions();
+        }
+        return [];
+    },
+    async saveChatSessions(sessions) {
+        if (window.go.desktop.Bridge.SaveChatSessions) {
+            await window.go.desktop.Bridge.SaveChatSessions(sessions || []);
         }
     },
 
@@ -147,7 +174,7 @@ const WailsAPI = {
             if (onDone) onDone(result);
         } catch (error) {
             this._offStreamHooks();
-            if (onError) onError({ error: error.message || '任务执行失败' });
+            if (onError) onError({ error: wailsErrorMessage(error, '任务执行失败') });
             else throw error;
         }
     },

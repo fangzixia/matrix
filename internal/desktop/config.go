@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"matrix/internal/matrixpaths"
 )
 
 // Config 桌面应用配置
@@ -111,17 +113,9 @@ func DefaultConfig() *Config {
 	}
 }
 
-// ConfigDir 返回配置目录路径
+// ConfigDir 返回配置目录路径（与 matrixpaths.AppDataDir 相同）。
 func ConfigDir() (string, error) {
-	base, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	dir := filepath.Join(base, "matrix")
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", err
-	}
-	return dir, nil
+	return matrixpaths.AppDataDir()
 }
 
 // ConfigPath 返回配置文件路径
