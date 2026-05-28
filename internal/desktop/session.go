@@ -2,7 +2,6 @@ package desktop
 
 import (
 	"context"
-	"fmt"
 	"matrix/internal/audit"
 	"matrix/internal/logger"
 	"sync"
@@ -44,7 +43,7 @@ func (b *Bridge) runAgentSession(initial []query.Message, chatSessionID string, 
 		return nil, errNoAPIKey()
 	}
 	if len(initial) == 0 {
-		return nil, fmt.Errorf("会话消息不能为空")
+		return nil, NewAppError(ErrorValidation, "会话消息不能为空", false, nil)
 	}
 
 	b.sessions.mu.Lock()
@@ -179,5 +178,5 @@ func (b *Bridge) CancelAgentSession() error {
 }
 
 func errNoAPIKey() error {
-	return fmt.Errorf("请先配置 API Key")
+	return NewAppError(ErrorNotConfigured, "请先配置 API Key", false, nil)
 }

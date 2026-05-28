@@ -2,19 +2,35 @@ package tasks
 
 import (
 	"path/filepath"
-	"strings"
 )
 
 const uiScanPreset = ``
 
+func NewUIScanWorkflow(userInput string) Workflow {
+	outDir := filepath.Join(".matrix", "pagescan")
+	return Workflow{
+		Kind:         KindUIScan,
+		State:        StatePrepared,
+		Preset:       uiScanPreset,
+		UserInput:    userInput,
+		FileLabel:    "输出目录",
+		FilePath:     outDir,
+		FileFallback: outDir,
+		DefaultTask:  "请根据我提供的访问地址与登录信息，生成完整的 Web 应用页面结构扫描报告。",
+		ExpectedArtifacts: []string{
+			filepath.Join(outDir, "页面结构扫描报告"),
+		},
+		Acceptance: []string{
+			"覆盖用户提供的关键页面和登录路径",
+			"报告页面结构、交互入口和异常状态",
+		},
+		Recovery: []string{
+			"访问失败时记录 URL、错误和可复测步骤",
+		},
+	}
+}
+
 // BuildUIScanTask 组装「页面扫描」任务 prompt。
 func BuildUIScanTask(userInput string) string {
-	outDir := filepath.Join(".spec", "pagescan")
-	var b strings.Builder
-	b.WriteString(uiScanPreset)
-	b.WriteString("\n\n输出目录: ")
-	b.WriteString(outDir)
-	b.WriteString("\n\n扫描说明:\n")
-	b.WriteString(userPart(userInput, "请根据我提供的访问地址与登录信息，生成完整的 Web 应用页面结构扫描报告。"))
-	return b.String()
+	return NewUIScanWorkflow(userInput).Prompt()
 }

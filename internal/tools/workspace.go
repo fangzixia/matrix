@@ -10,7 +10,7 @@ import (
 
 var (
 	workspaceRootMu sync.RWMutex
-	workspaceRoot   string // 绝对路径；空表示未配置工作区，新建文件不做越界校验
+	workspaceRoot   string // 绝对路径；空表示未配置工作区，文件工具退回进程 CWD
 )
 
 // SetWorkspaceRoot 设置当前会话的工作区根目录（由 desktop Bridge 在启动 Agent 时调用）。
@@ -37,8 +37,8 @@ func getWorkspaceRoot() string {
 	return workspaceRoot
 }
 
-// resolveToolPathForNewFile 将路径解析为绝对路径：相对路径相对于工作区根，未配置时相对于进程 CWD。
-func resolveToolPathForNewFile(path string) (string, error) {
+// ResolveWorkspacePath 将工具路径解析为绝对路径：相对路径相对于工作区根，未配置时相对于进程 CWD。
+func ResolveWorkspacePath(path string) (string, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return "", fmt.Errorf("路径为空")
@@ -57,8 +57,8 @@ func resolveToolPathForNewFile(path string) (string, error) {
 	return filepath.Clean(filepath.Join(base, path)), nil
 }
 
-// requireNewFileInWorkspace 校验新建目标路径必须位于已配置的工作区内。
-func requireNewFileInWorkspace(absPath string) error {
+// RequirePathInWorkspace 校验目标路径必须位于已配置的工作区内。
+func RequirePathInWorkspace(absPath string) error {
 	root := getWorkspaceRoot()
 	if root == "" {
 		return nil
@@ -68,7 +68,7 @@ func requireNewFileInWorkspace(absPath string) error {
 		return fmt.Errorf("无效路径: %w", err)
 	}
 	if !pathWithinRoot(abs, root) {
-		return fmt.Errorf("新建文件必须位于工作区内 (%s)，拒绝写入: %s", root, abs)
+		return fmt.Errorf("文件操作必须位于工作区内 (%s)，拒绝访问: %s", root, abs)
 	}
 	return nil
 }

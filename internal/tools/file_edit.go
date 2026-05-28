@@ -61,7 +61,16 @@ func execFileEdit(_ context.Context, args map[string]any) (string, error) {
 	newStr, _ := getString(args, "new_string")
 	replaceAll, _ := args["replace_all"].(bool)
 
-	// 读取现有内容（路径按调用方传入解析，修改已有文件不做工作区限制）。
+	resolvedPath, resolveErr := ResolveWorkspacePath(filePath)
+	if resolveErr != nil {
+		return "", fmt.Errorf("str_replace_editor: %w", resolveErr)
+	}
+	if err := RequirePathInWorkspace(resolvedPath); err != nil {
+		return "", fmt.Errorf("str_replace_editor: %w", err)
+	}
+	filePath = resolvedPath
+
+	// 读取现有内容。所有写入路径均由统一工作区策略约束。
 	content, fileExists, err := readTextFile(filePath)
 	if err != nil {
 		return "", fmt.Errorf("str_replace_editor: 读取文件失败: %w", err)
@@ -74,23 +83,6 @@ func execFileEdit(_ context.Context, args map[string]any) (string, error) {
 				"str_replace_editor: 文件 %s 已存在且非空。若要替换内容，请提供非空 old_string",
 				filePath)
 		}
-		if !fileExists {
-			resolved, resolveErr := resolveToolPathForNewFile(filePath)
-			if resolveErr != nil {
-				return "", fmt.Errorf("str_replace_editor: %w", resolveErr)
-			}
-			if err := requireNewFileInWorkspace(resolved); err != nil {
-				return "", fmt.Errorf("str_replace_editor: %w", err)
-			}
-			filePath = resolved
-		} else if !filepath.IsAbs(filePath) {
-			cwd, cwdErr := os.Getwd()
-			if cwdErr != nil {
-				return "", fmt.Errorf("str_replace_editor: 获取工作目录失败: %w", cwdErr)
-			}
-			filePath = filepath.Join(cwd, filePath)
-		}
-
 		if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
 			return "", fmt.Errorf("str_replace_editor: 创建目录失败: %w", err)
 		}
@@ -101,15 +93,6 @@ func execFileEdit(_ context.Context, args map[string]any) (string, error) {
 			return fmt.Sprintf("已更新 %s（原文件为空）", filePath), nil
 		}
 		return fmt.Sprintf("已创建 %s", filePath), nil
-	}
-
-	// 修改已有文件：统一为绝对路径，不校验工作区边界。
-	if !filepath.IsAbs(filePath) {
-		cwd, cwdErr := os.Getwd()
-		if cwdErr != nil {
-			return "", fmt.Errorf("str_replace_editor: 获取工作目录失败: %w", cwdErr)
-		}
-		filePath = filepath.Join(cwd, filePath)
 	}
 
 	// ── 文件不存在 ─────────────────────────────────────────────────────

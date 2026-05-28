@@ -14,6 +14,16 @@ function wailsErrorMessage(error, fallback) {
     return fallback;
 }
 
+function normalizeError(error, fallback, code = 'transport_error') {
+    if (error?.error_info) return error.error_info;
+    if (error?.code && error?.message) return error;
+    return {
+        code: error?.error_code || code,
+        message: wailsErrorMessage(error, fallback),
+        retryable: Boolean(error?.retryable),
+    };
+}
+
 const WailsAPI = {
     getMode: () => 'desktop',
 
@@ -77,12 +87,13 @@ const WailsAPI = {
         try {
             const result = await window.go.desktop.Bridge.RunAgentSession(task);
             this._offStreamHooks();
-            if (onDone) onDone(result);
+            if (onDone) onDone(this._normalizeRunResult(result));
         } catch (error) {
             console.error('[API Adapter] Session error:', error);
             this._offStreamHooks();
             if (onError) {
-                onError({ error: wailsErrorMessage(error, '任务执行失败') });
+                const info = normalizeError(error, '任务执行失败');
+                onError({ error: info.message, error_info: info, error_code: info.code });
             } else {
                 throw error;
             }
@@ -105,12 +116,13 @@ const WailsAPI = {
                 bootstrap: bootstrap || [],
             });
             this._offStreamHooks();
-            if (onDone) onDone(result);
+            if (onDone) onDone(this._normalizeRunResult(result));
         } catch (error) {
             console.error('[API Adapter] Chat session error:', error);
             this._offStreamHooks();
             if (onError) {
-                onError({ error: wailsErrorMessage(error, '对话执行失败') });
+                const info = normalizeError(error, '对话执行失败');
+                onError({ error: info.message, error_info: info, error_code: info.code });
             } else {
                 throw error;
             }
@@ -171,12 +183,29 @@ const WailsAPI = {
                 ? await run(userInput, filePath)
                 : await window.go.desktop.Bridge.RunAgentSession(userInput);
             this._offStreamHooks();
-            if (onDone) onDone(result);
+            if (onDone) onDone(this._normalizeRunResult(result));
         } catch (error) {
             this._offStreamHooks();
-            if (onError) onError({ error: wailsErrorMessage(error, '任务执行失败') });
+            if (onError) {
+                const info = normalizeError(error, '任务执行失败');
+                onError({ error: info.message, error_info: info, error_code: info.code });
+            }
             else throw error;
         }
+    },
+
+    _normalizeRunResult(result) {
+        if (!result) return result;
+        if (result.has_error) {
+            const info = normalizeError(result, result.error || '任务执行失败', 'task_failed');
+            return {
+                ...result,
+                error: info.message,
+                error_code: info.code,
+                error_info: info,
+            };
+        }
+        return result;
     },
 
     /** 执行任务页：按任务类型路由到对应后端入口 */

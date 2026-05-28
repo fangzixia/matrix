@@ -33,28 +33,15 @@ type Bridge struct {
 	sessions         *sessionRunner
 	chatTranscripts  *ChatTranscriptStore
 	chatSessionStore *ChatSessionStore
+	fileService      *FileService
+	settingsService  *SettingsService
+	workspaceService *WorkspaceService
+	mcpService       *MCPService
 }
 
 // NewBridge 创建新的 Bridge 实例
 func NewBridge(cfg *Config) *Bridge {
 	mcpManager := mcp.NewManager()
-
-	// 初始化 MCP 配置
-	if cfg.MCPServers != nil {
-		mcpConfigs := make(map[string]mcp.ServerConfig)
-		for name, serverCfg := range cfg.MCPServers {
-			mcpConfigs[name] = mcp.ServerConfig{
-				Command:     serverCfg.Command,
-				Args:        serverCfg.Args,
-				Env:         serverCfg.Env,
-				URL:         serverCfg.URL,
-				Headers:     serverCfg.Headers,
-				Disabled:    serverCfg.Disabled,
-				AutoApprove: serverCfg.AutoApprove,
-			}
-		}
-		mcpManager.UpdateConfigs(mcpConfigs)
-	}
 
 	b := &Bridge{
 		config:           cfg,
@@ -64,8 +51,17 @@ func NewBridge(cfg *Config) *Bridge {
 		mcpManager:       mcpManager,
 		sessions:         &sessionRunner{},
 	}
+	b.settingsService = NewSettingsService(cfg)
+	b.workspaceService = NewWorkspaceService(cfg, func(oldRoot, newRoot string) {
+		if b.chatTranscripts != nil {
+			b.chatTranscripts.InvalidateCache()
+		}
+	})
+	b.mcpService = NewMCPService(mcpManager)
+	b.mcpService.UpdateConfigs(mcpConfigsFromConfig(cfg))
 	b.chatTranscripts = NewChatTranscriptStore(b.workspaceRoot)
 	b.chatSessionStore = NewChatSessionStore(b.workspaceRoot)
+	b.fileService = NewFileService(b.workspaceRoot)
 	return b
 }
 
@@ -83,17 +79,7 @@ func (b *Bridge) Startup(ctx context.Context) {
 }
 
 func (b *Bridge) autoConnectMCPServers() {
-	if b.mcpManager == nil {
-		return
-	}
-	statuses := b.mcpManager.ReconnectAll()
-	available := 0
-	for _, s := range statuses {
-		if s.Available {
-			available++
-		}
-	}
-	logger.Infof("MCP auto-connect: %d/%d servers available", available, len(statuses))
+	b.mcpService.AutoConnect()
 }
 
 // Shutdown Wails 关闭回调
@@ -214,15 +200,20 @@ func (b *Bridge) buildQueryConfig(initial []query.Message, sessionID string, hub
 
 // RunResult 任务执行结果
 type RunResult struct {
-	Output   string `json:"output"`
-	HasError bool   `json:"has_error"`
-	Error    string `json:"error,omitempty"`
+	Output     string     `json:"output"`
+	HasError   bool       `json:"has_error"`
+	Error      string     `json:"error,omitempty"`
+	ErrorCode  string     `json:"error_code,omitempty"`
+	ErrorInfo  *ErrorInfo `json:"error_info,omitempty"`
+	StopReason string     `json:"stop_reason,omitempty"`
+	TaskKind   string     `json:"task_kind,omitempty"`
+	TaskState  string     `json:"task_state,omitempty"`
 }
 
 // RunTask 执行 Agent（非流式）。
 func (b *Bridge) RunTask(task string) (*RunResult, error) {
 	if b.client == nil {
-		return nil, fmt.Errorf("请先配置 API Key")
+		return nil, errNoAPIKey()
 	}
 	return b.toRunResult(b.executeAgent(b.ctx, task, stream.NopSink{}))
 }
@@ -235,6 +226,9 @@ func (b *Bridge) RunAgentSession(task string) (*RunResult, error) {
 }
 
 func (b *Bridge) workspaceRoot() string {
+	if b.workspaceService != nil {
+		return b.workspaceService.Root()
+	}
 	return matrixpaths.NormalizeWorkspacePath(b.config.Workspace.Root)
 }
 
@@ -254,10 +248,17 @@ func (b *Bridge) executeAgent(ctx context.Context, task string, sink query.Strea
 }
 
 func (b *Bridge) toRunResult(r query.Result) (*RunResult, error) {
-	if r.Err != nil {
-		return &RunResult{HasError: true, Error: r.Err.Error()}, nil
+	info := runErrorInfo(r)
+	if info != nil {
+		return &RunResult{
+			HasError:   true,
+			Error:      info.Message,
+			ErrorCode:  info.Code,
+			ErrorInfo:  info,
+			StopReason: string(r.StopReason),
+		}, nil
 	}
-	return &RunResult{Output: r.Answer}, nil
+	return &RunResult{Output: r.Answer, StopReason: string(r.StopReason)}, nil
 }
 
 // formatUserMessage 构建首轮 user 消息（工作区 + prompt）。
@@ -289,36 +290,22 @@ func (b *Bridge) connectedMCPServerNames() []string {
 // GetSettings 读取用户配置
 func (b *Bridge) GetSettings() (*Settings, error) {
 	logger.Info("GetSettings")
-	return b.config.ToSettings(), nil
+	return b.settingsService.Get(), nil
 }
 
 // SaveSettings 保存用户配置并热重载
 func (b *Bridge) SaveSettings(s *Settings) error {
 	logger.Infof("SaveSettings: model=%s", s.Model.Model)
 
-	b.config.FromSettings(s)
-
-	if err := SaveConfig(b.config); err != nil {
-		return fmt.Errorf("save config: %w", err)
+	mcpConfigs, err := b.settingsService.Save(s)
+	if err != nil {
+		return err
 	}
 
 	b.updateClient()
 
-	// 更新 MCP 配置
-	if s.MCPServers != nil {
-		mcpConfigs := make(map[string]mcp.ServerConfig)
-		for name, serverCfg := range s.MCPServers {
-			mcpConfigs[name] = mcp.ServerConfig{
-				Command:     serverCfg.Command,
-				Args:        serverCfg.Args,
-				Env:         serverCfg.Env,
-				URL:         serverCfg.URL,
-				Headers:     serverCfg.Headers,
-				Disabled:    serverCfg.Disabled,
-				AutoApprove: serverCfg.AutoApprove,
-			}
-		}
-		b.mcpManager.UpdateConfigs(mcpConfigs)
+	if mcpConfigs != nil {
+		b.mcpService.UpdateConfigs(mcpConfigs)
 		go b.autoConnectMCPServers()
 	}
 
@@ -329,58 +316,13 @@ func (b *Bridge) SaveSettings(s *Settings) error {
 func (b *Bridge) GetWorkspace() (map[string]interface{}, error) {
 	root := b.workspaceRoot()
 	logger.Infof("GetWorkspace: current=%s", root)
-	out := map[string]interface{}{
-		"current": root,
-		"recent":  b.config.Workspace.Recent,
-	}
-	if root != "" && root != "." {
-		out["workspaceId"] = matrixpaths.WorkspaceID(root)
-	}
-	return out, nil
+	return b.workspaceService.Get(), nil
 }
 
 // SetWorkspace 切换工作区
 func (b *Bridge) SetWorkspace(path string) error {
 	logger.Infof("SetWorkspace: path=%s", path)
-
-	info, err := os.Stat(path)
-	if err != nil || !info.IsDir() {
-		return fmt.Errorf("路径不存在或不是目录")
-	}
-
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return fmt.Errorf("无效路径")
-	}
-
-	oldRoot := b.config.Workspace.Root
-	if oldAbs, err := filepath.Abs(oldRoot); err == nil && oldRoot != "" {
-		oldRoot = oldAbs
-	}
-	b.config.Workspace.Root = abs
-	if b.chatTranscripts != nil && oldRoot != abs {
-		b.chatTranscripts.InvalidateCache()
-	}
-	tools.SetWorkspaceRoot(matrixpaths.NormalizeWorkspacePath(abs))
-
-	// 更新最近列表
-	recent := []string{abs}
-	for _, r := range b.config.Workspace.Recent {
-		if r != abs && len(recent) < 10 {
-			recent = append(recent, r)
-		}
-	}
-	b.config.Workspace.Recent = recent
-
-	if err := SaveConfig(b.config); err != nil {
-		return err
-	}
-
-	if err := matrixpaths.EnsureWorkspaceStore(abs); err != nil {
-		logger.Warnf("workspace store: %v", err)
-	}
-
-	return nil
+	return b.workspaceService.Set(path)
 }
 
 // OpenFolderDialog 打开系统文件夹选择对话框
@@ -392,10 +334,9 @@ func (b *Bridge) OpenFolderDialog() (string, error) {
 
 // ReadFile 读取工作区内的文件
 func (b *Bridge) ReadFile(path string) (map[string]interface{}, error) {
-	fullPath := b.resolvePath(path)
-	content, err := os.ReadFile(fullPath)
+	content, err := b.fileService.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read file: %w", err)
+		return nil, err
 	}
 	return map[string]interface{}{
 		"content": string(content),
@@ -404,11 +345,7 @@ func (b *Bridge) ReadFile(path string) (map[string]interface{}, error) {
 
 // SaveFile 保存文件到工作区
 func (b *Bridge) SaveFile(path, content string) error {
-	fullPath := b.resolvePath(path)
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-		return fmt.Errorf("create directory: %w", err)
-	}
-	return os.WriteFile(fullPath, []byte(content), 0644)
+	return b.fileService.SaveFile(path, content)
 }
 
 // FileInfo 文件信息
@@ -420,23 +357,9 @@ type FileInfo struct {
 
 // ListFiles 列出目录内容
 func (b *Bridge) ListFiles(path string) (map[string]interface{}, error) {
-	fullPath := b.resolvePath(path)
-	entries, err := os.ReadDir(fullPath)
+	files, err := b.fileService.ListFiles(path)
 	if err != nil {
-		return nil, fmt.Errorf("read directory: %w", err)
-	}
-
-	files := make([]FileInfo, 0, len(entries))
-	for _, entry := range entries {
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		files = append(files, FileInfo{
-			Name:  entry.Name(),
-			IsDir: entry.IsDir(),
-			Size:  info.Size(),
-		})
+		return nil, err
 	}
 
 	return map[string]interface{}{
@@ -452,9 +375,9 @@ type RequirementInfo struct {
 	FullPath string `json:"fullPath"`
 }
 
-// GetRequirements 列出工作区 .spec 下的需求文件
+// GetRequirements 列出工作区 .matrix 下的需求文件
 func (b *Bridge) GetRequirements() (map[string]interface{}, error) {
-	specDir := filepath.Join(b.config.Workspace.Root, ".spec")
+	specDir := filepath.Join(b.config.Workspace.Root, ".matrix")
 	entries, err := os.ReadDir(specDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -472,7 +395,7 @@ func (b *Bridge) GetRequirements() (map[string]interface{}, error) {
 			continue
 		}
 		id := strings.TrimSuffix(e.Name(), ".md")
-		relPath := filepath.ToSlash(filepath.Join(".spec", e.Name()))
+		relPath := filepath.ToSlash(filepath.Join(".matrix", e.Name()))
 		result = append(result, RequirementInfo{
 			ID:       id,
 			Path:     relPath,
@@ -494,9 +417,9 @@ type EvaluationInfo struct {
 	Score         int    `json:"score"`
 }
 
-// GetEvaluations 列出工作区 .spec 下的评测文件
+// GetEvaluations 列出工作区 .matrix 下的评测文件
 func (b *Bridge) GetEvaluations() (map[string]interface{}, error) {
-	specDir := filepath.Join(b.config.Workspace.Root, ".spec")
+	specDir := filepath.Join(b.config.Workspace.Root, ".matrix")
 	entries, err := os.ReadDir(specDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -519,7 +442,7 @@ func (b *Bridge) GetEvaluations() (map[string]interface{}, error) {
 		if len(parts) >= 3 {
 			reqID = "REQ-" + parts[2]
 		}
-		relPath := filepath.ToSlash(filepath.Join(".spec", e.Name()))
+		relPath := filepath.ToSlash(filepath.Join(".matrix", e.Name()))
 		result = append(result, EvaluationInfo{
 			ID:            name,
 			RequirementID: reqID,
@@ -533,152 +456,43 @@ func (b *Bridge) GetEvaluations() (map[string]interface{}, error) {
 	return map[string]interface{}{"evaluations": result}, nil
 }
 
-// resolvePath 解析相对路径为绝对路径
-func (b *Bridge) resolvePath(path string) string {
-	if filepath.IsAbs(path) {
-		return path
-	}
-	return filepath.Join(b.config.Workspace.Root, path)
-}
-
 // TestMCPServer 测试 MCP 服务器连接
 func (b *Bridge) TestMCPServer(serverName string) (*MCPServerStatus, error) {
 	logger.Infof("TestMCPServer: %s", serverName)
-
-	status := b.mcpManager.TestServer(serverName)
-
-	// 转换为前端格式
-	return &MCPServerStatus{
-		Name:       status.Name,
-		Available:  status.Available,
-		ToolCount:  status.ToolCount,
-		Tools:      status.Tools,
-		Error:      status.Error,
-		LastTested: status.LastTested,
-	}, nil
+	return b.mcpService.TestServer(serverName), nil
 }
 
 // TestAllMCPServers 测试所有 MCP 服务器
 func (b *Bridge) TestAllMCPServers() (map[string]*MCPServerStatus, error) {
 	logger.Info("TestAllMCPServers")
-
-	statuses := b.mcpManager.ReconnectAll()
-
-	// 转换为前端格式
-	return mcpStatusesToFrontend(statuses), nil
-}
-
-func mcpStatusesToFrontend(statuses map[string]*mcp.ServerStatus) map[string]*MCPServerStatus {
-	results := make(map[string]*MCPServerStatus)
-	for name, status := range statuses {
-		results[name] = &MCPServerStatus{
-			Name:       status.Name,
-			Available:  status.Available,
-			ToolCount:  status.ToolCount,
-			Tools:      status.Tools,
-			Error:      status.Error,
-			LastTested: status.LastTested,
-		}
-	}
-	return results
+	return b.mcpService.TestAllServers(), nil
 }
 
 // GetMCPServerStatus 获取 MCP 服务器状态（从缓存）
 func (b *Bridge) GetMCPServerStatus(serverName string) (*MCPServerStatus, error) {
-	status := b.mcpManager.GetServerStatus(serverName)
-
-	return &MCPServerStatus{
-		Name:      status.Name,
-		Available: status.Available,
-		ToolCount: status.ToolCount,
-		Tools:     status.Tools,
-		Error:     status.Error,
-	}, nil
+	return b.mcpService.GetServerStatus(serverName), nil
 }
 
 // GetAllMCPServerStatuses 获取所有 MCP 服务器状态
 func (b *Bridge) GetAllMCPServerStatuses() (map[string]*MCPServerStatus, error) {
 	logger.Info("GetAllMCPServerStatuses")
-
-	statuses := b.mcpManager.GetAllServerStatuses()
-
-	// 转换为前端格式
-	results := make(map[string]*MCPServerStatus)
-	for name, status := range statuses {
-		results[name] = &MCPServerStatus{
-			Name:      status.Name,
-			Available: status.Available,
-			ToolCount: status.ToolCount,
-			Tools:     status.Tools,
-			Error:     status.Error,
-		}
-	}
-
-	return results, nil
+	return b.mcpService.GetAllServerStatuses(), nil
 }
 
 // CallMCPTool 调用 MCP 工具
 func (b *Bridge) CallMCPTool(serverName, toolName string, arguments map[string]interface{}) (map[string]interface{}, error) {
 	logger.Infof("CallMCPTool: server=%s, tool=%s", serverName, toolName)
-
-	result, err := b.mcpManager.CallTool(serverName, toolName, arguments)
-	if err != nil {
-		return nil, fmt.Errorf("call tool: %w", err)
-	}
-
-	// 转换为前端格式
-	response := map[string]interface{}{
-		"isError": result.IsError,
-		"content": result.Content,
-	}
-
-	return response, nil
+	return b.mcpService.CallTool(serverName, toolName, arguments)
 }
 
 // ListMCPTools 列出 MCP 服务器的所有工具
 func (b *Bridge) ListMCPTools(serverName string) ([]map[string]interface{}, error) {
 	logger.Infof("ListMCPTools: server=%s", serverName)
-
-	tools, err := b.mcpManager.ListTools(serverName)
-	if err != nil {
-		return nil, fmt.Errorf("list tools: %w", err)
-	}
-
-	// 转换为前端格式
-	result := make([]map[string]interface{}, len(tools))
-	for i, tool := range tools {
-		result[i] = map[string]interface{}{
-			"name":        tool.Name,
-			"description": tool.Description,
-			"inputSchema": tool.InputSchema,
-		}
-	}
-
-	return result, nil
+	return b.mcpService.ListTools(serverName)
 }
 
 // ListAllMCPTools 列出所有 MCP 服务器的工具
 func (b *Bridge) ListAllMCPTools() (map[string]interface{}, error) {
 	logger.Info("ListAllMCPTools")
-
-	allTools, err := b.mcpManager.ListAllTools()
-	if err != nil {
-		return nil, fmt.Errorf("list all tools: %w", err)
-	}
-
-	// 转换为前端格式
-	result := make(map[string]interface{})
-	for serverName, tools := range allTools {
-		toolList := make([]map[string]interface{}, len(tools))
-		for i, tool := range tools {
-			toolList[i] = map[string]interface{}{
-				"name":        tool.Name,
-				"description": tool.Description,
-				"inputSchema": tool.InputSchema,
-			}
-		}
-		result[serverName] = toolList
-	}
-
-	return result, nil
+	return b.mcpService.ListAllTools()
 }

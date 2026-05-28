@@ -56,20 +56,12 @@ var WriteFile = &Tool{
 			return "", fmt.Errorf("write_file: 缺少必需参数 'path'")
 		}
 
-		targetPath := path
-		if _, err := os.Stat(path); err != nil {
-			if os.IsNotExist(err) {
-				resolved, resolveErr := resolveToolPathForNewFile(path)
-				if resolveErr != nil {
-					return "", fmt.Errorf("write_file: %w", resolveErr)
-				}
-				if err := requireNewFileInWorkspace(resolved); err != nil {
-					return "", fmt.Errorf("write_file: %w", err)
-				}
-				targetPath = resolved
-			} else {
-				return "", fmt.Errorf("write_file: %w", err)
-			}
+		targetPath, resolveErr := ResolveWorkspacePath(path)
+		if resolveErr != nil {
+			return "", fmt.Errorf("write_file: %w", resolveErr)
+		}
+		if err := RequirePathInWorkspace(targetPath); err != nil {
+			return "", fmt.Errorf("write_file: %w", err)
 		}
 
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
