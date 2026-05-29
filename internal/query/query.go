@@ -32,11 +32,6 @@ func sessionID(cfg Config) string {
 	return uuid.NewString()
 }
 
-// Run 启动 TAOR 会话并阻塞直到循环终止（不推送流式消息）。
-func Run(ctx context.Context, cfg Config) Result {
-	return RunSession(ctx, cfg, stream.NopSink{})
-}
-
 // RunSession 启动 TAOR 会话，经 sink 推送 SDK 风格过程消息。
 func RunSession(ctx context.Context, cfg Config, sink StreamSink) Result {
 	if sink == nil {

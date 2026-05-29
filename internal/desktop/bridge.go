@@ -93,15 +93,18 @@ func (b *Bridge) Shutdown(_ context.Context) {
 
 // updateClient 更新 LLM 客户端
 func (b *Bridge) updateClient() {
-	if b.config.Model.APIKey != "" {
-		b.client = llm.NewClient(b.config.Model.BaseURL, b.config.Model.APIKey)
+	m := b.config.ActiveModelConfig()
+	if m.APIKey != "" {
+		b.client = llm.NewClient(m.BaseURL, m.APIKey)
+	} else {
+		b.client = nil
 	}
 }
 
 func (b *Bridge) contextPolicy() query.ContextPolicy {
 	autoTh := b.config.Context.AutoCompactThreshold
 	if autoTh <= 0 {
-		autoTh = b.config.Model.SmartCompressThreshold
+		autoTh = b.config.ActiveModelConfig().SmartCompressThreshold
 	}
 	keepRecent := b.config.Context.KeepRecentMessages
 	if keepRecent < 1 {
@@ -153,14 +156,15 @@ func (b *Bridge) buildQueryConfig(initial []query.Message, sessionID string, hub
 	}
 
 	workerOnly := coordinator.CloneWorkerRegistry(workerReg)
+	activeModel := b.config.ActiveModelConfig()
 	coordCfg := coordinator.Config{
 		LLM:                b.client,
-		Model:              b.config.Model.Model,
+		Model:              activeModel.Model,
 		AgentRegistry:      b.subAgentRegistry,
 		ToolRegistry:       workerOnly,
 		CanUseTool:         b.canUseTool(),
 		MaxTurns:           200,
-		MaxTokens:          b.config.Model.MaxTokens,
+		MaxTokens:          activeModel.MaxTokens,
 		ContextPolicy:      b.contextPolicy(),
 		MaxToolResultRunes: b.config.Context.MaxToolResultRunes,
 		Async:              b.coordinatorAsync,
@@ -182,11 +186,11 @@ func (b *Bridge) buildQueryConfig(initial []query.Message, sessionID string, hub
 
 	return query.Config{
 		LLM:                b.client,
-		Model:              b.config.Model.Model,
+		Model:              activeModel.Model,
 		SystemPrompt:       prompt,
 		Registry:           reg,
 		MaxTurns:           200,
-		MaxTokens:          b.config.Model.MaxTokens,
+		MaxTokens:          activeModel.MaxTokens,
 		ContextPolicy:      b.contextPolicy(),
 		MaxToolResultRunes: b.config.Context.MaxToolResultRunes,
 		CanUseTool:         b.canUseTool(),
@@ -295,7 +299,11 @@ func (b *Bridge) GetSettings() (*Settings, error) {
 
 // SaveSettings 保存用户配置并热重载
 func (b *Bridge) SaveSettings(s *Settings) error {
-	logger.Infof("SaveSettings: model=%s", s.Model.Model)
+	activeID := ""
+	if s != nil {
+		activeID = s.ActiveModelID
+	}
+	logger.Infof("SaveSettings: models=%d active_id=%s", len(s.Models), activeID)
 
 	mcpConfigs, err := b.settingsService.Save(s)
 	if err != nil {
@@ -309,6 +317,23 @@ func (b *Bridge) SaveSettings(s *Settings) error {
 		go b.autoConnectMCPServers()
 	}
 
+	return nil
+}
+
+// SetActiveModel 切换当前使用的模型（无需打开配置页）
+func (b *Bridge) SetActiveModel(modelID string) error {
+	if modelID == "" {
+		return NewAppError(ErrorValidation, "模型 ID 不能为空", false, nil)
+	}
+	if !b.config.SetActiveModelID(modelID) {
+		return NewAppError(ErrorValidation, "未找到该模型配置", false, nil)
+	}
+	if err := SaveConfig(b.config); err != nil {
+		return wrapInternal("保存配置失败", err)
+	}
+	b.updateClient()
+	m := b.config.ActiveModel()
+	logger.Infof("SetActiveModel: id=%s name=%s model=%s", m.ID, m.Name, m.Model)
 	return nil
 }
 

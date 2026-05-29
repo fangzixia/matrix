@@ -50,6 +50,10 @@ const WailsAPI = {
         await window.go.desktop.Bridge.SaveSettings(settings);
         return { success: true };
     },
+    async setActiveModel(modelId) {
+        await window.go.desktop.Bridge.SetActiveModel(modelId);
+        return { success: true };
+    },
 
     async listFiles(path) {
         const result = await window.go.desktop.Bridge.ListFiles(path);

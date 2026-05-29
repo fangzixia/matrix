@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Build Agent - Web 项目开发闭环</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/style.css?v=20260524-desktop-flex">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260529-models-layout2">
 </head>
 <body>
     <div class="app">
@@ -28,9 +28,15 @@
                     <a href="#history" class="nav-link" data-page="history">验收历史</a>
                     <a href="#config" class="nav-link" data-page="config">系统配置</a>
                 </nav>
-                <div class="workspace-indicator" id="workspace-indicator" title="点击切换工作区">
-                    <span class="workspace-icon">📁</span>
-                    <span class="workspace-path" id="workspace-path-display">未选择工作区</span>
+                <div class="header-actions">
+                    <div class="model-selector-wrap" title="切换当前使用的模型">
+                        <span class="model-selector-icon">🤖</span>
+                        <select id="active-model-select" class="model-selector" aria-label="选择模型"></select>
+                    </div>
+                    <div class="workspace-indicator" id="workspace-indicator" title="点击切换工作区">
+                        <span class="workspace-icon">📁</span>
+                        <span class="workspace-path" id="workspace-path-display">未选择工作区</span>
+                    </div>
                 </div>
             </div>
         </header>
@@ -251,28 +257,59 @@
 
                     <div id="config-editor-container" style="display:none;">
                         <!-- 模型配置 -->
-                        <div class="config-section">
+                        <div class="config-section config-section--models">
                             <div class="config-section-title">模型配置</div>
-                            <div class="config-section-body">
-                                <div class="config-field">
-                                    <label class="config-field-label">API 地址</label>
-                                    <input type="text" id="model-base-url" class="config-field-input" placeholder="https://api.openai.com/v1" />
+                            <div class="config-section-body-models">
+                                <div class="models-config-layout">
+                                    <aside class="models-list-panel">
+                                        <div class="models-list-header">
+                                            <span class="models-list-title">已配置模型</span>
+                                            <button type="button" class="btn btn-sm btn-secondary" id="add-model-btn" title="添加模型">＋ 添加</button>
+                                        </div>
+                                        <div id="models-list" class="models-list"></div>
+                                    </aside>
+                                    <div class="model-editor-panel">
+                                        <div class="model-editor-header">
+                                            <h3 class="model-editor-heading">模型详情</h3>
+                                            <p class="model-editor-hint">在左侧选择模型后，在此编辑连接参数</p>
+                                        </div>
+                                        <div class="model-editor-form">
+                                            <div class="config-field">
+                                                <label class="config-field-label" for="model-profile-name">显示名称</label>
+                                                <input type="text" id="model-profile-name" class="config-field-input" placeholder="例如：DeepSeek" />
+                                            </div>
+                                            <div class="config-field">
+                                                <label class="config-field-label" for="model-name">模型 ID</label>
+                                                <input type="text" id="model-name" class="config-field-input" placeholder="gpt-4o-mini" />
+                                            </div>
+                                            <div class="config-field">
+                                                <label class="config-field-label" for="model-base-url">API 地址</label>
+                                                <input type="text" id="model-base-url" class="config-field-input" placeholder="https://api.openai.com/v1" />
+                                            </div>
+                                            <div class="config-field">
+                                                <label class="config-field-label" for="model-api-key">API Key</label>
+                                                <input type="password" id="model-api-key" class="config-field-input" placeholder="sk-..." autocomplete="off" />
+                                            </div>
+                                            <div class="config-field">
+                                                <label class="config-field-label" for="model-max-tokens">单次输出 Max Tokens</label>
+                                                <input type="number" min="256" id="model-max-tokens" class="config-field-input" placeholder="8192" />
+                                            </div>
+                                            <div class="config-field">
+                                                <label class="config-field-label" for="model-smart-compress-threshold">智能压缩阈值</label>
+                                                <input type="number" min="1000" id="model-smart-compress-threshold" class="config-field-input" placeholder="100000" />
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div class="config-field">
-                                    <label class="config-field-label">API Key</label>
-                                    <input type="password" id="model-api-key" class="config-field-input" placeholder="sk-..." autocomplete="off" />
-                                </div>
-                                <div class="config-field">
-                                    <label class="config-field-label">模型名称</label>
-                                    <input type="text" id="model-name" class="config-field-input" placeholder="gpt-4o-mini" />
-                                </div>
-                                <div class="config-field">
-                                    <label class="config-field-label">上下文 Token 上限</label>
-                                    <input type="number" min="1000" id="model-max-context-tokens" class="config-field-input" placeholder="130000" />
-                                </div>
-                                <div class="config-field">
-                                    <label class="config-field-label">智能压缩阈值</label>
-                                    <input type="number" min="1000" id="model-smart-compress-threshold" class="config-field-input" placeholder="100000" />
+                                <div class="models-global-bar">
+                                    <div class="models-global-bar-text">
+                                        <span class="models-global-bar-title">全局上下文</span>
+                                        <span class="models-global-bar-desc">对所有模型生效的上下文窗口上限</span>
+                                    </div>
+                                    <div class="config-field models-global-field">
+                                        <label class="config-field-label" for="model-max-context-tokens">Token 上限</label>
+                                        <input type="number" min="1000" id="model-max-context-tokens" class="config-field-input config-field-input--number" placeholder="130000" />
+                                    </div>
                                 </div>
                             </div>
                         </div>

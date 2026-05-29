@@ -112,7 +112,7 @@ function renderResultToDOM(slot) {
     contentEl.appendChild(pre);
 
     if (!r.has_error && r.output) {
-        const fileMatch = r.output.match(/\.spec\/[^\s]+\.md/g);
+        const fileMatch = r.output.match(/\.matrix\/[^\s]+\.md/g);
         if (fileMatch && fileMatch.length > 0) {
             const filePath = fileMatch[fileMatch.length - 1];
             const viewBtn = document.createElement('button');
@@ -1321,14 +1321,123 @@ document.addEventListener('DOMContentLoaded', () => {
             setTimeout(() => waitForWails(cb), 50);
         }
     }
-    waitForWails(() => WorkspaceSelector.loadData());
+    waitForWails(() => {
+        WorkspaceSelector.loadData();
+        ModelSelector.load();
+    });
 });
+
+// ==================== 模型切换器（顶栏） ====================
+
+const ModelSelector = {
+    models: [],
+    activeId: '',
+    switching: false,
+
+    bindEvents() {
+        const sel = $('#active-model-select');
+        if (!sel || sel.dataset.bound) return;
+        sel.dataset.bound = '1';
+        sel.addEventListener('change', () => this.onSelectChange());
+    },
+
+    applySettings(settings) {
+        const s = settings || {};
+        if (Array.isArray(s.models) && s.models.length > 0) {
+            this.models = JSON.parse(JSON.stringify(s.models));
+            this.activeId = s.activeModelId || this.models[0].id;
+        } else if (s.model) {
+            this.models = [{
+                id: 'default',
+                name: s.model.model || '默认模型',
+                baseUrl: s.model.baseUrl || '',
+                apiKey: s.model.apiKey || '',
+                model: s.model.model || '',
+            }];
+            this.activeId = 'default';
+        }
+        this.renderSelect();
+    },
+
+    renderSelect() {
+        const sel = $('#active-model-select');
+        if (!sel) return;
+        if (!this.models.length) {
+            sel.innerHTML = '<option value="">未配置模型</option>';
+            sel.disabled = true;
+            return;
+        }
+        sel.disabled = false;
+        sel.innerHTML = this.models.map(m => {
+            const label = m.name || m.model || m.id;
+            const selected = m.id === this.activeId ? ' selected' : '';
+            return `<option value="${escapeHtml(m.id)}"${selected}>${escapeHtml(label)}</option>`;
+        }).join('');
+    },
+
+    async load() {
+        this.bindEvents();
+        try {
+            const s = await WailsAPI.getSettings();
+            this.applySettings(s);
+        } catch (e) {
+            console.error('Failed to load models:', e);
+        }
+    },
+
+    async onSelectChange() {
+        const sel = $('#active-model-select');
+        if (!sel || this.switching) return;
+        const id = sel.value;
+        if (!id || id === this.activeId) return;
+        this.switching = true;
+        sel.disabled = true;
+        try {
+            await WailsAPI.setActiveModel(id);
+            this.activeId = id;
+            showNotification(`已切换模型: ${this.labelFor(id)}`, 'success');
+            if (configPageController?.settings) {
+                configPageController.settings.activeModelId = id;
+                if (configPageController.editingModelId) {
+                    configPageController.selectModel(id, { syncHeader: false });
+                }
+            }
+        } catch (e) {
+            sel.value = this.activeId;
+            showNotification(`切换模型失败: ${e.message}`, 'error');
+        } finally {
+            sel.disabled = false;
+            this.switching = false;
+        }
+    },
+
+    labelFor(id) {
+        const m = this.models.find(x => x.id === id);
+        return m ? (m.name || m.model || id) : id;
+    },
+};
+
+function escapeHtml(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/"/g, '&quot;');
+}
+
+function newModelId() {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        return crypto.randomUUID();
+    }
+    return `model-${Date.now()}`;
+}
 
 // ==================== 配置页面功能 ====================
 
 class ConfigPageController {
     constructor() {
         this.settings = null;
+        this.models = [];
+        this.editingModelId = null;
         this.mcpServers = {};
         this.mcpServerStatuses = {};
         this.mcpConnecting = false;
@@ -1337,13 +1446,43 @@ class ConfigPageController {
         $('#save-config-btn')?.addEventListener('click', () => this.saveConfig());
         $('#format-mcp-json-btn')?.addEventListener('click', () => this.formatMCPJson());
         $('#validate-mcp-json-btn')?.addEventListener('click', () => this.validateMCPJson());
+        $('#add-model-btn')?.addEventListener('click', () => this.addModel());
+        $('#models-list')?.addEventListener('click', (e) => {
+            const actionBtn = e.target.closest('[data-action]');
+            if (actionBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const item = actionBtn.closest('.model-list-item');
+                const id = item?.dataset?.id;
+                if (!id) return;
+                if (actionBtn.dataset.action === 'set-active') {
+                    this.setAsActiveModel(id);
+                } else if (actionBtn.dataset.action === 'delete') {
+                    this.deleteModel(id);
+                }
+                return;
+            }
+            const main = e.target.closest('.model-list-item-main');
+            if (!main) return;
+            const item = main.closest('.model-list-item');
+            if (!item?.dataset?.id) return;
+            this.selectModel(item.dataset.id, { setActive: false });
+        });
+
+        const formIds = [
+            'model-profile-name', 'model-base-url', 'model-api-key', 'model-name',
+            'model-max-tokens', 'model-smart-compress-threshold',
+        ];
+        formIds.forEach(id => {
+            const el = $(`#${id}`);
+            if (el) el.addEventListener('input', () => this.syncEditingModelFromForm());
+        });
         
-        // JSON 编辑器变化监听
         const editor = $('#mcp-json-editor');
         if (editor) {
             editor.addEventListener('input', () => this.onMCPJsonChange());
         }
-
+        
         $('#mcp-servers-list')?.addEventListener('click', (e) => {
             if (e.target.closest('.mcp-toggle-switch') || e.target.closest('button')) return;
             const header = e.target.closest('.mcp-server-header');
@@ -1353,6 +1492,162 @@ class ConfigPageController {
             card.classList.toggle('expanded');
             header.setAttribute('aria-expanded', card.classList.contains('expanded') ? 'true' : 'false');
         });
+    }
+
+    normalizeModelsFromSettings(s) {
+        if (Array.isArray(s.models) && s.models.length > 0) {
+            return JSON.parse(JSON.stringify(s.models));
+        }
+        if (s.model) {
+            return [{
+                id: 'default',
+                name: s.model.model || '默认模型',
+                baseUrl: s.model.baseUrl || '',
+                apiKey: s.model.apiKey || '',
+                model: s.model.model || '',
+                maxTokens: 8192,
+                smartCompressThreshold: s.model.smartCompressThreshold ?? 100000,
+            }];
+        }
+        return [{
+            id: newModelId(),
+            name: '新模型',
+            baseUrl: '',
+            apiKey: '',
+            model: '',
+            maxTokens: 8192,
+            smartCompressThreshold: 100000,
+        }];
+    }
+
+    getModel(id) {
+        return this.models.find(m => m.id === id);
+    }
+
+    selectModel(id, { setActive = true, syncHeader = true } = {}) {
+        this.syncEditingModelFromForm();
+        const m = this.getModel(id);
+        if (!m) return;
+        this.editingModelId = id;
+        if (setActive && this.settings) {
+            this.settings.activeModelId = id;
+        }
+        $('#model-profile-name').value = m.name || '';
+        $('#model-base-url').value = m.baseUrl || '';
+        $('#model-api-key').value = m.apiKey || '';
+        $('#model-name').value = m.model || '';
+        $('#model-max-tokens').value = m.maxTokens || 8192;
+        $('#model-smart-compress-threshold').value = m.smartCompressThreshold ?? 100000;
+        this.renderModelsList();
+        if (setActive && syncHeader) {
+            ModelSelector.activeId = id;
+            ModelSelector.models = JSON.parse(JSON.stringify(this.models));
+            ModelSelector.renderSelect();
+        }
+    }
+
+    async setAsActiveModel(modelId) {
+        const id = modelId || this.editingModelId;
+        if (!id) return;
+        const activeId = this.settings?.activeModelId;
+        if (activeId === id) return;
+        this.selectModel(id, { setActive: false });
+        if (this.settings) this.settings.activeModelId = id;
+        this.renderModelsList();
+        try {
+            await WailsAPI.setActiveModel(id);
+            ModelSelector.activeId = id;
+            ModelSelector.models = JSON.parse(JSON.stringify(this.models));
+            ModelSelector.renderSelect();
+            showNotification(`已切换模型: ${ModelSelector.labelFor(id)}`, 'success');
+        } catch (e) {
+            showNotification(`切换失败: ${e.message}`, 'error');
+        }
+    }
+
+    syncEditingModelFromForm() {
+        if (!this.editingModelId) return;
+        const m = this.getModel(this.editingModelId);
+        if (!m) return;
+        m.name = $('#model-profile-name').value.trim() || m.model || '未命名模型';
+        m.baseUrl = $('#model-base-url').value.trim();
+        m.apiKey = $('#model-api-key').value.trim();
+        m.model = $('#model-name').value.trim();
+        m.maxTokens = parseInt($('#model-max-tokens').value, 10) || 8192;
+        m.smartCompressThreshold = parseInt($('#model-smart-compress-threshold').value, 10) || 100000;
+        this.renderModelsList();
+    }
+
+    renderModelsList() {
+        const container = $('#models-list');
+        if (!container) return;
+        if (!this.models.length) {
+            container.innerHTML = '<div class="empty-state">暂无模型</div>';
+            return;
+        }
+        const activeId = this.settings?.activeModelId || this.models[0]?.id;
+        const editingId = this.editingModelId;
+        container.innerHTML = this.models.map(m => {
+            const active = m.id === activeId ? ' active' : '';
+            const editing = m.id === editingId ? ' editing' : '';
+            const name = escapeHtml(m.name || m.model || '未命名');
+            const model = escapeHtml(m.model || '—');
+            const badge = active ? '<span class="model-list-item-badge">当前</span>' : '';
+            const setDisabled = m.id === activeId ? ' disabled' : '';
+            const actionsHtml = m.id === editingId ? `
+                <div class="model-list-item-actions">
+                    <button type="button" class="btn btn-xs btn-primary" data-action="set-active"${setDisabled} title="设为当前使用的模型">设为当前</button>
+                    <button type="button" class="btn btn-xs btn-ghost-danger" data-action="delete" title="删除此模型">删除</button>
+                </div>` : '';
+            return `<div class="model-list-item${active}${editing}" data-id="${escapeHtml(m.id)}">
+                <div class="model-list-item-main" role="button" tabindex="0">
+                    <div class="model-list-item-top">
+                        <span class="model-list-item-name">${name}</span>
+                        ${badge}
+                    </div>
+                    <div class="model-list-item-model">${model}</div>
+                </div>
+                ${actionsHtml}
+            </div>`;
+        }).join('');
+    }
+
+    deleteModel(modelId) {
+        const id = modelId || this.editingModelId;
+        if (!id) return;
+        const name = this.getModel(id)?.name || id;
+        if (!confirm(`确定删除模型「${name}」？`)) return;
+        this.syncEditingModelFromForm();
+        this.models = this.models.filter(m => m.id !== id);
+        if (this.models.length === 0) {
+            this.editingModelId = null;
+            if (this.settings) this.settings.activeModelId = '';
+            ['model-profile-name', 'model-base-url', 'model-api-key', 'model-name',
+                'model-max-tokens', 'model-smart-compress-threshold'].forEach(fid => {
+                const el = $(`#${fid}`);
+                if (el) el.value = '';
+            });
+            this.renderModelsList();
+            return;
+        }
+        const next = this.models[0];
+        if (this.settings) this.settings.activeModelId = next.id;
+        this.selectModel(next.id, { setActive: true });
+    }
+
+    addModel() {
+        this.syncEditingModelFromForm();
+        const id = newModelId();
+        this.models.push({
+            id,
+            name: '新模型',
+            baseUrl: '',
+            apiKey: '',
+            model: '',
+            maxTokens: 8192,
+            smartCompressThreshold: 100000,
+        });
+        this.selectModel(id, { setActive: true });
     }
 
     async loadConfig() {
@@ -1384,12 +1679,11 @@ class ConfigPageController {
 
     render() {
         const s = this.settings;
-        $('#model-base-url').value = s.model?.baseUrl || '';
-        $('#model-api-key').value  = s.model?.apiKey  || '';
-        $('#model-name').value     = s.model?.model   || '';
-        $('#model-max-context-tokens').value = s.model?.maxContextTokens ?? 130000;
-        $('#model-smart-compress-threshold').value = s.model?.smartCompressThreshold ?? 100000;
-        
+        this.models = this.normalizeModelsFromSettings(s);
+        const activeId = s.activeModelId || this.models[0]?.id;
+        if (s) s.activeModelId = activeId;
+        $('#model-max-context-tokens').value = s.maxContextTokens ?? s.model?.maxContextTokens ?? 130000;
+        this.selectModel(activeId, { syncHeader: true });
         this.renderMCPJsonEditor();
         this.renderMCPServersPreview();
     }
@@ -1691,18 +1985,13 @@ class ConfigPageController {
     }
 
     collectSettings() {
-        const s = {
-            model: {
-                baseUrl: $('#model-base-url').value.trim(),
-                apiKey:  $('#model-api-key').value.trim(),
-                model:   $('#model-name').value.trim(),
-                maxContextTokens: parseInt($('#model-max-context-tokens').value, 10) || 130000,
-                smartCompressThreshold: parseInt($('#model-smart-compress-threshold').value, 10) || 100000,
-            },
+        this.syncEditingModelFromForm();
+        return {
+            models: JSON.parse(JSON.stringify(this.models)),
+            activeModelId: this.settings?.activeModelId || this.editingModelId || this.models[0]?.id,
+            maxContextTokens: parseInt($('#model-max-context-tokens').value, 10) || 130000,
             mcpServers: this.mcpServers,
         };
-        
-        return s;
     }
 
     async saveConfig() {
@@ -1725,6 +2014,7 @@ class ConfigPageController {
             const s = this.collectSettings();
             await WailsAPI.saveSettings(s);
             this.settings = s;
+            ModelSelector.applySettings(s);
             await this.connectAllMCPServers({ silent: true });
             successEl.textContent = '配置已保存';
             successEl.style.display = 'block';

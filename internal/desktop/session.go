@@ -80,14 +80,15 @@ func (b *Bridge) runAgentSession(initial []query.Message, chatSessionID string, 
 	sidechain := agent.NewSidechainWriter(matrixpaths.SubagentsDir(ws))
 	auditWriter := audit.NewWriter(ws, sessionID)
 	taskPreview := audit.Preview(initial[len(initial)-1].Content, 500)
+	activeModel := b.config.ActiveModelConfig()
 	auditWriter.UpdateMeta(audit.SessionMeta{
 		Workspace:   ws,
-		Model:       b.config.Model.Model,
+		Model:       activeModel.Model,
 		TaskPreview: taskPreview,
 	})
 	auditWriter.Emit("session.start", 0, "desktop", map[string]any{
 		"task_preview":    taskPreview,
-		"model":           b.config.Model.Model,
+		"model":           activeModel.Model,
 		"workspace":       ws,
 		"chat_session_id": chatSessionID,
 		"history_len":     len(initial),
