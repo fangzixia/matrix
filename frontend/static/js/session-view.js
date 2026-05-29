@@ -742,6 +742,7 @@
         function renderWorkerFeed(ui) {
             ui.feedRenderer.sync(ui.state.feed || []);
             renderWorkerCurrentStep(ui);
+            scrollToLatest();
         }
 
         function ensureFeedToolIn(feed, key) {
@@ -839,6 +840,20 @@
             }
         }
 
+        function shouldStickBottom(el) {
+            if (!el) return true;
+            return el.scrollTop + el.clientHeight >= el.scrollHeight - 48;
+        }
+
+        function scrollToLatest(force) {
+            if (!rootEl) return;
+            if (force || shouldStickBottom(rootEl)) {
+                requestAnimationFrame(() => {
+                    rootEl.scrollTop = rootEl.scrollHeight;
+                });
+            }
+        }
+
         function renderPhase() {
             const phaseLabel = state.status === 'done' ? '已完成' : state.status === 'error' ? '失败' : '执行中';
             const turnPart = state.turn > 0 ? `第 ${state.turn} 轮` : '';
@@ -847,6 +862,7 @@
             phaseEl.textContent = `${phaseLabel}${turnPart ? ' · ' + turnPart : ''}${transPart}${dur}`;
             updateCurrentStep();
             renderTodos();
+            scrollToLatest();
         }
 
         function scheduleMarkdown() {
@@ -859,12 +875,14 @@
             markdownThrottle = setTimeout(() => {
                 markdownThrottle = null;
                 assistantEl.innerHTML = renderMd(state.assistantText || '');
+                scrollToLatest();
             }, THROTTLE_MS);
         }
 
         function renderFeed() {
             feedRenderer.sync(state.feed || []);
             updateCurrentStep();
+            scrollToLatest();
         }
 
         function pushFeed(entry) {
@@ -978,6 +996,7 @@
             if (delta.type === 'text_delta' && delta.text) {
                 state.assistantText += delta.text;
                 scheduleMarkdown();
+                scrollToLatest();
             }
         }
 
@@ -1085,6 +1104,7 @@
             if (subagentPanel) subagentPanel.clear();
             state.status = 'streaming';
             renderPhase();
+            scrollToLatest(true);
         }
 
         function getSnapshot() {
@@ -1124,6 +1144,7 @@
             restoreWorkers(snap.workers);
             renderFeed();
             renderPhase();
+            scrollToLatest(true);
         }
 
         function getStepCountLabel() {

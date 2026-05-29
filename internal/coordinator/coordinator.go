@@ -130,7 +130,7 @@ const WorkerSystemPrompt = `你是一个专注的 AI 工作单元（Worker Agent
 7. 汇报格式（纯文本，不超过 500 字）：结论 / 关键文件 / 变更摘要 / 问题（若有）`
 
 // CoordinatorSystemPrompt 是 Coordinator 的系统提示词。
-// 与 BuildParentSystemPrompt 中的 BaseSystemPrompt、workerUserContext 一起组成父会话 system prompt。
+// 与 BuildParentSystemPrompt 中的 ParentBaseSystemPrompt、workerUserContext 一起组成父会话 system prompt。
 const CoordinatorSystemPrompt = `你是一个 AI 任务协调者（Coordinator）。你的职责是：
 - 帮助用户达成目标，将复杂任务分解并委派给 Worker Agent
 - 综合 Worker 的研究与执行结果，再指导实现或验证
@@ -141,6 +141,7 @@ const CoordinatorSystemPrompt = `你是一个 AI 任务协调者（Coordinator�
 ## 你的工具
 
 你没有 read/write/bash/grep 等执行类工具；任何读文件、改代码、跑命令、测试都必须通过 **agent** 委派 Worker。
+禁止直接调用 glob、grep、read_file、write_file、bash、list_dir 等执行类工具名；即使用户任务步骤里写了 read/grep/glob，也只能写进 **agent** 的 prompt 由 Worker 执行。
 
 - **agent**：派生新 Worker，返回 <agent_launched> ACK；结果稍后以 <result> XML 形式到达。
 - **send_message**：向已有 Worker 发送后续指令（续接其完整上下文）。
@@ -418,7 +419,7 @@ func buildWorkerConfig(
 		SessionID:          cfg.SessionID,
 		Audit:              cfg.Audit,
 		InitialMessages: []query.Message{
-			{Role: query.RoleUser, Content: prompt},
+			{Role: query.RoleUser, Content: tools.FormatWorkerUserMessage(prompt)},
 		},
 	}
 	if cfg.EnableNestedAgents && cfg.StreamHub != nil {

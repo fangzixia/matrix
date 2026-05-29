@@ -11,11 +11,11 @@ func NewBuildWorkflow(userInput, filePath string) Workflow {
 		UserInput:    userInput,
 		FilePath:     filePath,
 		FileLabel:    "需求文件",
-		FileFallback: "未指定（请使用最新的 .matrix/REQ-*.md）",
+		FileFallback: "未指定（请使用最新的 .matrix/SPEC-*.md）",
 		DefaultTask:  "请按需求完成实现并通过验收（综合分 ≥ 8.0）。",
 		ExpectedArtifacts: []string{
 			"代码实现",
-			".matrix/EVAL-REQ-*-*.md",
+			".matrix/EVAL-SPEC-*-*.md",
 		},
 		Acceptance: []string{
 			"实现满足验收标准",

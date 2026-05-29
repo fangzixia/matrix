@@ -377,7 +377,11 @@ type RequirementInfo struct {
 
 // GetRequirements 列出工作区 .matrix 下的需求文件
 func (b *Bridge) GetRequirements() (map[string]interface{}, error) {
-	specDir := filepath.Join(b.config.Workspace.Root, ".matrix")
+	root := b.workspaceRoot()
+	if root == "" || root == "." {
+		return map[string]interface{}{"requirements": []RequirementInfo{}}, nil
+	}
+	specDir := filepath.Join(root, ".matrix")
 	entries, err := os.ReadDir(specDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -391,16 +395,17 @@ func (b *Bridge) GetRequirements() (map[string]interface{}, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
-		if !strings.HasPrefix(e.Name(), "REQ-") {
+		name := e.Name()
+		if !strings.HasPrefix(name, "SPEC-") && !strings.HasPrefix(name, "SPEC-") {
 			continue
 		}
-		id := strings.TrimSuffix(e.Name(), ".md")
-		relPath := filepath.ToSlash(filepath.Join(".matrix", e.Name()))
+		id := strings.TrimSuffix(name, ".md")
+		relPath := filepath.ToSlash(filepath.Join(".matrix", name))
 		result = append(result, RequirementInfo{
 			ID:       id,
 			Path:     relPath,
 			Title:    id,
-			FullPath: filepath.Join(specDir, e.Name()),
+			FullPath: filepath.Join(specDir, name),
 		})
 	}
 
@@ -419,7 +424,11 @@ type EvaluationInfo struct {
 
 // GetEvaluations 列出工作区 .matrix 下的评测文件
 func (b *Bridge) GetEvaluations() (map[string]interface{}, error) {
-	specDir := filepath.Join(b.config.Workspace.Root, ".matrix")
+	root := b.workspaceRoot()
+	if root == "" || root == "." {
+		return map[string]interface{}{"evaluations": []EvaluationInfo{}}, nil
+	}
+	specDir := filepath.Join(root, ".matrix")
 	entries, err := os.ReadDir(specDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -440,7 +449,7 @@ func (b *Bridge) GetEvaluations() (map[string]interface{}, error) {
 		parts := strings.SplitN(name, "-", 4)
 		reqID := ""
 		if len(parts) >= 3 {
-			reqID = "REQ-" + parts[2]
+			reqID = "SPEC-" + parts[2]
 		}
 		relPath := filepath.ToSlash(filepath.Join(".matrix", e.Name()))
 		result = append(result, EvaluationInfo{

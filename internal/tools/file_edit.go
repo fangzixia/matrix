@@ -32,7 +32,7 @@ func NewFileEditTool() *Tool {
 			Properties: map[string]PropSchema{
 				"file_path": {
 					Type:        "string",
-					Description: "要编辑的文件路径（绝对路径或相对于工作目录的路径）",
+					Description: pathParamDesc,
 				},
 				"old_string": {
 					Type:        "string",
@@ -61,12 +61,9 @@ func execFileEdit(_ context.Context, args map[string]any) (string, error) {
 	newStr, _ := getString(args, "new_string")
 	replaceAll, _ := args["replace_all"].(bool)
 
-	resolvedPath, resolveErr := ResolveWorkspacePath(filePath)
+	resolvedPath, resolveErr := ResolveAndValidateToolPath(filePath)
 	if resolveErr != nil {
 		return "", fmt.Errorf("str_replace_editor: %w", resolveErr)
-	}
-	if err := RequirePathInWorkspace(resolvedPath); err != nil {
-		return "", fmt.Errorf("str_replace_editor: %w", err)
 	}
 	filePath = resolvedPath
 

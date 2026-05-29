@@ -52,12 +52,12 @@ const WailsAPI = {
     },
 
     async listFiles(path) {
-        const files = await window.go.desktop.Bridge.ListFiles(path);
-        return { files };
+        const result = await window.go.desktop.Bridge.ListFiles(path);
+        return { files: result?.files || [] };
     },
     async readFile(path) {
-        const content = await window.go.desktop.Bridge.ReadFile(path);
-        return { path, content };
+        const result = await window.go.desktop.Bridge.ReadFile(path);
+        return { path, content: result?.content ?? '' };
     },
     async saveFile(path, content) {
         await window.go.desktop.Bridge.SaveFile(path, content);
@@ -66,11 +66,11 @@ const WailsAPI = {
 
     async getRequirements() {
         const result = await window.go.desktop.Bridge.GetRequirements();
-        return { requirements: result };
+        return { requirements: result?.requirements || [] };
     },
     async getEvaluations() {
         const result = await window.go.desktop.Bridge.GetEvaluations();
-        return { evaluations: result };
+        return { evaluations: result?.evaluations || [] };
     },
 
     async runTask(task) {

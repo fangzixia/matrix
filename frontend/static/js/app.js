@@ -47,6 +47,14 @@ function getExecutionSlot(action) {
     return state.executionByPersona[action];
 }
 
+function syncExecutionPageLayout() {
+    const page = $('#execution-page');
+    const progressEl = $('#execution-progress');
+    if (!page || !progressEl) return;
+    const live = progressEl.style.display !== 'none';
+    page.classList.toggle('execution-page--live', live);
+}
+
 /** 切换「执行任务」页内不同卡片时，恢复该卡片对应的进度/结果 UI */
 function applyExecutionViewForPersona(action) {
     const slot = getExecutionSlot(action);
@@ -70,6 +78,7 @@ function applyExecutionViewForPersona(action) {
         progressEl.style.display = 'none';
         resultEl.style.display = 'none';
     }
+    syncExecutionPageLayout();
 }
 
 function renderResultToDOM(slot) {
@@ -452,12 +461,21 @@ async function showExecutionForm(persona) {
     // 根据不同的 persona 显示不同的表单字段
     await setupFormFields(persona);
 
+    const page = $('#execution-page');
+    const quickActions = $('.quick-actions');
+    if (page) page.classList.add('execution-page--form');
+    if (quickActions) quickActions.style.display = 'none';
+
     $('#execution-form').style.display = 'block';
     const taskInput = $('#task-input');
     if (taskInput) {
         taskInput.rows = persona === 'ui-scan' ? 8 : 4;
     }
     $('#task-input').focus();
+
+    requestAnimationFrame(() => {
+        $('#submit-execution-btn')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
 
     $$('.action-card').forEach((c) => {
         c.classList.toggle('action-card--active', c.dataset.persona === persona);
@@ -467,6 +485,10 @@ async function showExecutionForm(persona) {
 
 function hideExecutionForm() {
     $('#execution-form').style.display = 'none';
+    const page = $('#execution-page');
+    const quickActions = $('.quick-actions');
+    if (page) page.classList.remove('execution-page--form');
+    if (quickActions) quickActions.style.display = '';
 }
 
 // 设置表单字段
@@ -851,6 +873,7 @@ function showExecutionProgress() {
 
     $('#execution-progress').style.display = 'block';
     $('#execution-result').style.display = 'none';
+    syncExecutionPageLayout();
 
     const view = getExecutionSessionView();
     if (view) view.reset();
@@ -864,6 +887,7 @@ function showExecutionProgress() {
 
 function hideExecutionProgress() {
     $('#execution-progress').style.display = 'none';
+    syncExecutionPageLayout();
     const stopBtn = $('#stop-execution-btn');
     if (stopBtn) stopBtn.disabled = true;
 }

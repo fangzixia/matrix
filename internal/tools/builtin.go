@@ -14,21 +14,25 @@ import (
 // ReadFile 是读取文件内容的内置工具（只读，并发安全）。
 var ReadFile = &Tool{
 	Name:        "read_file",
-	Description: "读取指定路径文件的完整内容。",
+	Description: "读取用户指定绝对路径的文件内容。",
 	Parameters: JSONSchema{
 		Type: "object",
 		Properties: map[string]PropSchema{
-			"path": {Type: "string", Description: "文件的绝对路径或相对路径。"},
+			"path": {Type: "string", Description: readPathParamDesc},
 		},
 		Required: []string{"path"},
 	},
 	IsConcurrencySafe: true,
 	Execute: func(ctx context.Context, args map[string]any) (string, error) {
 		path, ok := getString(args, "path")
-		if !ok || path == "" {
+		if !ok {
 			return "", fmt.Errorf("read_file: 缺少必需参数 'path'")
 		}
-		data, err := os.ReadFile(path)
+		targetPath, resolveErr := ResolveAndValidateToolPath(path)
+		if resolveErr != nil {
+			return "", fmt.Errorf("read_file: %w", resolveErr)
+		}
+		data, err := os.ReadFile(targetPath)
 		if err != nil {
 			return "", fmt.Errorf("read_file: %w", err)
 		}
@@ -43,7 +47,7 @@ var WriteFile = &Tool{
 	Parameters: JSONSchema{
 		Type: "object",
 		Properties: map[string]PropSchema{
-			"path":    {Type: "string", Description: "目标文件路径。"},
+			"path":    {Type: "string", Description: pathParamDesc},
 			"content": {Type: "string", Description: "要写入的文本内容。"},
 		},
 		Required: []string{"path", "content"},
@@ -52,16 +56,9 @@ var WriteFile = &Tool{
 	Execute: func(ctx context.Context, args map[string]any) (string, error) {
 		path, _ := getString(args, "path")
 		content, _ := getString(args, "content")
-		if path == "" {
-			return "", fmt.Errorf("write_file: 缺少必需参数 'path'")
-		}
-
-		targetPath, resolveErr := ResolveWorkspacePath(path)
+		targetPath, resolveErr := ResolveAndValidateToolPath(path)
 		if resolveErr != nil {
 			return "", fmt.Errorf("write_file: %w", resolveErr)
-		}
-		if err := RequirePathInWorkspace(targetPath); err != nil {
-			return "", fmt.Errorf("write_file: %w", err)
 		}
 
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
@@ -77,20 +74,22 @@ var WriteFile = &Tool{
 // ListDir 是列出目录内容的内置工具（只读，并发安全）。
 var ListDir = &Tool{
 	Name:        "list_dir",
-	Description: "列出指定目录下的文件和子目录。",
+	Description: "列出指定目录内容；必须在 path 中写明目录位置。",
 	Parameters: JSONSchema{
 		Type: "object",
 		Properties: map[string]PropSchema{
-			"path": {Type: "string", Description: "目录路径，缺省时使用当前工作目录。"},
+			"path": {Type: "string", Description: pathParamDesc},
 		},
+		Required: []string{"path"},
 	},
 	IsConcurrencySafe: true,
 	Execute: func(ctx context.Context, args map[string]any) (string, error) {
 		path, _ := getString(args, "path")
-		if path == "" {
-			path = "."
+		targetPath, resolveErr := ResolveAndValidateToolPath(path)
+		if resolveErr != nil {
+			return "", fmt.Errorf("list_dir: %w", resolveErr)
 		}
-		entries, err := os.ReadDir(path)
+		entries, err := os.ReadDir(targetPath)
 		if err != nil {
 			return "", fmt.Errorf("list_dir: %w", err)
 		}
@@ -101,10 +100,11 @@ var ListDir = &Tool{
 			if info != nil {
 				size = info.Size()
 			}
+			entryPath := filepath.Join(targetPath, e.Name())
 			if e.IsDir() {
-				sb.WriteString(fmt.Sprintf("[目录] %s/\n", e.Name()))
+				sb.WriteString(fmt.Sprintf("[目录] %s/\n", entryPath))
 			} else {
-				sb.WriteString(fmt.Sprintf("[文件] %s  (%d B)\n", e.Name(), size))
+				sb.WriteString(fmt.Sprintf("[文件] %s  (%d B)\n", entryPath, size))
 			}
 		}
 		return sb.String(), nil
@@ -142,6 +142,9 @@ Windows 上请避免 which、tail、cat 等典型 Unix 写法；可改用 where�
 		} else {
 			cmd = exec.CommandContext(ctx, "sh", "-c", command)
 		}
+		if dir := getWorkspaceRoot(); dir != "" {
+			cmd.Dir = dir
+		}
 		var out bytes.Buffer
 		cmd.Stdout = &out
 		cmd.Stderr = &out
@@ -176,6 +179,9 @@ var PowerShell = &Tool{
 			return "", fmt.Errorf("powershell: 缺少必需参数 'command'")
 		}
 		cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command", command)
+		if dir := getWorkspaceRoot(); dir != "" {
+			cmd.Dir = dir
+		}
 		var out bytes.Buffer
 		cmd.Stdout = &out
 		cmd.Stderr = &out

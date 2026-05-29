@@ -11,7 +11,7 @@ func NewImplementWorkflow(userInput, filePath string) Workflow {
 		UserInput:    userInput,
 		FilePath:     filePath,
 		FileLabel:    "需求文件",
-		FileFallback: "未指定（请使用最新的 .matrix/REQ-*.md）",
+		FileFallback: "未指定（请使用最新的 .matrix/SPEC-*.md）",
 		DefaultTask:  "请按需求文档完成实现。",
 		ExpectedArtifacts: []string{
 			"满足需求的代码变更",

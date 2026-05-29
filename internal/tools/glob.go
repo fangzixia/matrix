@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -17,12 +16,12 @@ import (
 // GlobTool：
 //   - 支持标准 Glob（*, ?, [...]）和递归通配符 **
 //   - 结果限制 100 条（超出时提示截断）
-//   - 返回相对于工作目录的路径（节省 token）
+//   - 返回匹配文件的绝对路径
 //   - 并发安全（只读操作）
 func NewGlobTool() *Tool {
 	return &Tool{
 		Name:        "glob",
-		Description: "按 Glob 模式搜索文件名（路径级匹配，不搜索文件内容）。支持 * ? [...] 和 **。最多返回 100 条。与 grep 不同：grep 在文件内容里找正则。",
+		Description: "在指定目录下按 Glob 模式搜索文件名；必须在 path 中写明搜索根目录。最多返回 100 条。",
 		Parameters: JSONSchema{
 			Type: "object",
 			Properties: map[string]PropSchema{
@@ -32,10 +31,10 @@ func NewGlobTool() *Tool {
 				},
 				"path": {
 					Type:        "string",
-					Description: "搜索的根目录（默认为当前工作目录）",
+					Description: pathParamDesc,
 				},
 			},
-			Required: []string{"pattern"},
+			Required: []string{"pattern", "path"},
 		},
 		IsConcurrencySafe: true,
 		Execute:           execGlob,
@@ -46,40 +45,25 @@ const globMaxResults = 100
 
 func execGlob(_ context.Context, args map[string]any) (string, error) {
 	pattern, _ := getString(args, "pattern")
-	root, _ := getString(args, "path")
+	searchPath, _ := getString(args, "path")
 
-	if root == "" {
-		var err error
-		root, err = os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("glob: 获取工作目录失败: %w", err)
-		}
-	} else if !filepath.IsAbs(root) {
-		cwd, _ := os.Getwd()
-		root = filepath.Join(cwd, root)
-	}
-
-	matches, truncated, err := globSearch(pattern, root, globMaxResults)
+	searchRoot, err := ResolveAndValidateToolPath(searchPath)
 	if err != nil {
 		return "", fmt.Errorf("glob: %w", err)
 	}
 
-	cwd, _ := os.Getwd()
-	rel := make([]string, 0, len(matches))
-	for _, m := range matches {
-		if r, err := filepath.Rel(cwd, m); err == nil {
-			rel = append(rel, r)
-		} else {
-			rel = append(rel, m)
-		}
+	matches, truncated, err := globSearch(pattern, searchRoot, globMaxResults)
+	if err != nil {
+		return "", fmt.Errorf("glob: %w", err)
 	}
 
-	if len(rel) == 0 {
+	if len(matches) == 0 {
 		return "未找到匹配文件", nil
 	}
 
 	var sb strings.Builder
-	for _, f := range rel {
+	for _, f := range matches {
+		f = ToAbsolutePath(f, searchRoot)
 		sb.WriteString(f)
 		sb.WriteByte('\n')
 	}

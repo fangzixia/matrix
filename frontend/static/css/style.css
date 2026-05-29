@@ -138,6 +138,28 @@ body {
     overflow: hidden;
 }
 
+#execution-page.active {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* 填写任务表单时允许页面滚动，避免「开始执行」被裁切 */
+#execution-page.active.execution-page--form {
+    overflow-y: auto;
+}
+
+#execution-page.active .page-title,
+#execution-page.active .quick-actions {
+    flex-shrink: 0;
+}
+
+#execution-page.active.execution-page--live .execution-progress {
+    flex: 1 1 0;
+    min-height: 0;
+}
+
 .page-title {
     font-size: 20px;
     font-weight: 600;
@@ -401,6 +423,16 @@ body {
     gap: 12px;
 }
 
+.execution-form .form-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    margin-top: 8px;
+    padding-top: 16px;
+    background: white;
+    border-top: 1px solid var(--gray-200);
+}
+
 /* 按钮 */
 .btn {
     padding: 10px 20px;
@@ -507,13 +539,14 @@ body {
     display: flex;
     flex-direction: column;
     flex: 1 1 0;
-    min-height: 240px;
+    min-height: min(420px, calc(100vh - 240px));
     max-height: none;
+    overflow: hidden;
 }
 
 .execution-progress-body {
     flex: 1 1 0;
-    min-height: 0;
+    min-height: 280px;
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -522,12 +555,41 @@ body {
 
 .execution-progress .session-view-root {
     flex: 1 1 0;
-    min-height: 0;
+    min-height: 240px;
     overflow-y: auto;
+    overflow-x: hidden;
     border: 1px solid var(--gray-200);
     border-radius: var(--border-radius);
     padding: 12px;
     background: var(--gray-50);
+    scrollbar-width: thin;
+    scrollbar-color: var(--gray-300) transparent;
+}
+
+.execution-progress .session-view-root::-webkit-scrollbar {
+    width: 8px;
+}
+
+.execution-progress .session-view-root::-webkit-scrollbar-thumb {
+    background: var(--gray-300);
+    border-radius: 4px;
+}
+
+.execution-progress .session-view-root::-webkit-scrollbar-thumb:hover {
+    background: var(--gray-400);
+}
+
+/* 执行任务页：由外层 session-view-root 统一滚动，避免内层多段 max-height 挤成一行 */
+.execution-progress .session-view-root.session-view .session-stream,
+.execution-progress .session-view-root.session-view .session-feed,
+.execution-progress .session-view-root.session-view .session-workers {
+    max-height: none;
+    overflow: visible;
+}
+
+.execution-progress .session-view-root.session-view .session-workers .worker-feed {
+    max-height: none;
+    overflow: visible;
 }
 
 .progress-header {

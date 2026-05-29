@@ -21,6 +21,11 @@ const (
 	StateFailed    State = "failed"
 )
 
+// CoordinatorExecutionNote 追加到任务 prompt，提醒父 Agent 勿直接调用 Worker 工具。
+const CoordinatorExecutionNote = `
+【Coordinator 执行说明】
+你是 Coordinator：不要直接调用 read_file、grep、glob、write_file、bash、list_dir 等；并行调研请在同一轮发起多个 agent。`
+
 // Workflow makes task flows explicit enough for callers to track state,
 // expected artifacts, and recovery guidance independently from the prompt.
 type Workflow struct {
@@ -56,6 +61,7 @@ func (w Workflow) Prompt() string {
 	}
 	b.WriteString("\n\n任务描述: ")
 	b.WriteString(userPart(w.UserInput, w.DefaultTask))
+	b.WriteString(CoordinatorExecutionNote)
 	return b.String()
 }
 

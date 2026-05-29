@@ -264,7 +264,15 @@ func execOne(
 
 	t := reg.Get(call.Function.Name)
 	if t == nil {
-		out := fmt.Sprintf("unknown tool: %s", call.Function.Name)
+		var out string
+		if IsKnownBuiltinTool(call.Function.Name) {
+			out = fmt.Sprintf(
+				"工具 %q 仅 Worker 可用。请使用 agent 工具委派，在 prompt 中写明路径、模式和验收标准。",
+				call.Function.Name,
+			)
+		} else {
+			out = fmt.Sprintf("unknown tool: %s", call.Function.Name)
+		}
 		emitToolDone(onProgress, call, "failed", 0, out)
 		return Result{
 			ToolCallID: call.ID,

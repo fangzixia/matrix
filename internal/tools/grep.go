@@ -38,7 +38,7 @@ func NewGrepTool() *Tool {
 				},
 				"path": {
 					Type:        "string",
-					Description: "搜索路径（文件或目录），默认为当前工作目录",
+					Description: pathParamDesc,
 				},
 				"glob": {
 					Type:        "string",
@@ -65,7 +65,7 @@ func NewGrepTool() *Tool {
 					Description: "最多返回条数（默认 250，0 表示不限）",
 				},
 			},
-			Required: []string{"pattern"},
+			Required: []string{"pattern", "path"},
 		},
 		IsConcurrencySafe: true,
 		Execute:           execGrep,
@@ -102,22 +102,17 @@ func execGrep(ctx context.Context, args map[string]any) (string, error) {
 		outputMode = "files_with_matches"
 	}
 
-	if path == "" {
-		var err error
-		path, err = os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("grep: 获取工作目录失败: %w", err)
-		}
-	} else if !filepath.IsAbs(path) {
-		cwd, _ := os.Getwd()
-		path = filepath.Join(cwd, path)
+	var err error
+	searchRoot, err := ResolveAndValidateToolPath(path)
+	if err != nil {
+		return "", fmt.Errorf("grep: %w", err)
 	}
 
 	if grepHasRipgrep {
-		return execGrepRg(ctx, pattern, path, globFilter, outputMode,
+		return execGrepRg(ctx, pattern, searchRoot, globFilter, outputMode,
 			caseInsensitive, int(contextLines), showLineNumbers, headLimit)
 	}
-	return execGrepGo(ctx, pattern, path, globFilter, outputMode,
+	return execGrepGo(ctx, pattern, searchRoot, globFilter, outputMode,
 		caseInsensitive, int(contextLines), showLineNumbers, headLimit)
 }
 
@@ -169,8 +164,7 @@ func execGrepRg(
 
 	lines := grepSplitLines(out.String())
 	lines = grepApplyHeadLimit(lines, headLimit)
-	cwd, _ := os.Getwd()
-	lines = grepRelativizePaths(lines, cwd, outputMode)
+	lines = grepAbsolutizePaths(lines, path, outputMode)
 	return formatGrepResult(outputMode, lines, len(lines)), nil
 }
 
@@ -223,18 +217,14 @@ func execGrepGo(
 		if len(lines) == 0 {
 			return nil
 		}
-		cwd, _ := os.Getwd()
-		relPath, err := filepath.Rel(cwd, path)
-		if err != nil {
-			relPath = path
-		}
+		absPath := ToAbsolutePath(path, rootPath)
 		switch outputMode {
 		case "files_with_matches":
-			matchFiles = append(matchFiles, relPath)
+			matchFiles = append(matchFiles, absPath)
 		case "content":
 			contentLines = append(contentLines, lines...)
 		case "count":
-			countLines = append(countLines, fmt.Sprintf("%s:%d", relPath, len(lines)))
+			countLines = append(countLines, fmt.Sprintf("%s:%d", absPath, len(lines)))
 		}
 		totalFiles++
 		return nil
@@ -318,26 +308,19 @@ func grepApplyHeadLimit(lines []string, limit int) []string {
 	return lines[:limit]
 }
 
-func grepRelativizePaths(lines []string, cwd, outputMode string) []string {
+func grepAbsolutizePaths(lines []string, searchRoot, outputMode string) []string {
 	out := make([]string, len(lines))
 	for i, line := range lines {
 		switch outputMode {
 		case "files_with_matches":
-			if r, err := filepath.Rel(cwd, line); err == nil {
-				out[i] = r
-			} else {
-				out[i] = line
-			}
+			out[i] = ToAbsolutePath(line, searchRoot)
 		default:
 			idx := strings.Index(line, ":")
 			if idx > 0 {
-				absPath := line[:idx]
-				if r, err := filepath.Rel(cwd, absPath); err == nil {
-					out[i] = r + line[idx:]
-					continue
-				}
+				out[i] = ToAbsolutePath(line[:idx], searchRoot) + line[idx:]
+			} else {
+				out[i] = line
 			}
-			out[i] = line
 		}
 	}
 	return out
