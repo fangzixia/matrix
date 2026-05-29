@@ -33,7 +33,7 @@ func summarizeHistory(ctx context.Context, cfg Config, msgs []Message) (string, 
 		maxOut = cfg.MaxTokens
 	}
 
-	summary, err := cfg.LLM.Complete(ctx, llm.ChatRequest{
+	summary, err := cfg.LLM.Context(ctx, llm.ChatRequest{
 		Model: cfg.Model,
 		Messages: []llm.ChatMessage{
 			{Role: "system", Content: autoCompactSystemPrompt},
