@@ -112,7 +112,7 @@ function renderResultToDOM(slot) {
     contentEl.appendChild(pre);
 
     if (!r.has_error && r.output) {
-        const fileMatch = r.output.match(/\.matrix\/[^\s]+\.md/g);
+        const fileMatch = r.output.match(/\.matrix\/\S+\.md/g);
         if (fileMatch && fileMatch.length > 0) {
             const filePath = fileMatch[fileMatch.length - 1];
             const viewBtn = document.createElement('button');
