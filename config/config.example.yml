@@ -1,0 +1,41 @@
+# Matrix 配置示例（复制为 config/config.yml 后按需修改）
+
+system:
+  env: development  # development | production
+
+storage:
+  base_dir: ./data       # 数据根目录
+  data_dir: ./data       # 业务数据（工作区、审计等）
+  workspaces_dir: workspaces
+  audit_dir: audit
+  exports_dir: exports
+
+logging:
+  dir: ./logs
+  file: matrix.log
+  level: debug           # debug | info | warn | error
+  format: text           # text | json
+  max_size_mb: 100
+  max_backups: 7
+
+server:
+  addr: ":8080"          # HTTP 监听地址
+  read_timeout: 30s
+
+database:
+  dsn: postgres://matrix:matrix@localhost:5432/matrix?sslmode=disable
+  max_open_conns: 25
+  auto_migrate: true     # GORM 自动建表
+  sql_migrate: true      # 执行 migrations/*.sql
+
+auth:
+  session:
+    cookie_name: _matrix_session
+    ttl: 720h
+    secure: false        # 生产环境 HTTPS 下设为 true
+  bootstrap:
+    admin_username: root
+    admin_password: "${MATRIX_BOOTSTRAP_PASSWORD:-changeme}"  # 首装管理员密码
+
+# 模型、MCP、Git、Worker 并发、流水线等运行参数请在 Web 管理端配置：
+# root 用户登录 → 管理区域 → 系统配置（/admin/system），写入数据库后覆盖代码默认值。

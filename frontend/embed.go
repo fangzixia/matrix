@@ -5,10 +5,13 @@ import (
 	"io/fs"
 )
 
-//go:embed index.html static
-var Assets embed.FS
+//go:embed dist/*
+var dist embed.FS
 
-// FS returns the embedded filesystem
-func FS() fs.FS {
-	return Assets
+func Dist() fs.FS {
+	sub, err := fs.Sub(dist, "dist")
+	if err != nil {
+		return dist
+	}
+	return sub
 }

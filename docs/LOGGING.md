@@ -1,45 +1,58 @@
 # Matrix 日志与诊断
 
-## 运维日志（matrix.log）
+## 系统日志（slog）
 
-- 路径：`%UserConfigDir%/matrix/logs/matrix.log`（由 `matrixpaths.LogFile()` 解析）
-- 开发模式（`MATRIX_DEV=1` 或 `matrix-dev` 可执行文件）：Text 格式 + stderr 双写 + Debug 级别
-- 生产默认：JSON Lines（便于 `jq` 与大模型解析）
-- 覆盖格式：`MATRIX_LOG_FORMAT=text` 或 `json`
+Matrix Web 使用 Go 标准库 **slog** 输出运维日志，由 YAML `logging` 段配置：
 
-结构化字段（通过 `logger.With` / `logger.InfoCtx`）：
+```yaml
+logging:
+  dir: ./logs              # 日志目录（可与 storage.data_dir 分离）
+  file: matrix.log         # 主日志文件名
+  level: info              # debug | info | warn | error
+  format: json             # json | text（development 默认 text）
+  max_size_mb: 100         # 单文件上限，超出后轮转
+  max_backups: 7           # 保留归档数量
+```
 
-- `session_id`, `agent_id`, `turn`, `component`
+解析后写入 `{logging.dir}/{logging.file}`。开发模式（`system.env: development`）同时输出到 stderr。
 
-## 会话诊断（面向 LLM）
+### 日志内容
 
-每个 Agent 会话在**应用数据目录**（非项目工作区）写入：
+| 类型 | 说明 |
+|------|------|
+| HTTP 访问 | method、path、status、latency、request_id |
+| 启动 | 存储路径解析、监听地址、迁移结果 |
+| Run 状态 | Run 创建/完成/取消 |
+| Git 操作 | clone/pull/push 错误 |
 
-- `%UserConfigDir%/matrix/workspaces/{workspace_id}/sessions/{sessionID}.jsonl` — 事件时间线
-- `%UserConfigDir%/matrix/workspaces/{workspace_id}/sessions/{sessionID}.meta.json` — 摘要元数据
+### 环境变量
 
-子 Agent 详细流：`.../subagents/{agentId}.jsonl`。
+| 变量 | 说明 |
+|------|------|
+| `MATRIX_CONFIG` | 配置文件路径 |
+| `MATRIX_DEV=1` | 可配合开发模式使用 |
 
-### 导出方式
+## AI 审计（JSONL）
 
-1. **Bridge API**（Wails）  
-   - `ListSessionDiagnostics(limit)`  
-   - `GetSessionDiagnostic(sessionID)` → `llm_markdown` 可直接粘贴给大模型  
-   - `ExportSessionDiagnosticToFile(sessionID, destDir)`
+Agent 会话审计 **不走 slog**，由 `internal/ai/audit` 写入系统目录：
 
-2. **直接读文件**  
-   打开上述 jsonl / meta，或使用导出目录中的 `*-diagnostic.md`。
+```
+{storage.audit_dir}/{project_id}/{run_id}.jsonl
+{storage.audit_dir}/{project_id}/sessions/
+```
 
-### 典型事件
+路径由 `platform/storage.Paths` 在启动时解析；`runs.audit_path` 字段在 PG 中索引对应文件。
 
-| event | 含义 |
-|-------|------|
-| `session.start` / `session.end` | 会话起止 |
-| `turn.iteration` | TAOR 轮次 |
-| `turn.llm_request` / `turn.llm_response` | 模型调用 |
-| `turn.tool_call` / `turn.tool_result` | 工具执行 |
-| `context.compact` | 上下文压缩 |
-| `async.result` | 异步子 Agent 结果注入 |
-| `subagent.spawn` / `subagent.done` | 子 Agent 生命周期 |
+## 与旧版桌面版的区别
 
-敏感信息（API Key、Bearer 等）在写入前经 `audit.RedactString` 处理。
+| 旧版（Wails） | 新版（Web） |
+|---------------|-------------|
+| `%APPDATA%/matrix/logs/matrix.log` | YAML `logging.dir` 可配 |
+| `matrixpaths` 包 | `platform/storage` |
+| 自定义 logger | slog |
+
+## 排查建议
+
+1. 启动失败：查看控制台或 `logging.dir` 下最新日志。
+2. Run 无输出：检查 SSE 连接与 `{audit_dir}` 下 JSONL 是否生成。
+3. 迁移失败：日志中会记录 `migrate up` 错误；确认 PostgreSQL 可连且 `migrations/` 目录可读。

@@ -1,0 +1,75 @@
+:root {
+  /* GitLab brand */
+  --gl-color-orange-50: #fdf1ed;
+  --gl-color-orange-500: #fc6d26;
+  --gl-color-orange-600: #e24329;
+  --gl-color-orange-700: #c93c27;
+
+  --gl-color-blue-50: #e9f3fc;
+  --gl-color-blue-500: #1f75cb;
+  --gl-color-blue-600: #1068bf;
+
+  --gl-color-green-50: #ecf4ee;
+  --gl-color-green-500: #108548;
+  --gl-color-green-600: #217645;
+
+  --gl-color-red-50: #fdeded;
+  --gl-color-red-500: #dd2b0e;
+  --gl-color-red-600: #c91c00;
+
+  --gl-color-gray-50: #fbfafd;
+  --gl-color-gray-100: #ececef;
+  --gl-color-gray-200: #dcdcde;
+  --gl-color-gray-300: #bfbfc3;
+  --gl-color-gray-500: #737278;
+  --gl-color-gray-900: #303030;
+
+  /* Semantic */
+  --gl-background-color-default: #ffffff;
+  --gl-background-color-subtle: #fbfafd;
+  --gl-background-color-strong: #ececef;
+  --gl-background-color-page: #f0f0f0;
+  --gl-background-color-sidebar: #ffffff;
+  --gl-background-color-header: #ffffff;
+
+  --gl-border-color-default: #dcdcde;
+  --gl-border-color-strong: #bfbfc3;
+
+  --gl-text-color-default: #303030;
+  --gl-text-color-subtle: #737278;
+  --gl-text-color-link: #1f75cb;
+  --gl-text-color-inverse: #ffffff;
+
+  /* Layout */
+  --gl-sidebar-width: 240px;
+  --gl-header-height: 40px;
+  --gl-content-max-width: 1280px;
+  --gl-radius: 4px;
+  --gl-radius-lg: 8px;
+
+  /* Shadows */
+  --gl-shadow-sm: 0 1px 2px rgba(48, 48, 48, 0.08);
+  --gl-shadow-md: 0 2px 8px rgba(48, 48, 48, 0.1);
+  --gl-shadow-lg: 0 4px 16px rgba(48, 48, 48, 0.12);
+  --gl-shadow-dropdown: 0 2px 4px rgba(48, 48, 48, 0.1), 0 0 1px rgba(48, 48, 48, 0.2);
+
+  /* Typography */
+  --gl-font-family: 'GitLab Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --gl-font-size-sm: 12px;
+  --gl-font-size-md: 14px;
+  --gl-font-size-lg: 16px;
+  --gl-font-size-xl: 20px;
+  --gl-font-size-2xl: 24px;
+
+  /* Spacing */
+  --gl-spacing-1: 4px;
+  --gl-spacing-2: 8px;
+  --gl-spacing-3: 12px;
+  --gl-spacing-4: 16px;
+  --gl-spacing-5: 20px;
+  --gl-spacing-6: 24px;
+  --gl-spacing-8: 32px;
+
+  /* Focus ring */
+  --gl-focus-ring: 0 0 0 2px #ffffff, 0 0 0 4px #1f75cb;
+}

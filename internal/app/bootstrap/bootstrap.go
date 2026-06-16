@@ -1,0 +1,99 @@
+package bootstrap
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"io/fs"
+	"os"
+
+	"github.com/gin-gonic/gin"
+
+	"matrix/internal/app"
+	"matrix/internal/modules/identity"
+	"matrix/internal/platform/config"
+	platformdb "matrix/internal/platform/db"
+	platformhttp "matrix/internal/platform/http"
+	"matrix/internal/platform/logging"
+	"matrix/internal/platform/migrate"
+	"matrix/internal/platform/storage"
+	"matrix/internal/webapp"
+)
+
+type Options struct {
+	ConfigPath string
+	StaticFS   fs.FS
+}
+
+// Run 启动 Web 服务：加载配置、迁移数据库、注入依赖并监听 HTTP。
+func Run(ctx context.Context, opts Options) error {
+	cfg, err := config.Load(opts.ConfigPath)
+	if err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+	paths, err := storage.Resolve(cfg)
+	if err != nil {
+		return err
+	}
+	if err := storage.EnsureLayout(paths); err != nil {
+		return err
+	}
+	dev := cfg.System.Env == "development"
+	log, err := logging.Init(cfg.Logging, paths, dev)
+	if err != nil {
+		return err
+	}
+	log.Info("storage resolved", "data_dir", paths.DataDir, "log_dir", paths.LogDir)
+
+	db, err := platformdb.Open(cfg.Database)
+	if err != nil {
+		return err
+	}
+	if err := migrate.Up(db, cfg.Database); err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
+	if err := identity.BootstrapAdmin(ctx, db, cfg.Auth); err != nil {
+		return err
+	}
+
+	deps := app.NewDeps(cfg, paths, db, log)
+	if err := deps.SystemSettings.Bootstrap(ctx); err != nil {
+		return fmt.Errorf("system settings: %w", err)
+	}
+	if err := deps.Repositories.MigrateLegacyProjects(ctx); err != nil {
+		log.Warn("migrate legacy repositories", "err", err)
+	}
+	deps.Runs.SetLifecycle(ctx) // 进程退出时取消进行中的 Run
+	defer deps.Close()
+
+	deps.StartJobWorker(ctx) // 嵌入式任务队列消费者
+
+	engine := platformhttp.NewEngine(log, dev)
+	webapp.Register(engine, deps, opts.StaticFS)
+
+	log.Info("listening", "addr", cfg.Server.Addr)
+	srv := &httpServer{engine: engine, addr: cfg.Server.Addr}
+	return srv.ListenAndServe()
+}
+
+type httpServer struct {
+	engine *gin.Engine
+	addr   string
+}
+
+func (s *httpServer) ListenAndServe() error {
+	return s.engine.Run(s.addr)
+}
+
+func ConfigPathFromFlags() string {
+	path := flag.String("config", envOr("MATRIX_CONFIG", "config/config.yml"), "config file path")
+	flag.Parse()
+	return *path
+}
+
+func envOr(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
+}

@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS system_settings (
+  id TEXT PRIMARY KEY DEFAULT 'default',
+  settings JSONB NOT NULL DEFAULT '{}',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

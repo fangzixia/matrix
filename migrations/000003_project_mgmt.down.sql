@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS notifications;
+DROP TABLE IF EXISTS run_jobs;
+DROP TABLE IF EXISTS run_events;
+DROP TABLE IF EXISTS run_steps;
+ALTER TABLE runs DROP COLUMN IF EXISTS error_message;
+ALTER TABLE runs DROP COLUMN IF EXISTS repository_id;
+DROP TABLE IF EXISTS project_repositories;
+ALTER TABLE projects DROP COLUMN IF EXISTS path;
+ALTER TABLE projects DROP COLUMN IF EXISTS group_id;
+DROP TABLE IF EXISTS group_members;
+DROP TABLE IF EXISTS groups;
