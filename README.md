@@ -43,9 +43,9 @@ Matrix 是一款 **私有化 B/S Web 平台**，内置 AI Agent 内核，用于�
 
 - Go 1.24+
 - PostgreSQL 16+（本机安装）
-- Node.js 22+（前端构建）
+- Node.js 22+（前端开发 / 构建）
 
-### 启动
+### 首次准备
 
 ```bash
 # 1. 准备 PostgreSQL（创建 matrix 用户与数据库，见 docs/DEPLOY.md）
@@ -54,16 +54,52 @@ Matrix 是一款 **私有化 B/S Web 平台**，内置 AI Agent 内核，用于�
 cp config/config.example.yml config/config.yml
 # 编辑 database.dsn 与 ai.default_model.api_key
 
-# 3. 构建前端
-cd frontend && npm install && npm run build && cd ..
+# 3. 安装前端依赖（日常开发只需一次）
+cd frontend && npm install && cd ..
+```
 
-# 4. 启动 Web 服务
+默认 admin：`root` / `changeme`（可通过 `MATRIX_BOOTSTRAP_PASSWORD` 覆盖）。
+
+### 日常开发（推荐）
+
+生产构建会把 `frontend/dist` 通过 `go:embed` 打进 Go 二进制，**每次改前端都要重新 `npm run build` + `go build` + 重启服务**。日常改 UI 请用 **Vite 开发服务器**：前后端分进程运行，前端支持 HMR，改完即生效，无需打包或重启后端。
+
+**终端 1 — 后端 API（`:8080`）**
+
+```bash
 go run ./cmd/web -config config/config.yml
 ```
 
-访问 http://localhost:8080 ，默认 admin：`root` / `changeme`（可通过 `MATRIX_BOOTSTRAP_PASSWORD` 覆盖）。
+**终端 2 — 前端开发服（`:5173`）**
 
-生产构建（先编译前端再嵌入 Go 二进制）：
+```bash
+cd frontend && npm run dev
+```
+
+浏览器访问 **http://localhost:5173**（不要访问 `:8080`，否则仍是嵌入的旧构建产物）。
+
+Vite 会把 `/api` 代理到 `http://localhost:8080`（见 `frontend/vite.config.ts`），Cookie / Session 与单进程模式一致。
+
+| 变更类型 | 需要做什么 |
+|----------|------------|
+| 改 React / 样式 / 路由 | 保存即可，浏览器自动热更新 |
+| 改 Go 后端 / 配置 | 重启终端 1 的 `go run` |
+| 发布生产包 | 见下方「生产构建」 |
+
+### 单进程启动（快速体验）
+
+不跑 Vite、只用一个端口时，需先构建前端再启动 Go（适合验收 embed 产物，不适合日常改 UI）：
+
+```bash
+cd frontend && npm run build && cd ..
+go run ./cmd/web -config config/config.yml
+```
+
+访问 http://localhost:8080 。
+
+### 生产构建
+
+先编译前端再嵌入 Go 二进制：
 
 ```bash
 # 推荐：一键脚本
@@ -77,12 +113,6 @@ go build -o build/matrix ./cmd/web        # Linux/macOS
 ```
 
 已有 `frontend/dist` 且无需重编前端时，可跳过：`set SKIP_FRONTEND=1` 后执行 `go generate`。
-
-前端开发模式（Vite 代理 `/api`）：
-
-```bash
-cd frontend && npm run dev
-```
 
 完整部署说明见 [docs/DEPLOY.md](docs/DEPLOY.md)。
 
