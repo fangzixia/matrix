@@ -3,6 +3,7 @@ package harness
 const implementPreset = `【编码实现】
 根据需求文档在工作区内完成实现与必要自测，满足全部验收标准。`
 
+// NewImplementWorkflow 创建「编码实现」流水线工作流。
 func NewImplementWorkflow(userInput, filePath string) Workflow {
 	return Workflow{
 		Kind:         KindImplement,

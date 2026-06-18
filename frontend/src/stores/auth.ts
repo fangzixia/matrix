@@ -1,37 +1,45 @@
-import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { create } from 'zustand'
 import * as authApi from '@/api/auth'
 import type { User } from '@/api/auth'
 
-export const useAuthStore = defineStore('auth', () => {
-  const user = ref<User | null>(null)
-  const loading = ref(false)
-  const initialized = ref(false)
+interface AuthState {
+  user: User | null
+  loading: boolean
+  initialized: boolean
+  isLoggedIn: () => boolean
+  isAdmin: () => boolean
+  isRoot: () => boolean
+  fetchMe: () => Promise<void>
+  login: (username: string, password: string) => Promise<void>
+  logout: () => Promise<void>
+  setUser: (user: User | null) => void
+}
 
-  const isLoggedIn = computed(() => !!user.value)
-  const isAdmin = computed(() => !!user.value?.is_admin)
-  const isRoot = computed(() => !!user.value?.is_root)
-
-  async function fetchMe() {
-    loading.value = true
+export const useAuthStore = create<AuthState>((set, get) => ({
+  user: null,
+  loading: false,
+  initialized: false,
+  isLoggedIn: () => !!get().user,
+  isAdmin: () => !!get().user?.is_admin,
+  isRoot: () => !!get().user?.is_root,
+  setUser: (user) => set({ user }),
+  fetchMe: async () => {
+    set({ loading: true })
     try {
-      user.value = await authApi.me()
+      const user = await authApi.me()
+      set({ user })
     } catch {
-      user.value = null
+      set({ user: null })
     } finally {
-      loading.value = false
-      initialized.value = true
+      set({ loading: false, initialized: true })
     }
-  }
-
-  async function login(username: string, password: string) {
-    user.value = await authApi.login(username, password)
-  }
-
-  async function logout() {
+  },
+  login: async (username, password) => {
+    const user = await authApi.login(username, password)
+    set({ user })
+  },
+  logout: async () => {
     await authApi.logout()
-    user.value = null
-  }
-
-  return { user, loading, initialized, isLoggedIn, isAdmin, isRoot, fetchMe, login, logout }
-})
+    set({ user: null })
+  },
+}))

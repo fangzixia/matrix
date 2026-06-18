@@ -1,3 +1,4 @@
+// Package db 打开 PostgreSQL 连接并执行 GORM 自动迁移。
 package db
 
 import (
@@ -12,6 +13,7 @@ import (
 	"matrix/internal/platform/db/models"
 )
 
+// Open 打开 PostgreSQL 连接并配置连接池。
 func Open(cfg config.DatabaseConfig) (*gorm.DB, error) {
 	gcfg := &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Warn),
@@ -31,6 +33,7 @@ func Open(cfg config.DatabaseConfig) (*gorm.DB, error) {
 	return db, nil
 }
 
+// AutoMigrate 对 models.All 注册的全部实体执行 GORM 自动建表。
 func AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(models.All()...)
 }

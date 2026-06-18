@@ -1,5 +1,9 @@
+/**
+ * 项目多 Git 仓库绑定 API。
+ */
 import { api } from './client'
 
+/** 项目下绑定的 Git 仓库 */
 export interface Repository {
   id: string
   project_id: string

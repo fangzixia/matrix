@@ -1,8 +1,14 @@
+/**
+ * HTTP 客户端：封装 fetch，携带 Session Cookie，统一解析 JSON 错误。
+ */
+
+/** 后端 JSON 错误响应体 */
 export interface ApiError {
   error: string
   message: string
 }
 
+/** 带 status/code 的 HTTP 异常，供页面捕获并展示 message */
 export class HttpError extends Error {
   status: number
   code: string
@@ -14,6 +20,10 @@ export class HttpError extends Error {
   }
 }
 
+/**
+ * api 发起 REST 请求；204/空响应返回 undefined。
+ * @param path 相对路径（如 /api/projects）
+ */
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (init.body && !headers.has('Content-Type')) {

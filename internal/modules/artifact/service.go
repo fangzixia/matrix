@@ -1,3 +1,4 @@
+// Package artifact 评测与构建产物记录。
 package artifact
 
 import (
@@ -18,15 +19,18 @@ const (
 	evalDirLegacy = ".spec/evaluations"
 )
 
+// Service 管理评测与构建产物的列表查询。
 type Service struct {
 	db *gorm.DB
 	ws *workspace.Service
 }
 
+// NewService 创建产物服务实例。
 func NewService(db *gorm.DB, ws *workspace.Service) *Service {
 	return &Service{db: db, ws: ws}
 }
 
+// Item 是产物列表项 API 返回的数据传输对象。
 type Item struct {
 	ID    uuid.UUID `json:"id"`
 	Kind  string    `json:"kind"`
@@ -34,6 +38,7 @@ type Item struct {
 	Title string    `json:"title"`
 }
 
+// ListEvaluations 返回评测产物列表。
 func (s *Service) ListEvaluations(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID) ([]Item, error) {
 	root, err := s.ws.SandboxRoot(ctx, projectID, repositoryID)
 	if err != nil {

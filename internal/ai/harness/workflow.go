@@ -1,24 +1,36 @@
+// Package harness 定义 Spec/Implement/Verify/Build/UI Scan 任务流与 Prompt 模板。
 package harness
 
 import "strings"
 
+// Kind 是 Harness 任务流类型。
 type Kind string
 
 const (
-	KindSpec      Kind = "spec"
+	// KindSpec 是需求规格阶段。
+	KindSpec Kind = "spec"
+	// KindImplement 是代码实现阶段。
 	KindImplement Kind = "implement"
-	KindVerify    Kind = "verify"
-	KindBuild     Kind = "build"
-	KindUIScan    Kind = "ui-scan"
+	// KindVerify 是验证阶段。
+	KindVerify Kind = "verify"
+	// KindBuild 是构建阶段。
+	KindBuild Kind = "build"
+	// KindUIScan 是 UI 扫描阶段。
+	KindUIScan Kind = "ui-scan"
 )
 
+// State 是任务流执行状态。
 type State string
 
 const (
-	StatePrepared  State = "prepared"
-	StateRunning   State = "running"
+	// StatePrepared 表示已准备、尚未执行。
+	StatePrepared State = "prepared"
+	// StateRunning 表示正在执行。
+	StateRunning State = "running"
+	// StateSucceeded 表示执行成功。
 	StateSucceeded State = "succeeded"
-	StateFailed    State = "failed"
+	// StateFailed 表示执行失败。
+	StateFailed State = "failed"
 )
 
 // CoordinatorExecutionNote 追加到任务 prompt，提醒父 Agent 勿直接调用 Worker 工具。
@@ -26,8 +38,7 @@ const CoordinatorExecutionNote = `
 【Coordinator 执行说明】
 你是 Coordinator：不要直接调用 read_file、grep、glob、write_file、bash、list_dir 等；并行调研请在同一轮发起多个 agent。`
 
-// Workflow makes task flows explicit enough for callers to track state,
-// expected artifacts, and recovery guidance independently from the prompt.
+// Workflow 描述任务流的显式状态、预期产物与恢复指引，独立于 Prompt 文本。
 type Workflow struct {
 	Kind              Kind
 	State             State
@@ -42,6 +53,7 @@ type Workflow struct {
 	Recovery          []string
 }
 
+// Prompt 根据任务流状态、产物与验收标准生成完整 Prompt 文本。
 func (w Workflow) Prompt() string {
 	var b strings.Builder
 	b.WriteString(w.Preset)
@@ -65,6 +77,7 @@ func (w Workflow) Prompt() string {
 	return b.String()
 }
 
+// WithState 返回指定执行状态的任务流副本。
 func (w Workflow) WithState(state State) Workflow {
 	w.State = state
 	return w

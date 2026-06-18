@@ -6,6 +6,7 @@ import (
 
 const uiScanPreset = ``
 
+// NewUIScanWorkflow 创建「页面扫描」流水线工作流。
 func NewUIScanWorkflow(userInput string) Workflow {
 	outDir := filepath.Join(".matrix", "pagescan")
 	return Workflow{

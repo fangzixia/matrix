@@ -227,6 +227,7 @@ func DefaultRegistry() *Registry {
 	return r
 }
 
+// RegistryWithoutShell 返回不含 bash/powershell 的内置工具注册表。
 func RegistryWithoutShell(_ *Registry) *Registry {
 	r := NewRegistry()
 	r.Register(ReadFile)

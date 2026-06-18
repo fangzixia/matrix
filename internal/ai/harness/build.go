@@ -3,6 +3,7 @@ package harness
 const buildPreset = `【完整构建】
 按需求完成实现与验收闭环，评测综合分 ≥ 8.0，未达标须说明差距与遗留项。`
 
+// NewBuildWorkflow 创建「完整构建」流水线工作流。
 func NewBuildWorkflow(userInput, filePath string) Workflow {
 	return Workflow{
 		Kind:         KindBuild,

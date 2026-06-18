@@ -1,3 +1,4 @@
+// Package bootstrap Web 服务启动链：配置、迁移、依赖注入、HTTP 监听。
 package bootstrap
 
 import (
@@ -20,6 +21,7 @@ import (
 	"matrix/internal/webapp"
 )
 
+// Options 是 Web 服务启动时的配置选项。
 type Options struct {
 	ConfigPath string
 	StaticFS   fs.FS
@@ -81,10 +83,12 @@ type httpServer struct {
 	addr   string
 }
 
+// ListenAndServe 在配置的地址上启动 Gin HTTP 服务。
 func (s *httpServer) ListenAndServe() error {
 	return s.engine.Run(s.addr)
 }
 
+// ConfigPathFromFlags 解析 -config 命令行参数，默认 config/config.yml（可用 MATRIX_CONFIG 覆盖）。
 func ConfigPathFromFlags() string {
 	path := flag.String("config", envOr("MATRIX_CONFIG", "config/config.yml"), "config file path")
 	flag.Parse()

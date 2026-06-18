@@ -9,16 +9,19 @@ import (
 	"matrix/internal/modules/repository"
 )
 
+// ProjectRepoResolver 根据项目与仓库 ID 解析沙箱根目录并确保仓库已克隆。
 type ProjectRepoResolver struct {
 	Projects *project.Service
 	Repos    *repository.Service
 	WS       *Service
 }
 
+// RepoRoot 返回项目默认仓库根目录。
 func (r *ProjectRepoResolver) RepoRoot(ctx context.Context, projectID uuid.UUID) (string, error) {
 	return r.RepoRootFor(ctx, projectID, nil)
 }
 
+// RepoRootFor 返回指定仓库的根目录。
 func (r *ProjectRepoResolver) RepoRootFor(ctx context.Context, projectID uuid.UUID, repoID *uuid.UUID) (string, error) {
 	var name, gitURL, branch string
 	if repoID != nil && r.Repos != nil {

@@ -1,3 +1,4 @@
+// Package app 组装应用依赖图，供 webapp 与 bootstrap 注入使用。
 package app
 
 import (
@@ -25,30 +26,31 @@ import (
 	"matrix/internal/platform/storage"
 )
 
+// Deps 应用级依赖容器：各领域 Service 与共享基础设施。
 type Deps struct {
-	Config         *config.Config
-	Paths          storage.Paths
-	DB             *gorm.DB
-	Log            *slog.Logger
-	Hub            *events.Hub
-	Auth           *identity.AuthService
-	Users          *identity.UserRepo
-	Sessions       *identity.SessionService
-	IAM            *iam.Enforcer
-	Members        *iam.MemberService
-	Projects       *project.Service
-	Settings       *project.SettingsService
-	Repositories   *repository.Service
-	Groups         *group.Service
-	Workspace      *workspace.Service
-	Runs           *run.Service
-	Jobs           *job.Service
-	Pipeline       *pipeline.Service
-	Notifications  *notification.Service
-	Requirements   *requirement.Service
-	Artifacts      *artifact.Service
-	Runtime        *run.Runtime
-	SystemSettings *systemsettings.Service
+	Config         *config.Config           // YAML + 热更新后的运行配置
+	Paths          storage.Paths            // 数据/工作区/审计目录
+	DB             *gorm.DB                 // PostgreSQL
+	Log            *slog.Logger             // 结构化日志
+	Hub            *events.Hub              // SSE 事件总线
+	Auth           *identity.AuthService    // 登录校验
+	Users          *identity.UserRepo       // 用户 CRUD
+	Sessions       *identity.SessionService // Session Cookie
+	IAM            *iam.Enforcer            // 项目 RBAC
+	Members        *iam.MemberService       // 项目成员
+	Projects       *project.Service         // 项目
+	Settings       *project.SettingsService // 项目集成设置
+	Repositories   *repository.Service      // Git 仓库绑定
+	Groups         *group.Service           // 用户组
+	Workspace      *workspace.Service       // Git 工作区
+	Runs           *run.Service             // AI Run/Chat
+	Jobs           *job.Service             // 任务队列
+	Pipeline       *pipeline.Service        // 流水线阶段
+	Notifications  *notification.Service    // 通知
+	Requirements   *requirement.Service     // 需求文档
+	Artifacts      *artifact.Service        // 评测产物
+	Runtime        *run.Runtime             // AI Agent 运行时
+	SystemSettings *systemsettings.Service  // 系统级配置（DB）
 }
 
 // NewDeps 组装应用依赖图（数据库、IAM、Run 队列、通知等）。
@@ -91,6 +93,7 @@ func NewDeps(cfg *config.Config, paths storage.Paths, db *gorm.DB, log *slog.Log
 	}
 }
 
+// Close 释放应用依赖持有的资源（如 AI 运行时）。
 func (d *Deps) Close() {
 	if d.Runtime != nil {
 		d.Runtime.Close()

@@ -1,32 +1,33 @@
-import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { create } from 'zustand'
 import * as runsApi from '@/api/runs'
 import type { Run } from '@/api/runs'
 
-export const useRunStore = defineStore('run', () => {
-  const runs = ref<Run[]>([])
-  const current = ref<Run | null>(null)
-  const loading = ref(false)
-  const streamEvents = ref<string[]>([])
+interface RunState {
+  runs: Run[]
+  current: Run | null
+  loading: boolean
+  streamEvents: string[]
+  fetchRuns: (projectId: string) => Promise<void>
+  setCurrent: (run: Run | null) => void
+  appendStream: (data: unknown) => void
+}
 
-  async function fetchRuns(projectId: string) {
-    loading.value = true
+export const useRunStore = create<RunState>((set, get) => ({
+  runs: [],
+  current: null,
+  loading: false,
+  streamEvents: [],
+  fetchRuns: async (projectId) => {
+    set({ loading: true })
     try {
       const res = await runsApi.listRuns(projectId)
-      runs.value = res.runs
+      set({ runs: res.runs })
     } finally {
-      loading.value = false
+      set({ loading: false })
     }
-  }
-
-  function setCurrent(run: Run | null) {
-    current.value = run
-    streamEvents.value = []
-  }
-
-  function appendStream(data: unknown) {
-    streamEvents.value.push(JSON.stringify(data, null, 2))
-  }
-
-  return { runs, current, loading, streamEvents, fetchRuns, setCurrent, appendStream }
-})
+  },
+  setCurrent: (run) => set({ current: run, streamEvents: [] }),
+  appendStream: (data) => {
+    set({ streamEvents: [...get().streamEvents, JSON.stringify(data, null, 2)] })
+  },
+}))

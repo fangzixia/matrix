@@ -1,5 +1,9 @@
+/**
+ * Run、流水线、Chat 会话 API。
+ */
 import { api } from './client'
 
+/** AI 任务/Chat 运行记录 */
 export interface Run {
   id: string
   project_id: string
@@ -14,6 +18,7 @@ export interface Run {
   created_at: string
 }
 
+/** Run 内流水线步骤 */
 export interface RunStep {
   id: string
   run_id: string
@@ -25,6 +30,7 @@ export interface RunStep {
   finished_at?: string
 }
 
+/** Run 事件快照 */
 export interface RunEvent {
   id: string
   run_id: string
@@ -34,6 +40,7 @@ export interface RunEvent {
   created_at: string
 }
 
+/** Chat 会话元数据 */
 export interface ChatSession {
   id: string
   title: string

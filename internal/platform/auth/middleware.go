@@ -1,3 +1,4 @@
+// Package auth 提供 Gin 中间件：Session 鉴权、Admin/Root 与项目 RBAC。
 package auth
 
 import (
@@ -9,10 +10,12 @@ import (
 
 const ctxUserKey = "auth_user"
 
+// SetUser 将已认证用户写入 Gin 上下文。
 func SetUser(c *gin.Context, u *identity.User) {
 	c.Set(ctxUserKey, u)
 }
 
+// User 从 Gin 上下文读取已认证用户。
 func User(c *gin.Context) (*identity.User, bool) {
 	v, ok := c.Get(ctxUserKey)
 	if !ok {
@@ -22,6 +25,7 @@ func User(c *gin.Context) (*identity.User, bool) {
 	return u, ok
 }
 
+// RequireAuth 校验 Session Cookie 并将用户写入上下文。
 func RequireAuth(session *identity.SessionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token, err := c.Cookie(session.CookieName())
@@ -39,6 +43,7 @@ func RequireAuth(session *identity.SessionService) gin.HandlerFunc {
 	}
 }
 
+// RequireAdmin 要求当前用户具有管理员标志。
 func RequireAdmin() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		u, ok := User(c)

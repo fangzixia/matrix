@@ -1,3 +1,4 @@
+// Package migrate 在启动时执行 GORM 与 SQL 版本化迁移。
 package migrate
 
 import (
@@ -28,6 +29,7 @@ import (
 
 var embedSQL embed.FS
 
+// Up 执行 GORM AutoMigrate 与 SQL 版本化迁移（若配置启用）。
 func Up(db *gorm.DB, cfg config.DatabaseConfig) error {
 
 	if cfg.AutoMigrate {

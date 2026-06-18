@@ -1,3 +1,4 @@
+// Package logging 初始化 slog 日志输出，并提供 AI 内核迁移期的兼容辅助函数。
 package logging
 
 import (
@@ -14,6 +15,7 @@ import (
 	"matrix/internal/platform/storage"
 )
 
+// Init 根据配置创建 slog Logger，写入日志文件并在开发模式下同时输出到 stderr。
 func Init(cfg config.LoggingConfig, paths storage.Paths, dev bool) (*slog.Logger, error) {
 
 	if err := os.MkdirAll(paths.LogDir, 0o755); err != nil {
@@ -78,12 +80,14 @@ func Init(cfg config.LoggingConfig, paths storage.Paths, dev bool) (*slog.Logger
 
 }
 
-// Legacy helpers for ai kernel packages during migration.
-
+// Info 写入 info 级别日志（兼容 AI 内核旧调用）。
 func Info(msg string, args ...any) { slog.Info(msg, args...) }
 
+// Warn 写入 warn 级别日志（兼容 AI 内核旧调用）。
 func Warn(msg string, args ...any) { slog.Warn(msg, args...) }
 
+// Error 写入 error 级别日志（兼容 AI 内核旧调用）。
 func Error(msg string, args ...any) { slog.Error(msg, args...) }
 
+// Debug 写入 debug 级别日志（兼容 AI 内核旧调用）。
 func Debug(msg string, args ...any) { slog.Debug(msg, args...) }

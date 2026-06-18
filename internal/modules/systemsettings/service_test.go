@@ -21,25 +21,12 @@ func TestSaveAndGetMCPServers(t *testing.T) {
 		Security: SecuritySettings{ShellTimeout: "60s"},
 		Git:      GitSettings{CloneTimeout: "300s"},
 	}
-	merged := in
-	s.apply(merged, false)
+	s.apply(in, false)
 	if s.cfg.AI.ActiveModel().Model != "m" {
 		t.Fatalf("expected active model m, got %q", s.cfg.AI.ActiveModel().Model)
 	}
 	if s.cfg.MCP.Servers["demo"].Command != "node" {
 		t.Fatalf("cfg not updated: %+v", s.cfg.MCP.Servers)
-	}
-}
-
-func TestMigrateLegacyModel(t *testing.T) {
-	st := Settings{
-		Model: ModelSettings{
-			BaseURL: "https://x", Model: "legacy", MaxTokens: 100, APIKey: "k", APIKeySet: true,
-		},
-	}
-	migrateLegacyModel(&st)
-	if len(st.Models) != 1 || st.Models[0].Model != "legacy" {
-		t.Fatalf("unexpected %+v", st.Models)
 	}
 }
 
@@ -77,27 +64,29 @@ func TestFromGitConfig(t *testing.T) {
 	}
 }
 
-func TestValidate(t *testing.T) {
-	if err := validate(Settings{
+func TestValidateWorker(t *testing.T) {
+	if err := validateWorker(WorkerSettings{MaxAttempts: 3, Concurrency: 2, PollInterval: "2s"}); err != nil {
+		t.Fatalf("expected valid: %v", err)
+	}
+}
+
+func TestValidateAI(t *testing.T) {
+	if err := validateAI(AISettings{
 		Models:   []ModelProfileSettings{{ID: "1", Name: "a", Model: "m", MaxTokens: 100, Enabled: true}},
-		Worker:   WorkerSettings{MaxAttempts: 3, Concurrency: 2, PollInterval: "2s"},
 		Security: SecuritySettings{ShellTimeout: "60s"},
-		Git:      GitSettings{CloneTimeout: "300s"},
 	}); err != nil {
 		t.Fatalf("expected valid: %v", err)
 	}
 }
 
-func TestNormalizeModelSettingsDefault(t *testing.T) {
-	st := Settings{
-		Models: []ModelProfileSettings{
-			{ID: "1", Name: "a", Model: "m1", Enabled: true, Default: true, MaxTokens: 100},
-			{ID: "2", Name: "b", Model: "m2", Enabled: true, Default: true, MaxTokens: 100},
-		},
+func TestNormalizeModelProfilesDefault(t *testing.T) {
+	models := []ModelProfileSettings{
+		{ID: "1", Name: "a", Model: "m1", Enabled: true, Default: true, MaxTokens: 100},
+		{ID: "2", Name: "b", Model: "m2", Enabled: true, Default: true, MaxTokens: 100},
 	}
-	normalizeModelSettings(&st)
+	normalizeModelProfiles(&models)
 	count := 0
-	for _, m := range st.Models {
+	for _, m := range models {
 		if m.Default {
 			count++
 		}

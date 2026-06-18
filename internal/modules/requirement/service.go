@@ -1,3 +1,4 @@
+// Package requirement 需求文档管理与列表查询。
 package requirement
 
 import (
@@ -18,15 +19,18 @@ const (
 	specDirLegacy = ".spec/requirements"
 )
 
+// Service 管理需求文档的列表查询与内容读取。
 type Service struct {
 	db *gorm.DB
 	ws *workspace.Service
 }
 
+// NewService 创建需求文档服务实例。
 func NewService(db *gorm.DB, ws *workspace.Service) *Service {
 	return &Service{db: db, ws: ws}
 }
 
+// Item 是需求文档列表项 API 返回的数据传输对象。
 type Item struct {
 	ID      uuid.UUID `json:"id"`
 	Path    string    `json:"path"`
@@ -34,6 +38,7 @@ type Item struct {
 	Content string    `json:"content,omitempty"`
 }
 
+// List 返回列表。
 func (s *Service) List(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID) ([]Item, error) {
 	root, err := s.ws.SandboxRoot(ctx, projectID, repositoryID)
 	if err != nil {

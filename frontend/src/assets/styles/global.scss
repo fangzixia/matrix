@@ -8,19 +8,19 @@
 
 html,
 body,
-#app {
+#root {
   margin: 0;
   min-height: 100vh;
-  font-family: var(--gl-font-family);
-  font-size: var(--gl-font-size-md);
+  font-family: var(--matrix-font-family);
+  font-size: var(--matrix-font-size-md);
   line-height: 1.5;
-  color: var(--gl-text-color-default);
-  background: var(--gl-background-color-page);
+  color: var(--matrix-text-color-default);
+  background: var(--matrix-background-color-page);
   -webkit-font-smoothing: antialiased;
 }
 
 a {
-  color: var(--gl-text-color-link);
+  color: var(--matrix-text-color-link);
   text-decoration: none;
 
   &:hover {
@@ -29,36 +29,36 @@ a {
 }
 
 h1, h2, h3, h4 {
-  margin: 0 0 var(--gl-spacing-3);
+  margin: 0 0 var(--matrix-spacing-3);
   font-weight: 600;
   line-height: 1.3;
 }
 
 .page-title {
-  font-size: var(--gl-font-size-2xl);
+  font-size: var(--matrix-font-size-2xl);
   font-weight: 600;
-  margin-bottom: var(--gl-spacing-4);
-  color: var(--gl-text-color-default);
+  margin-bottom: var(--matrix-spacing-4);
+  color: var(--matrix-text-color-default);
 }
 
 .page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--gl-spacing-3);
-  margin-bottom: var(--gl-spacing-4);
+  gap: var(--matrix-spacing-3);
+  margin-bottom: var(--matrix-spacing-4);
 }
 
 .page-container {
-  max-width: var(--gl-content-max-width);
+  max-width: var(--matrix-content-max-width);
 }
 
 .panel {
-  background: var(--gl-background-color-default);
-  border: 1px solid var(--gl-border-color-default);
-  border-radius: var(--gl-radius);
-  padding: var(--gl-spacing-4);
-  box-shadow: var(--gl-shadow-sm);
+  background: var(--matrix-background-color-default);
+  border: 1px solid var(--matrix-border-color-default);
+  border-radius: var(--matrix-radius);
+  padding: var(--matrix-spacing-4);
+  box-shadow: var(--matrix-shadow-sm);
 }
 
 .panel--flat {
@@ -66,99 +66,118 @@ h1, h2, h3, h4 {
 }
 
 .muted {
-  color: var(--gl-text-color-subtle);
+  color: var(--matrix-text-color-subtle);
 }
 
 .flex-between {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--gl-spacing-3);
+  gap: var(--matrix-spacing-3);
 }
 
 .stack {
   display: flex;
   flex-direction: column;
-  gap: var(--gl-spacing-3);
+  gap: var(--matrix-spacing-3);
 }
 
-/* GitLab form controls */
-.gl-label {
+.matrix-ai-chat-page {
+  min-height: 420px;
+}
+
+.matrix-ai-chat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--matrix-spacing-3);
+  min-height: 360px;
+}
+
+.matrix-ai-chat__body {
+  flex: 1;
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* Matrix form controls */
+.matrix-label {
   display: block;
   font-weight: 600;
-  font-size: var(--gl-font-size-sm);
-  margin-bottom: var(--gl-spacing-1);
-  color: var(--gl-text-color-default);
+  font-size: var(--matrix-font-size-sm);
+  margin-bottom: var(--matrix-spacing-1);
+  color: var(--matrix-text-color-default);
 }
 
-.gl-input,
-.gl-select,
-.gl-textarea {
+.matrix-input,
+.matrix-select,
+.matrix-textarea {
   width: 100%;
   padding: 10px 12px;
   font: inherit;
-  font-size: var(--gl-font-size-md);
-  color: var(--gl-text-color-default);
-  background: var(--gl-background-color-default);
-  border: 1px solid var(--gl-border-color-default);
-  border-radius: var(--gl-radius);
+  font-size: var(--matrix-font-size-md);
+  color: var(--matrix-text-color-default);
+  background: var(--matrix-background-color-default);
+  border: 1px solid var(--matrix-border-color-default);
+  border-radius: var(--matrix-radius);
   transition: border-color 0.15s, box-shadow 0.15s;
 
   &::placeholder {
-    color: var(--gl-color-gray-300);
+    color: var(--matrix-color-gray-300);
   }
 
   &:hover {
-    border-color: var(--gl-border-color-strong);
+    border-color: var(--matrix-border-color-strong);
   }
 
   &:focus {
     outline: none;
-    border-color: var(--gl-color-blue-500);
-    box-shadow: var(--gl-focus-ring);
+    border-color: var(--matrix-color-blue-500);
+    box-shadow: var(--matrix-focus-ring);
   }
 
   &:disabled {
-    background: var(--gl-background-color-subtle);
+    background: var(--matrix-background-color-subtle);
     cursor: not-allowed;
   }
 }
 
-.gl-textarea {
+.matrix-textarea {
   min-height: 120px;
   resize: vertical;
 }
 
 /* Auto-style unmarked controls inside common form containers */
 form.panel,
-.gl-modal__body,
-.gl-form-field {
+.matrix-modal__body,
+.matrix-form-field {
   label:not(.checkbox):not(.sign-in__remember) {
     display: flex;
     flex-direction: column;
-    gap: var(--gl-spacing-1);
+    gap: var(--matrix-spacing-1);
     font-weight: 600;
-    font-size: var(--gl-font-size-sm);
-    color: var(--gl-text-color-default);
+    font-size: var(--matrix-font-size-sm);
+    color: var(--matrix-text-color-default);
   }
 }
 
-form.panel input:not([type=checkbox]):not([type=radio]):not(.gl-input),
-.gl-modal__body input:not([type=checkbox]):not([type=radio]):not(.gl-input),
-.gl-form-field input:not([type=checkbox]):not([type=radio]),
-form.panel select:not(.gl-select),
-.gl-modal__body select:not(.gl-select),
-.gl-form-field select {
-  @extend .gl-input;
+form.panel input:not([type=checkbox]):not([type=radio]):not(.matrix-input),
+.matrix-modal__body input:not([type=checkbox]):not([type=radio]):not(.matrix-input),
+.matrix-form-field input:not([type=checkbox]):not([type=radio]),
+form.panel select:not(.matrix-select),
+.matrix-modal__body select:not(.matrix-select),
+.matrix-form-field select {
+  @extend .matrix-input;
 }
 
-form.panel textarea:not(.gl-textarea),
-.gl-modal__body textarea:not(.gl-textarea),
-.gl-form-field textarea {
-  @extend .gl-textarea;
+form.panel textarea:not(.matrix-textarea),
+.matrix-modal__body textarea:not(.matrix-textarea),
+.matrix-form-field textarea {
+  @extend .matrix-textarea;
 }
 
-.gl-search {
+.matrix-search {
   position: relative;
 
   &::before {
@@ -174,19 +193,19 @@ form.panel textarea:not(.gl-textarea),
     mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M7 1a6 6 0 1 0 0 12A6 6 0 0 0 7 1zm8.5 14.5-3.5-3.5' stroke='black' stroke-width='1.5' fill='none'/%3E%3C/svg%3E") center / contain no-repeat;
   }
 
-  .gl-input {
+  .matrix-input {
     padding-left: 32px;
   }
 }
 
-/* Tab nav (GitLab underline style) */
-.gl-tab-nav {
+/* Tab nav (underline style) */
+.matrix-tab-nav {
   display: flex;
-  gap: var(--gl-spacing-4);
+  gap: var(--matrix-spacing-4);
   list-style: none;
   padding: 0;
-  margin: 0 0 var(--gl-spacing-4);
-  border-bottom: 1px solid var(--gl-border-color-default);
+  margin: 0 0 var(--matrix-spacing-4);
+  border-bottom: 1px solid var(--matrix-border-color-default);
 
   li {
     list-style: none;
@@ -194,38 +213,39 @@ form.panel textarea:not(.gl-textarea),
 
   button,
   a {
-    padding: var(--gl-spacing-2) var(--gl-spacing-1) var(--gl-spacing-3);
+    padding: var(--matrix-spacing-2) var(--matrix-spacing-1) var(--matrix-spacing-3);
     border: none;
     background: none;
     font: inherit;
-    font-size: var(--gl-font-size-md);
+    font-size: var(--matrix-font-size-md);
     cursor: pointer;
-    color: var(--gl-text-color-subtle);
+    color: var(--matrix-text-color-subtle);
     text-decoration: none;
     border-bottom: 2px solid transparent;
     margin-bottom: -1px;
     transition: color 0.15s, border-color 0.15s;
 
     &:hover {
-      color: var(--gl-text-color-default);
+      color: var(--matrix-text-color-default);
       text-decoration: none;
     }
 
     &.active,
-    &.router-link-active {
-      color: var(--gl-text-color-default);
+    &.router-link-active,
+    &.nav-link-active {
+      color: var(--matrix-text-color-default);
       font-weight: 600;
-      border-bottom-color: var(--gl-color-orange-500);
+      border-bottom-color: var(--matrix-color-orange-500);
     }
   }
 }
 
 /* Empty state */
-.gl-empty-state {
-  padding: var(--gl-spacing-8) var(--gl-spacing-4);
+.matrix-empty-state {
+  padding: var(--matrix-spacing-8) var(--matrix-spacing-4);
   text-align: center;
-  color: var(--gl-text-color-subtle);
-  background: var(--gl-background-color-default);
-  border: 1px solid var(--gl-border-color-default);
-  border-radius: var(--gl-radius);
+  color: var(--matrix-text-color-subtle);
+  background: var(--matrix-background-color-default);
+  border: 1px solid var(--matrix-border-color-default);
+  border-radius: var(--matrix-radius);
 }

@@ -1,0 +1,101 @@
+.auth-layout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--matrix-background-color-page);
+}
+
+.auth-layout__header {
+  height: calc(var(--matrix-header-height) + 8px);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--matrix-spacing-6);
+  background: var(--matrix-background-color-default);
+  border-bottom: 1px solid var(--matrix-border-color-default);
+}
+
+.auth-layout__main {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: var(--matrix-spacing-8) var(--matrix-spacing-4);
+}
+
+.auth-layout__grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) minmax(340px, 400px);
+  gap: var(--matrix-spacing-8);
+  width: min(960px, 100%);
+  align-items: center;
+}
+
+.auth-layout__hero {
+  padding-right: var(--matrix-spacing-4);
+
+  h1 {
+    font-size: 28px;
+    line-height: 1.25;
+    margin-bottom: var(--matrix-spacing-3);
+    color: var(--matrix-text-color-default);
+  }
+}
+
+.auth-layout__hero-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  margin-bottom: var(--matrix-spacing-3);
+  border-radius: 12px;
+  background: var(--matrix-color-orange-50);
+  color: var(--matrix-color-orange-700);
+  font-size: var(--matrix-font-size-sm);
+  font-weight: 600;
+}
+
+.auth-layout__lead {
+  line-height: 1.65;
+  color: var(--matrix-text-color-subtle);
+  margin: 0 0 var(--matrix-spacing-3);
+  font-size: var(--matrix-font-size-md);
+}
+
+.auth-layout__hint {
+  font-size: var(--matrix-font-size-sm);
+  margin: 0;
+}
+
+.auth-layout__card {
+  background: var(--matrix-background-color-default);
+  border: 1px solid var(--matrix-border-color-default);
+  border-radius: var(--matrix-radius-lg);
+  padding: var(--matrix-spacing-6);
+  box-shadow: var(--matrix-shadow-lg);
+}
+
+.auth-layout__footer {
+  text-align: center;
+  padding: var(--matrix-spacing-4);
+  font-size: var(--matrix-font-size-sm);
+}
+
+@media (max-width: 768px) {
+  .auth-layout__grid {
+    grid-template-columns: 1fr;
+    gap: var(--matrix-spacing-6);
+  }
+
+  .auth-layout__hero {
+    text-align: center;
+    padding-right: 0;
+  }
+}
+
+.sign-in__title {
+  font-size: var(--matrix-font-size-xl);
+  margin-bottom: var(--matrix-spacing-5);
+  font-weight: 600;
+}
+
+.sign-in__submit {
+  width: 100%;
+}

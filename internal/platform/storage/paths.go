@@ -1,3 +1,4 @@
+// Package storage 解析配置中的本地目录路径并确保目录布局存在。
 package storage
 
 import (
@@ -12,6 +13,7 @@ import (
 	"matrix/internal/platform/config"
 )
 
+// Paths 是解析后的本地存储目录绝对路径集合。
 type Paths struct {
 	DataDir string
 
@@ -26,6 +28,7 @@ type Paths struct {
 	LogFile string
 }
 
+// Resolve 根据配置计算各数据目录的绝对路径并校验 allowed_roots。
 func Resolve(cfg *config.Config) (Paths, error) {
 
 	base := config.ResolvePath(".", cfg.Storage.BaseDir)
@@ -125,6 +128,7 @@ func underAllowedRoot(path string, allowed []string) bool {
 
 }
 
+// EnsureLayout 创建 DataDir、WorkspacesDir 等必要目录。
 func EnsureLayout(p Paths) error {
 
 	for _, dir := range []string{p.DataDir, p.WorkspacesDir, p.AuditDir, p.ExportsDir, p.LogDir} {
@@ -141,10 +145,12 @@ func EnsureLayout(p Paths) error {
 
 }
 
+// ProjectRepoDir 返回项目默认 Git 仓库克隆目录。
 func ProjectRepoDir(p Paths, projectID string) string {
 	return filepath.Join(p.WorkspacesDir, projectID, "repo")
 }
 
+// ProjectNamedRepoDir 返回项目具名 Git 仓库克隆目录。
 func ProjectNamedRepoDir(p Paths, projectID, repoName string) string {
 	if repoName == "" || repoName == "default" {
 		return ProjectRepoDir(p, projectID)
@@ -152,24 +158,28 @@ func ProjectNamedRepoDir(p Paths, projectID, repoName string) string {
 	return filepath.Join(p.WorkspacesDir, projectID, "repos", repoName)
 }
 
+// ProjectAuditDir 返回项目审计日志根目录。
 func ProjectAuditDir(p Paths, projectID string) string {
 
 	return filepath.Join(p.AuditDir, projectID)
 
 }
 
+// ProjectSessionsDir 返回项目 Chat/Agent 会话 transcript 目录。
 func ProjectSessionsDir(p Paths, projectID string) string {
 
 	return filepath.Join(ProjectAuditDir(p, projectID), "sessions")
 
 }
 
+// RunAuditFile 返回单次 Run 的 JSONL 审计文件路径。
 func RunAuditFile(p Paths, projectID, runID string) string {
 
 	return filepath.Join(ProjectAuditDir(p, projectID), runID+".jsonl")
 
 }
 
+// ProjectSubagentsDir 返回项目子 Agent sidechain transcript 目录。
 func ProjectSubagentsDir(sessionsDir string) string {
 
 	return filepath.Join(filepath.Dir(sessionsDir), "subagents")

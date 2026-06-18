@@ -1,5 +1,9 @@
+/**
+ * 站内通知 API。
+ */
 import { api } from './client'
 
+/** 用户通知 */
 export interface Notification {
   id: string
   user_id: string

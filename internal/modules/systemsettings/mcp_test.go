@@ -7,24 +7,21 @@ import (
 
 func TestSaveValidateAfterMergeWorkerDefaults(t *testing.T) {
 	cfg := DefaultTestConfig()
-	merged := Settings{
+	if err := validateAI(AISettings{
 		Models: []ModelProfileSettings{{
 			ID: "1", Name: "t", Model: "m", MaxTokens: 100, Enabled: true, Default: true,
 		}},
-		Worker: WorkerSettings{
-			MaxAttempts:  cfg.Worker.MaxAttempts,
-			Concurrency:  cfg.Worker.Concurrency,
-			PollInterval: cfg.Worker.PollInterval.String(),
-			Enabled:      true,
-		},
 		Security: SecuritySettings{ShellTimeout: "60s"},
-		Git:      GitSettings{CloneTimeout: "300s"},
-		MCPServers: map[string]MCPServerSettings{
-			"x": {Command: "npx", Args: []string{"-y", "pkg"}},
-		},
+	}); err != nil {
+		t.Fatalf("validate ai: %v", err)
 	}
-	if err := validate(merged); err != nil {
-		t.Fatalf("validate after merge: %v", err)
+	if err := validateWorker(WorkerSettings{
+		MaxAttempts:  cfg.Worker.MaxAttempts,
+		Concurrency:  cfg.Worker.Concurrency,
+		PollInterval: cfg.Worker.PollInterval.String(),
+		Enabled:      true,
+	}); err != nil {
+		t.Fatalf("validate worker: %v", err)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// CoalesceSink 合并短时间内的 text/thinking delta 再转发到内层 Sink。
 type CoalesceSink struct {
 	inner     Sink
 	sessionID string
@@ -15,6 +16,7 @@ type CoalesceSink struct {
 	done      chan struct{}
 }
 
+// NewCoalesceSink 创建按 interval 批量 flush 的 Sink 包装器。
 func NewCoalesceSink(inner Sink, sessionID string, interval time.Duration) *CoalesceSink {
 	c := &CoalesceSink{
 		inner:     inner,
@@ -67,10 +69,12 @@ func (c *CoalesceSink) flush() {
 	}
 }
 
+// Close 停止 flush 循环并写出剩余 pending delta。
 func (c *CoalesceSink) Close() {
 	close(c.done)
 }
 
+// Publish 合并 content_block_delta 或直通其它消息类型。
 func (c *CoalesceSink) Publish(ctx context.Context, msg Message) error {
 	if msg.SessionID != "" {
 		c.sessionID = msg.SessionID

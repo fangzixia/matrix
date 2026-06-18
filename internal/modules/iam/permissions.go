@@ -11,6 +11,7 @@ type ProjectPermissions struct {
 	GitPush        bool `json:"git_push"`
 }
 
+// PermissionsForRole 返回角色对应的 GitLab 风格项目权限集。
 func PermissionsForRole(role Role) ProjectPermissions {
 	switch {
 	case RoleAtLeast(role, RoleOwner):

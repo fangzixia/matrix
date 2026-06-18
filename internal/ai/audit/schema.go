@@ -1,5 +1,7 @@
+// Package audit 记录 Agent 会话 JSONL 审计、导出与敏感信息脱敏。
 package audit
 
+// SchemaVersion 是当前审计 JSONL  schema 版本号。
 const SchemaVersion = 1
 
 // Event is a single JSONL audit record (LLM-friendly, English snake_case keys).

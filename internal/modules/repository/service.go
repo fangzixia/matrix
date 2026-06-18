@@ -1,3 +1,4 @@
+// Package repository 项目 Git 仓库绑定与默认仓库种子数据。
 package repository
 
 import (
@@ -13,6 +14,7 @@ import (
 	"matrix/internal/platform/db/models"
 )
 
+// DTO 是 Git 仓库 API 返回的数据传输对象。
 type DTO struct {
 	ID            uuid.UUID `json:"id"`
 	ProjectID     uuid.UUID `json:"project_id"`
@@ -26,6 +28,7 @@ type DTO struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
+// CreateInput 是创建 Git 仓库绑定时的请求参数。
 type CreateInput struct {
 	Name      string `json:"name"`
 	GitURL    string `json:"git_url"`
@@ -33,6 +36,7 @@ type CreateInput struct {
 	IsDefault bool   `json:"is_default"`
 }
 
+// UpdateInput 是更新 Git 仓库绑定时的请求参数。
 type UpdateInput struct {
 	Name      *string `json:"name"`
 	GitURL    *string `json:"git_url"`
@@ -40,14 +44,17 @@ type UpdateInput struct {
 	IsDefault *bool   `json:"is_default"`
 }
 
+// Service 管理项目 Git 仓库绑定与默认仓库种子数据。
 type Service struct {
 	db *gorm.DB
 }
 
+// NewService 创建仓库服务实例。
 func NewService(db *gorm.DB) *Service {
 	return &Service{db: db}
 }
 
+// List 返回列表。
 func (s *Service) List(ctx context.Context, projectID uuid.UUID) ([]DTO, error) {
 	var rows []models.ProjectRepository
 	if err := s.db.WithContext(ctx).Where("project_id = ?", projectID).Order("is_default desc, created_at asc").Find(&rows).Error; err != nil {
@@ -60,6 +67,7 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID) ([]DTO, error) 
 	return out, nil
 }
 
+// Get 执行对应操作。
 func (s *Service) Get(ctx context.Context, id uuid.UUID) (*DTO, error) {
 	var m models.ProjectRepository
 	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
@@ -68,6 +76,7 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID) (*DTO, error) {
 	return new(toDTO(&m)), nil
 }
 
+// GetDefault 返回项目默认仓库。
 func (s *Service) GetDefault(ctx context.Context, projectID uuid.UUID) (*DTO, error) {
 	var m models.ProjectRepository
 	err := s.db.WithContext(ctx).Where("project_id = ? AND is_default = ?", projectID, true).First(&m).Error
@@ -80,6 +89,7 @@ func (s *Service) GetDefault(ctx context.Context, projectID uuid.UUID) (*DTO, er
 	return new(toDTO(&m)), nil
 }
 
+// Create 创建记录。
 func (s *Service) Create(ctx context.Context, projectID uuid.UUID, in CreateInput) (*DTO, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
@@ -101,6 +111,7 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, in CreateInpu
 	return new(toDTO(&m)), nil
 }
 
+// Update 更新记录。
 func (s *Service) Update(ctx context.Context, id uuid.UUID, in UpdateInput) (*DTO, error) {
 	var m models.ProjectRepository
 	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
@@ -125,6 +136,7 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, in UpdateInput) (*DT
 	return new(toDTO(&m)), nil
 }
 
+// Delete 删除记录。
 func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	var m models.ProjectRepository
 	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
@@ -140,6 +152,7 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	return s.db.WithContext(ctx).Delete(&m).Error
 }
 
+// SeedDefault 为项目创建默认仓库绑定。
 func (s *Service) SeedDefault(ctx context.Context, projectID uuid.UUID, gitURL, branch string) error {
 	var count int64
 	if err := s.db.WithContext(ctx).Model(&models.ProjectRepository{}).Where("project_id = ?", projectID).Count(&count).Error; err != nil {
@@ -157,6 +170,7 @@ func (s *Service) SeedDefault(ctx context.Context, projectID uuid.UUID, gitURL, 
 	return s.db.WithContext(ctx).Create(&m).Error
 }
 
+// MigrateLegacyProjects 迁移旧版单仓库项目数据。
 func (s *Service) MigrateLegacyProjects(ctx context.Context) error {
 	var projects []models.Project
 	if err := s.db.WithContext(ctx).Find(&projects).Error; err != nil {

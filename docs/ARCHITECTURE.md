@@ -18,7 +18,7 @@ internal/modules/    领域模块（identity/iam/project/workspace/run/requireme
 internal/platform/   基础设施（config/logging/db/migrate/storage/http/auth/events）
 internal/app/        依赖装配与 bootstrap 启动链
 internal/webapp/     Gin 路由与 Handler 适配
-frontend/            Vue 3 + Vite GitLab 风格 UI
+frontend/            React + Vite + Ant Design 6 GitLab 风格 UI
 ```
 
 ## 依赖方向

@@ -1,3 +1,4 @@
+// Package group 用户组成员与项目权限继承。
 package group
 
 import (
@@ -13,17 +14,18 @@ import (
 	"matrix/internal/platform/db/models"
 )
 
+// GroupDTO 是用户组 API 返回的数据传输对象。
 type GroupDTO struct {
-	ID         uuid.UUID  `json:"id"`
-	Name       string     `json:"name"`
-	Path       string     `json:"path"`
-	ParentID   *uuid.UUID `json:"parent_id,omitempty"`
-	Visibility string     `json:"visibility"`
-	OwnerID    uuid.UUID  `json:"owner_id"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	ID              uuid.UUID             `json:"id"`
+	Name            string                `json:"name"`
+	OwnerID         uuid.UUID             `json:"owner_id"`
+	CreatedAt       time.Time             `json:"created_at"`
+	UpdatedAt       time.Time             `json:"updated_at"`
+	CurrentUserRole *iam.Role             `json:"current_user_role,omitempty"`
+	Permissions     *iam.GroupPermissions `json:"permissions,omitempty"`
 }
 
+// MemberDTO 是用户组成员 API 返回的数据传输对象。
 type MemberDTO struct {
 	UserID    uuid.UUID `json:"user_id"`
 	Username  string    `json:"username"`
@@ -33,20 +35,22 @@ type MemberDTO struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// CreateInput 是创建用户组时的请求参数。
 type CreateInput struct {
-	Name       string `json:"name"`
-	Path       string `json:"path"`
-	Visibility string `json:"visibility"`
+	Name string `json:"name"`
 }
 
+// Service 管理用户组成员与项目权限继承。
 type Service struct {
 	db *gorm.DB
 }
 
+// NewService 创建用户组服务实例。
 func NewService(db *gorm.DB) *Service {
 	return &Service{db: db}
 }
 
+// ListForUser 返回当前用户可见的列表。
 func (s *Service) ListForUser(ctx context.Context, userID uuid.UUID, isAdmin bool) ([]GroupDTO, error) {
 	var rows []models.Group
 	q := s.db.WithContext(ctx).Model(&models.Group{})
@@ -62,60 +66,70 @@ func (s *Service) ListForUser(ctx context.Context, userID uuid.UUID, isAdmin boo
 	}
 	out := make([]GroupDTO, len(rows))
 	for i := range rows {
-		out[i] = toDTO(&rows[i])
+		out[i] = *s.enrich(ctx, &rows[i], userID, isAdmin)
 	}
 	return out, nil
 }
 
+// Get 执行对应操作。
 func (s *Service) Get(ctx context.Context, id uuid.UUID) (*GroupDTO, error) {
 	var m models.Group
 	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
 		return nil, err
 	}
-	return new(toDTO(&m)), nil
+	return toDTO(&m), nil
 }
 
+// GetForUser 按用户权限返回单条记录（含当前用户角色与权限）。
+func (s *Service) GetForUser(ctx context.Context, id, userID uuid.UUID, isAdmin bool) (*GroupDTO, error) {
+	var m models.Group
+	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return s.enrich(ctx, &m, userID, isAdmin), nil
+}
+
+// Create 创建记录。
 func (s *Service) Create(ctx context.Context, ownerID uuid.UUID, in CreateInput) (*GroupDTO, error) {
-	path := strings.TrimSpace(in.Path)
-	if path == "" {
-		path = slugify(in.Name)
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		return nil, errors.New("组名称不能为空")
 	}
-	if path == "" {
-		return nil, errors.New("组路径不能为空")
-	}
-	vis := in.Visibility
-	if vis == "" {
-		vis = "private"
-	}
-	m := models.Group{Name: in.Name, Path: path, Visibility: vis, OwnerID: ownerID}
+	m := models.Group{Name: name, OwnerID: ownerID}
 	if err := s.db.WithContext(ctx).Create(&m).Error; err != nil {
 		return nil, err
 	}
 	_ = s.db.WithContext(ctx).Create(&models.GroupMember{
 		GroupID: m.ID, UserID: ownerID, Role: string(iam.RoleOwner),
 	}).Error
-	return new(toDTO(&m)), nil
+	return s.enrich(ctx, &m, ownerID, false), nil
 }
 
-func (s *Service) Update(ctx context.Context, id uuid.UUID, name, visibility *string) (*GroupDTO, error) {
+// Update 更新记录。
+func (s *Service) Update(ctx context.Context, id uuid.UUID, name *string) (*GroupDTO, error) {
 	var m models.Group
 	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
 		return nil, err
 	}
 	if name != nil {
-		m.Name = *name
-	}
-	if visibility != nil && *visibility != "" {
-		m.Visibility = *visibility
+		trimmed := strings.TrimSpace(*name)
+		if trimmed == "" {
+			return nil, errors.New("组名称不能为空")
+		}
+		m.Name = trimmed
 	}
 	if err := s.db.WithContext(ctx).Save(&m).Error; err != nil {
 		return nil, err
 	}
-	return new(toDTO(&m)), nil
+	return toDTO(&m), nil
 }
 
+// Delete 删除记录。
 func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.Project{}).Where("group_id = ?", id).Update("group_id", nil).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("group_id = ?", id).Delete(&models.GroupMember{}).Error; err != nil {
 			return err
 		}
@@ -123,6 +137,7 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	})
 }
 
+// ListMembers 返回组成员列表。
 func (s *Service) ListMembers(ctx context.Context, groupID uuid.UUID) ([]MemberDTO, error) {
 	var rows []models.GroupMember
 	if err := s.db.WithContext(ctx).Where("group_id = ?", groupID).Find(&rows).Error; err != nil {
@@ -142,41 +157,51 @@ func (s *Service) ListMembers(ctx context.Context, groupID uuid.UUID) ([]MemberD
 	return out, nil
 }
 
+// AddMember 向组添加成员。
 func (s *Service) AddMember(ctx context.Context, groupID, userID uuid.UUID, role iam.Role) error {
+	if err := iam.ValidateRole(role); err != nil {
+		return err
+	}
 	m := models.GroupMember{GroupID: groupID, UserID: userID, Role: string(role)}
 	return s.db.WithContext(ctx).Save(&m).Error
 }
 
+// UpdateMember 更新组成员角色。
 func (s *Service) UpdateMember(ctx context.Context, groupID, userID uuid.UUID, role iam.Role) error {
+	if err := iam.ValidateRole(role); err != nil {
+		return err
+	}
 	return s.db.WithContext(ctx).Model(&models.GroupMember{}).
 		Where("group_id = ? AND user_id = ?", groupID, userID).
 		Update("role", string(role)).Error
 }
 
+// RemoveMember 从组移除成员。
 func (s *Service) RemoveMember(ctx context.Context, groupID, userID uuid.UUID) error {
 	return s.db.WithContext(ctx).
 		Where("group_id = ? AND user_id = ?", groupID, userID).
 		Delete(&models.GroupMember{}).Error
 }
 
-func slugify(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	var b strings.Builder
-	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-		} else if r == ' ' || r == '-' || r == '_' {
-			if b.Len() > 0 && b.String()[b.Len()-1] != '-' {
-				b.WriteByte('-')
-			}
-		}
+func (s *Service) enrich(ctx context.Context, m *models.Group, userID uuid.UUID, isAdmin bool) *GroupDTO {
+	g := toDTO(m)
+	enforcer := iam.NewEnforcer(s.db)
+	if isAdmin {
+		g.CurrentUserRole = new(iam.RoleOwner)
+		g.Permissions = new(iam.PermissionsForGroupRole(iam.RoleOwner))
+		return g
 	}
-	return strings.Trim(b.String(), "-")
+	role, ok, _ := enforcer.GroupRole(ctx, userID, m.ID)
+	if ok {
+		g.CurrentUserRole = &role
+		g.Permissions = new(iam.PermissionsForGroupRole(role))
+	}
+	return g
 }
 
-func toDTO(m *models.Group) GroupDTO {
-	return GroupDTO{
-		ID: m.ID, Name: m.Name, Path: m.Path, ParentID: m.ParentID,
-		Visibility: m.Visibility, OwnerID: m.OwnerID, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
+func toDTO(m *models.Group) *GroupDTO {
+	return &GroupDTO{
+		ID: m.ID, Name: m.Name, OwnerID: m.OwnerID,
+		CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
 	}
 }

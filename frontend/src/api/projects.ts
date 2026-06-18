@@ -1,9 +1,15 @@
+/**
+ * 项目、成员、仓库文件与集成设置 API。
+ */
 import { api } from './client'
 
+/** 项目可见性 */
 export type ProjectVisibility = 'private' | 'internal' | 'public'
 
+/** 项目成员角色（GitLab 风格五级） */
 export type MemberRole = 'guest' | 'reporter' | 'developer' | 'maintainer' | 'owner'
 
+/** 当前用户在项目中的有效权限 */
 export interface ProjectPermissions {
   read: boolean
   create_run: boolean
@@ -14,6 +20,7 @@ export interface ProjectPermissions {
   git_push: boolean
 }
 
+/** 项目详情 DTO */
 export interface Project {
   id: string
   name: string
@@ -29,6 +36,7 @@ export interface Project {
   permissions?: ProjectPermissions
 }
 
+/** 项目成员列表项 */
 export interface ProjectMember {
   user_id: string
   username: string
@@ -38,6 +46,7 @@ export interface ProjectMember {
   created_at: string
 }
 
+/** 仓库文件树节点 */
 export interface FileEntry {
   name: string
   path: string
@@ -45,6 +54,7 @@ export interface FileEntry {
   size?: number
 }
 
+/** 需求文档摘要 */
 export interface RequirementItem {
   id?: string
   path: string
@@ -52,13 +62,16 @@ export interface RequirementItem {
   content?: string
 }
 
+/** 评测/产物摘要 */
 export interface EvaluationItem {
   id?: string
   kind?: string
   path: string
   title: string
+  content?: string
 }
 
+/** 项目级模型与 MCP 覆盖配置 */
 export interface IntegrationSettings {
   model?: {
     base_url?: string
@@ -174,6 +187,7 @@ export function pushRepository(projectId: string, message?: string) {
   })
 }
 
+/** 将 ISO 时间格式化为中文相对时间（如「3 小时前」） */
 export function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()
   const mins = Math.floor(diff / 60000)
@@ -185,10 +199,33 @@ export function formatRelativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString('zh-CN')
 }
 
+/** 角色中文标签 */
 export const roleLabels: Record<MemberRole, string> = {
   guest: '访客',
   reporter: '报告者',
   developer: '开发者',
   maintainer: '维护者',
   owner: '所有者',
+}
+
+/** 成员角色 Select 选项 */
+export const memberRoleOptions: { value: MemberRole; label: string; hint: string }[] = [
+  { value: 'guest', label: roleLabels.guest, hint: '只读访问项目、仓库与 Runs' },
+  { value: 'reporter', label: roleLabels.reporter, hint: '访客 + Git 拉取' },
+  { value: 'developer', label: roleLabels.developer, hint: '创建 Run、对话写入、Git 拉取' },
+  { value: 'maintainer', label: roleLabels.maintainer, hint: '管理设置与成员、Git 推送' },
+  { value: 'owner', label: roleLabels.owner, hint: '完全控制，含删除项目' },
+]
+
+/** 项目可见性标签 */
+export const visibilityLabels: Record<ProjectVisibility, string> = {
+  private: '私有',
+  internal: '内部',
+  public: '公开',
+}
+
+export const visibilityTitles: Record<ProjectVisibility, string> = {
+  private: '私有 — 仅项目成员可访问',
+  internal: '内部 — 所有已登录用户可访问',
+  public: '公开 — 所有已登录用户可访问',
 }

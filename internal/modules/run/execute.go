@@ -17,6 +17,7 @@ import (
 	"matrix/internal/platform/storage"
 )
 
+// StepDTO 是流水线步骤 API 返回的数据传输对象。
 type StepDTO struct {
 	ID            uuid.UUID  `json:"id"`
 	RunID         uuid.UUID  `json:"run_id"`
@@ -28,6 +29,7 @@ type StepDTO struct {
 	FinishedAt    *time.Time `json:"finished_at,omitempty"`
 }
 
+// EventDTO 是 Run 事件 API 返回的数据传输对象。
 type EventDTO struct {
 	ID        uuid.UUID  `json:"id"`
 	RunID     uuid.UUID  `json:"run_id"`
@@ -37,6 +39,7 @@ type EventDTO struct {
 	CreatedAt time.Time  `json:"created_at"`
 }
 
+// ListSteps 返回 Run 步骤列表。
 func (s *Service) ListSteps(ctx context.Context, runID uuid.UUID) ([]StepDTO, error) {
 	var rows []models.RunStep
 	if err := s.db.WithContext(ctx).Where("run_id = ?", runID).Order("sequence asc").Find(&rows).Error; err != nil {
@@ -53,6 +56,7 @@ func (s *Service) ListSteps(ctx context.Context, runID uuid.UUID) ([]StepDTO, er
 	return out, nil
 }
 
+// ListEvents 返回 Run 事件列表。
 func (s *Service) ListEvents(ctx context.Context, runID uuid.UUID, afterID *uuid.UUID, limit int) ([]EventDTO, error) {
 	if limit <= 0 {
 		limit = 200
@@ -75,6 +79,7 @@ func (s *Service) ListEvents(ctx context.Context, runID uuid.UUID, afterID *uuid
 	return out, nil
 }
 
+// GetAudit 返回 Run 审计日志路径或内容。
 func (s *Service) GetAudit(ctx context.Context, runID uuid.UUID) (string, error) {
 	var m models.Run
 	if err := s.db.WithContext(ctx).First(&m, "id = ?", runID).Error; err != nil {
@@ -106,6 +111,7 @@ func (s *Service) compositeSink(runID uuid.UUID, stepID *uuid.UUID) stream.Sink 
 	})
 }
 
+// ExecuteRun 执行 Run 的 Harness 流水线。
 func (s *Service) ExecuteRun(ctx context.Context, runID uuid.UUID) error {
 	if err := ctx.Err(); err != nil {
 		return err

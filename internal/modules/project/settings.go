@@ -18,6 +18,7 @@ type IntegrationSettings struct {
 	MCPServers map[string]MCPServerOverride `json:"mcp_servers,omitempty"`
 }
 
+// ModelOverride 是项目级 LLM 模型覆盖配置。
 type ModelOverride struct {
 	BaseURL   string `json:"base_url,omitempty"`
 	APIKey    string `json:"api_key,omitempty"`
@@ -25,6 +26,7 @@ type ModelOverride struct {
 	MaxTokens int    `json:"max_tokens,omitempty"`
 }
 
+// MCPServerOverride 是项目级单个 MCP 服务器覆盖配置。
 type MCPServerOverride struct {
 	Command  string            `json:"command,omitempty"`
 	Args     []string          `json:"args,omitempty"`
@@ -33,18 +35,22 @@ type MCPServerOverride struct {
 	Headers  map[string]string `json:"headers,omitempty"`
 }
 
+// SettingsService 管理项目集成设置（模型与 MCP 覆盖）的读写。
 type SettingsService struct {
 	db *gorm.DB
 }
 
+// NewSettingsService 创建项目设置服务实例。
 func NewSettingsService(db *gorm.DB) *SettingsService {
 	return &SettingsService{db: db}
 }
 
+// GetIntegrations 返回项目集成设置。
 func (s *SettingsService) GetIntegrations(ctx context.Context, projectID uuid.UUID) (*IntegrationSettings, error) {
 	return s.Get(ctx, projectID)
 }
 
+// Get 执行对应操作。
 func (s *SettingsService) Get(ctx context.Context, projectID uuid.UUID) (*IntegrationSettings, error) {
 	var row models.ProjectSetting
 	err := s.db.WithContext(ctx).First(&row, "project_id = ?", projectID).Error
@@ -61,6 +67,7 @@ func (s *SettingsService) Get(ctx context.Context, projectID uuid.UUID) (*Integr
 	return &out, nil
 }
 
+// Save 保存数据。
 func (s *SettingsService) Save(ctx context.Context, projectID uuid.UUID, in IntegrationSettings) (*IntegrationSettings, error) {
 	raw, err := json.Marshal(in)
 	if err != nil {

@@ -1,3 +1,4 @@
+// Package mcp 管理 MCP 服务器连接、工具发现与生命周期。
 package mcp
 
 import (
@@ -323,6 +324,7 @@ func (m *Manager) IsAutoApproved(serverName, toolName string) bool {
 	return false
 }
 
+// Names 返回已配置的 MCP 服务名称列表。
 func (m *Manager) Names() []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

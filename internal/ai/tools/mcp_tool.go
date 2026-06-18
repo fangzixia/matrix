@@ -8,7 +8,7 @@ import (
 	"matrix/internal/platform/logging"
 )
 
-// NewMCPTool creates an MCP tool wrapper
+// NewMCPTool 将 MCP 工具包装为可注册到 Registry 的 Tool。
 func NewMCPTool(serverName string, tool mcp.Tool, manager *mcp.Manager) *Tool {
 	name := fmt.Sprintf("mcp_%s_%s", serverName, tool.Name)
 
@@ -123,6 +123,7 @@ func formatContent(contents []mcp.Content) string {
 	return result
 }
 
+// RegisterMCPTools 将 Manager 发现的全部 MCP 工具注册到 Registry。
 func RegisterMCPTools(registry *Registry, manager *mcp.Manager) error {
 	allTools, err := manager.ListAllTools()
 	if err != nil {

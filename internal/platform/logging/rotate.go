@@ -53,6 +53,7 @@ func (w *rotateWriter) open() error {
 	return nil
 }
 
+// Write 写入日志字节，超出大小限制时自动轮转。
 func (w *rotateWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -95,6 +96,7 @@ func (w *rotateWriter) backupPath(n int) string {
 	return fmt.Sprintf("%s.%d", w.path, n)
 }
 
+// Close 关闭当前日志文件句柄。
 func (w *rotateWriter) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()

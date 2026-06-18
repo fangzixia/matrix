@@ -1,3 +1,4 @@
+// Package systemsettings 管理系统级运行参数：按业务域分表存储，启动时加载并热更新内存配置。
 package systemsettings
 
 import (
@@ -15,20 +16,7 @@ import (
 	"matrix/internal/platform/gitutil"
 )
 
-const rowID = "default"
-
-// Settings 系统级可编辑配置（持久化到 PG，覆盖 YAML 默认值）。
-type Settings struct {
-	Models     []ModelProfileSettings       `json:"models"`
-	Model      ModelSettings                `json:"model,omitempty"` // 旧版单模型，加载后迁移
-	Context    ContextSettings              `json:"context"`
-	Security   SecuritySettings             `json:"security"`
-	MCPServers map[string]MCPServerSettings `json:"mcp_servers"`
-	Git        GitSettings                  `json:"git"`
-	Worker     WorkerSettings               `json:"worker"`
-	Pipeline   PipelineSettings             `json:"pipeline"`
-}
-
+// ModelProfileSettings 单个 LLM 模型配置（含 API Key 脱敏字段）。
 type ModelProfileSettings struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
@@ -41,26 +29,20 @@ type ModelProfileSettings struct {
 	Default   bool   `json:"default"`
 }
 
-// ModelSettings 旧版单模型字段（兼容数据库历史数据）。
-type ModelSettings struct {
-	BaseURL   string `json:"base_url"`
-	APIKey    string `json:"api_key,omitempty"`
-	APIKeySet bool   `json:"api_key_set"`
-	Model     string `json:"model"`
-	MaxTokens int    `json:"max_tokens"`
-}
-
+// ContextSettings 对话上下文压缩策略。
 type ContextSettings struct {
 	AutoCompactThreshold int `json:"auto_compact_threshold"`
 	KeepRecentMessages   int `json:"keep_recent_messages"`
 }
 
+// SecuritySettings Agent 沙箱安全策略。
 type SecuritySettings struct {
 	AllowShell      bool   `json:"allow_shell"`
 	AllowCommandMCP bool   `json:"allow_command_mcp"`
 	ShellTimeout    string `json:"shell_timeout"`
 }
 
+// MCPServerSettings 单个 MCP 服务器连接参数。
 type MCPServerSettings struct {
 	Command  string            `json:"command,omitempty"`
 	Args     []string          `json:"args,omitempty"`
@@ -70,6 +52,7 @@ type MCPServerSettings struct {
 	Env      map[string]string `json:"env,omitempty"`
 }
 
+// GitAccess 按主机匹配的 SSH 密钥访问规则。
 type GitAccess struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
@@ -77,6 +60,7 @@ type GitAccess struct {
 	SSHKeyPath string `json:"ssh_key_path"`
 }
 
+// GitSettings Git 克隆超时与 SSH 访问列表。
 type GitSettings struct {
 	CloneTimeout      string      `json:"clone_timeout"`
 	SSHKeyPath        string      `json:"ssh_key_path,omitempty"`
@@ -86,6 +70,7 @@ type GitSettings struct {
 	DefaultSSHKeyPath string      `json:"default_ssh_key_path,omitempty"`
 }
 
+// WorkerSettings 嵌入式任务队列 Worker 参数。
 type WorkerSettings struct {
 	Enabled      bool   `json:"enabled"`
 	PollInterval string `json:"poll_interval"`
@@ -93,33 +78,38 @@ type WorkerSettings struct {
 	Concurrency  int    `json:"concurrency"`
 }
 
+// PipelineSettings Harness 流水线默认阶段。
 type PipelineSettings struct {
 	DefaultStages   []string `json:"default_stages"`
 	PullBeforeStage bool     `json:"pull_before_stage"`
 }
 
+// Hooks 配置变更回调，用于同步 Git/流水线到依赖服务。
 type Hooks struct {
 	OnGitUpdate      func(config.GitConfig)
 	OnPipelineUpdate func(config.PipelineConfig)
 }
 
+// Service 系统配置读写：DB 持久化 + 内存 cfg 热更新。
 type Service struct {
 	db    *gorm.DB
 	cfg   *config.Config
 	hooks Hooks
 }
 
+// NewService 创建系统配置服务实例。
 func NewService(db *gorm.DB, cfg *config.Config) *Service {
 	return &Service{db: db, cfg: cfg}
 }
 
+// SetHooks 注册配置变更回调，用于同步 Git 与流水线到依赖服务。
 func (s *Service) SetHooks(h Hooks) {
 	s.hooks = h
 }
 
-// Bootstrap 启动时从数据库加载覆盖并应用到内存配置。
+// Bootstrap 启动时从数据库按域加载并应用到内存配置。
 func (s *Service) Bootstrap(ctx context.Context) error {
-	stored, err := s.loadStored(ctx)
+	stored, err := s.loadAllStored(ctx)
 	if err != nil {
 		return err
 	}
@@ -130,80 +120,115 @@ func (s *Service) Bootstrap(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) Get(ctx context.Context) (*Settings, error) {
-	stored, err := s.loadStored(ctx)
+// --- AI ---
+
+// GetAI 读取 AI 系统设置。
+func (s *Service) GetAI(ctx context.Context) (*AISettings, error) {
+	stored, err := s.loadDomainAI(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if stored != nil {
-		s.decorateForGet(stored)
+		s.decorateAIForGet(stored)
 		return stored, nil
 	}
-	return s.fromConfig(s.cfg), nil
+	full := s.fromConfig(s.cfg)
+	return &AISettings{
+		Models: full.Models, Context: full.Context, Security: full.Security,
+	}, nil
 }
 
-func (s *Service) Save(ctx context.Context, in Settings) (*Settings, error) {
-	merged, err := s.mergeInput(ctx, in)
+// SaveAI 保存 AI 系统设置。
+func (s *Service) SaveAI(ctx context.Context, in AISettings) (*AISettings, error) {
+	merged, err := s.mergeAIInput(ctx, in)
 	if err != nil {
 		return nil, err
 	}
-	if err := validate(merged); err != nil {
+	if err := validateAI(merged); err != nil {
 		return nil, err
 	}
-	return s.persist(ctx, merged)
+	if err := s.saveDomain(ctx, DomainAI, merged); err != nil {
+		return nil, err
+	}
+	if err := s.reloadAndApply(ctx); err != nil {
+		return nil, err
+	}
+	return s.GetAI(ctx)
 }
 
-// SaveMCP 仅更新 MCP 服务配置，避免部分保存时其它字段校验失败。
-func (s *Service) SaveMCP(ctx context.Context, servers map[string]MCPServerSettings) (*Settings, error) {
+// --- MCP ---
+
+// GetMCP 读取 MCP 系统设置。
+func (s *Service) GetMCP(ctx context.Context) (*MCPSettings, error) {
+	stored, err := s.loadDomainMCP(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if stored != nil {
+		if stored.MCPServers == nil {
+			stored.MCPServers = map[string]MCPServerSettings{}
+		}
+		return stored, nil
+	}
+	full := s.fromConfig(s.cfg)
+	return &MCPSettings{MCPServers: full.MCPServers}, nil
+}
+
+// SaveMCP 保存 MCP 系统设置。
+func (s *Service) SaveMCP(ctx context.Context, servers map[string]MCPServerSettings) (*MCPSettings, error) {
 	if servers == nil {
 		servers = map[string]MCPServerSettings{}
 	}
-	stored, err := s.loadStored(ctx)
+	payload := MCPSettings{MCPServers: servers}
+	if err := s.saveDomain(ctx, DomainMCP, payload); err != nil {
+		return nil, err
+	}
+	if err := s.reloadAndApply(ctx); err != nil {
+		return nil, err
+	}
+	return s.GetMCP(ctx)
+}
+
+// --- Git ---
+
+// GetGit 读取 Git 系统设置。
+func (s *Service) GetGit(ctx context.Context) (*GitSettings, error) {
+	stored, err := s.loadDomainGit(ctx)
 	if err != nil {
 		return nil, err
 	}
-	base := s.fromConfig(s.cfg)
 	if stored != nil {
-		migrateLegacyModel(stored)
-		base.Models = stored.Models
-		base.MCPServers = stored.MCPServers
-		base.Context = stored.Context
-		base.Security = stored.Security
-		base.Git = stored.Git
-		base.Worker = stored.Worker
-		base.Pipeline = stored.Pipeline
+		normalizeGitSettings(stored)
+		enrichGitHints(stored)
+		return stored, nil
 	}
-	base.MCPServers = servers
-	base.Model = ModelSettings{}
-	return s.persist(ctx, *base)
+	full := s.fromConfig(s.cfg)
+	return &full.Git, nil
 }
 
-func (s *Service) persist(ctx context.Context, merged Settings) (*Settings, error) {
-	migrateLegacyModel(&merged)
-	normalizeModelSettings(&merged)
-	normalizeGitSettings(&merged.Git)
-	stripGitHints(&merged.Git)
-	merged.Model = ModelSettings{}
-	raw, err := json.Marshal(merged)
-	if err != nil {
+// SaveGit 保存 Git 系统设置。
+func (s *Service) SaveGit(ctx context.Context, in GitSettings) (*GitSettings, error) {
+	merged := in
+	normalizeGitSettings(&merged)
+	stripGitHints(&merged)
+	for i := range merged.Accesses {
+		if merged.Accesses[i].ID == "" {
+			merged.Accesses[i].ID = uuid.NewString()
+		}
+	}
+	if err := validateGit(merged); err != nil {
 		return nil, err
 	}
-	row := models.SystemSetting{
-		ID:        rowID,
-		Settings:  string(raw),
-		UpdatedAt: time.Now(),
-	}
-	if err := s.db.WithContext(ctx).Save(&row).Error; err != nil {
+	if err := s.saveDomain(ctx, DomainGit, merged); err != nil {
 		return nil, err
 	}
-	s.apply(merged, false)
-	out, err := s.Get(ctx)
-	if err != nil {
+	if err := s.reloadAndApply(ctx); err != nil {
 		return nil, err
 	}
-	return out, nil
+	return s.GetGit(ctx)
 }
 
+// TestGit 测试 Git 连通性。
 func (s *Service) TestGit(ctx context.Context, gitURL string) (string, error) {
 	timeout := s.cfg.Git.CloneTimeout
 	if timeout <= 0 {
@@ -212,70 +237,86 @@ func (s *Service) TestGit(ctx context.Context, gitURL string) (string, error) {
 	return gitutil.TestConnection(ctx, s.cfg.Git, gitURL, timeout)
 }
 
-func (s *Service) decorateForGet(st *Settings) {
-	migrateLegacyModel(st)
-	maskModelProfiles(st)
-	normalizeGitSettings(&st.Git)
-	enrichGitHints(&st.Git)
-	if st.MCPServers == nil {
-		st.MCPServers = map[string]MCPServerSettings{}
-	}
-	st.Model = ModelSettings{}
-}
+// --- Worker ---
 
-func (s *Service) mergeInput(ctx context.Context, in Settings) (Settings, error) {
-	existing, err := s.loadStored(ctx)
+// GetWorker 读取 Worker 系统设置。
+func (s *Service) GetWorker(ctx context.Context) (*WorkerSettings, error) {
+	stored, err := s.loadDomainWorker(ctx)
 	if err != nil {
-		return Settings{}, err
+		return nil, err
 	}
-	out := in
-	if out.MCPServers == nil {
-		if existing != nil && existing.MCPServers != nil {
-			out.MCPServers = existing.MCPServers
-		} else {
-			out.MCPServers = map[string]MCPServerSettings{}
-		}
+	if stored != nil {
+		return stored, nil
 	}
-	if existing != nil {
-		mergeModelAPIKeys(&out.Models, existing.Models)
-		if len(out.Models) == 0 && len(existing.Models) > 0 {
-			out.Models = existing.Models
-		}
-		if out.Worker.MaxAttempts < 1 {
-			out.Worker.MaxAttempts = existing.Worker.MaxAttempts
-		}
-		if out.Worker.Concurrency < 1 {
-			out.Worker.Concurrency = existing.Worker.Concurrency
-		}
-		if strings.TrimSpace(out.Worker.PollInterval) == "" {
-			out.Worker.PollInterval = existing.Worker.PollInterval
-		}
-	} else {
-		if out.Worker.MaxAttempts < 1 {
-			out.Worker.MaxAttempts = s.cfg.Worker.MaxAttempts
-		}
-		if out.Worker.Concurrency < 1 {
-			out.Worker.Concurrency = s.cfg.Worker.Concurrency
-		}
-		if strings.TrimSpace(out.Worker.PollInterval) == "" {
-			out.Worker.PollInterval = s.cfg.Worker.PollInterval.String()
-		}
-	}
-	normalizeModelSettings(&out)
-	out.Model = ModelSettings{}
-	normalizeGitSettings(&out.Git)
-	stripGitHints(&out.Git)
-	for i := range out.Git.Accesses {
-		if out.Git.Accesses[i].ID == "" {
-			out.Git.Accesses[i].ID = uuid.NewString()
-		}
-	}
-	return out, nil
+	full := s.fromConfig(s.cfg)
+	return &full.Worker, nil
 }
 
-func (s *Service) loadStored(ctx context.Context) (*Settings, error) {
+// SaveWorker 保存 Worker 系统设置。
+func (s *Service) SaveWorker(ctx context.Context, in WorkerSettings) (*WorkerSettings, error) {
+	merged, err := s.mergeWorkerInput(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateWorker(merged); err != nil {
+		return nil, err
+	}
+	if err := s.saveDomain(ctx, DomainWorker, merged); err != nil {
+		return nil, err
+	}
+	if err := s.reloadAndApply(ctx); err != nil {
+		return nil, err
+	}
+	return s.GetWorker(ctx)
+}
+
+// --- Pipeline ---
+
+// GetPipeline 读取 Pipeline 系统设置。
+func (s *Service) GetPipeline(ctx context.Context) (*PipelineSettings, error) {
+	stored, err := s.loadDomainPipeline(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if stored != nil {
+		return stored, nil
+	}
+	full := s.fromConfig(s.cfg)
+	return &full.Pipeline, nil
+}
+
+// SavePipeline 保存 Pipeline 系统设置。
+func (s *Service) SavePipeline(ctx context.Context, in PipelineSettings) (*PipelineSettings, error) {
+	if err := validatePipeline(in); err != nil {
+		return nil, err
+	}
+	if err := s.saveDomain(ctx, DomainPipeline, in); err != nil {
+		return nil, err
+	}
+	if err := s.reloadAndApply(ctx); err != nil {
+		return nil, err
+	}
+	return s.GetPipeline(ctx)
+}
+
+// --- 存储层 ---
+
+func (s *Service) saveDomain(ctx context.Context, domainID string, data any) error {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	row := models.SystemSetting{
+		ID:        domainID,
+		Settings:  string(raw),
+		UpdatedAt: time.Now(),
+	}
+	return s.db.WithContext(ctx).Save(&row).Error
+}
+
+func (s *Service) loadDomainRaw(ctx context.Context, domainID string) (json.RawMessage, error) {
 	var row models.SystemSetting
-	err := s.db.WithContext(ctx).Where("id = ?", rowID).First(&row).Error
+	err := s.db.WithContext(ctx).Where("id = ?", domainID).First(&row).Error
 	if err == gorm.ErrRecordNotFound {
 		return nil, nil
 	}
@@ -285,17 +326,162 @@ func (s *Service) loadStored(ctx context.Context) (*Settings, error) {
 	if row.Settings == "" || row.Settings == "{}" {
 		return nil, nil
 	}
-	var st Settings
-	if err := json.Unmarshal([]byte(row.Settings), &st); err != nil {
-		return nil, fmt.Errorf("system settings: parse: %w", err)
+	return json.RawMessage(row.Settings), nil
+}
+
+func (s *Service) loadDomainAI(ctx context.Context) (*AISettings, error) {
+	raw, err := s.loadDomainRaw(ctx, DomainAI)
+	if err != nil || raw == nil {
+		return nil, err
 	}
-	migrateLegacyModel(&st)
+	var st AISettings
+	if err := json.Unmarshal(raw, &st); err != nil {
+		return nil, fmt.Errorf("ai settings: parse: %w", err)
+	}
 	return &st, nil
 }
 
+func (s *Service) loadDomainMCP(ctx context.Context) (*MCPSettings, error) {
+	raw, err := s.loadDomainRaw(ctx, DomainMCP)
+	if err != nil || raw == nil {
+		return nil, err
+	}
+	var st MCPSettings
+	if err := json.Unmarshal(raw, &st); err != nil {
+		return nil, fmt.Errorf("mcp settings: parse: %w", err)
+	}
+	return &st, nil
+}
+
+func (s *Service) loadDomainGit(ctx context.Context) (*GitSettings, error) {
+	raw, err := s.loadDomainRaw(ctx, DomainGit)
+	if err != nil || raw == nil {
+		return nil, err
+	}
+	var st GitSettings
+	if err := json.Unmarshal(raw, &st); err != nil {
+		return nil, fmt.Errorf("git settings: parse: %w", err)
+	}
+	return &st, nil
+}
+
+func (s *Service) loadDomainWorker(ctx context.Context) (*WorkerSettings, error) {
+	raw, err := s.loadDomainRaw(ctx, DomainWorker)
+	if err != nil || raw == nil {
+		return nil, err
+	}
+	var st WorkerSettings
+	if err := json.Unmarshal(raw, &st); err != nil {
+		return nil, fmt.Errorf("worker settings: parse: %w", err)
+	}
+	return &st, nil
+}
+
+func (s *Service) loadDomainPipeline(ctx context.Context) (*PipelineSettings, error) {
+	raw, err := s.loadDomainRaw(ctx, DomainPipeline)
+	if err != nil || raw == nil {
+		return nil, err
+	}
+	var st PipelineSettings
+	if err := json.Unmarshal(raw, &st); err != nil {
+		return nil, fmt.Errorf("pipeline settings: parse: %w", err)
+	}
+	return &st, nil
+}
+
+func (s *Service) loadAllStored(ctx context.Context) (*Settings, error) {
+	ai, _ := s.loadDomainAI(ctx)
+	mcp, _ := s.loadDomainMCP(ctx)
+	git, _ := s.loadDomainGit(ctx)
+	worker, _ := s.loadDomainWorker(ctx)
+	pipeline, _ := s.loadDomainPipeline(ctx)
+
+	if ai == nil && mcp == nil && git == nil && worker == nil && pipeline == nil {
+		return nil, nil
+	}
+
+	base := s.fromConfig(s.cfg)
+	if ai != nil {
+		base.Models = ai.Models
+		base.Context = ai.Context
+		base.Security = ai.Security
+	}
+	if mcp != nil {
+		base.MCPServers = mcp.MCPServers
+	}
+	if git != nil {
+		base.Git = *git
+		stripGitHints(&base.Git)
+	}
+	if worker != nil {
+		base.Worker = *worker
+	}
+	if pipeline != nil {
+		base.Pipeline = *pipeline
+	}
+	return base, nil
+}
+
+func (s *Service) reloadAndApply(ctx context.Context) error {
+	stored, err := s.loadAllStored(ctx)
+	if err != nil {
+		return err
+	}
+	if stored != nil {
+		s.apply(*stored, false)
+	}
+	return nil
+}
+
+func (s *Service) decorateAIForGet(st *AISettings) {
+	maskModelProfiles(&st.Models)
+}
+
+func (s *Service) mergeAIInput(ctx context.Context, in AISettings) (AISettings, error) {
+	existing, err := s.loadDomainAI(ctx)
+	if err != nil {
+		return AISettings{}, err
+	}
+	out := in
+	if existing != nil {
+		mergeModelAPIKeys(&out.Models, existing.Models)
+	}
+	normalizeModelProfiles(&out.Models)
+	return out, nil
+}
+
+func (s *Service) mergeWorkerInput(ctx context.Context, in WorkerSettings) (WorkerSettings, error) {
+	existing, err := s.loadDomainWorker(ctx)
+	if err != nil {
+		return WorkerSettings{}, err
+	}
+	out := in
+	if existing != nil {
+		if out.MaxAttempts < 1 {
+			out.MaxAttempts = existing.MaxAttempts
+		}
+		if out.Concurrency < 1 {
+			out.Concurrency = existing.Concurrency
+		}
+		if strings.TrimSpace(out.PollInterval) == "" {
+			out.PollInterval = existing.PollInterval
+		}
+	} else {
+		if out.MaxAttempts < 1 {
+			out.MaxAttempts = s.cfg.Worker.MaxAttempts
+		}
+		if out.Concurrency < 1 {
+			out.Concurrency = s.cfg.Worker.Concurrency
+		}
+		if strings.TrimSpace(out.PollInterval) == "" {
+			out.PollInterval = s.cfg.Worker.PollInterval.String()
+		}
+	}
+	return out, nil
+}
+
 func (s *Service) apply(st Settings, _ bool) {
-	migrateLegacyModel(&st)
-	normalizeModelSettings(&st)
+	normalizeModelProfiles(&st.Models)
 	s.cfg.AI.Models = toConfigModels(st.Models)
 	config.SyncDefaultModel(&s.cfg.AI)
 	if st.Context.AutoCompactThreshold > 0 {
@@ -345,11 +531,11 @@ func (s *Service) fromConfig(cfg *config.Config) *Settings {
 	git := fromGitConfig(cfg.Git)
 	normalizeGitSettings(&git)
 	enrichGitHints(&git)
-	models := fromConfigModels(cfg.AI.Models, cfg.AI.DefaultModel)
+	models := fromConfigModels(cfg.AI.Models)
 	if len(models) == 0 {
 		models = []ModelProfileSettings{defaultModelFromYAML(cfg.AI.DefaultModel)}
 	}
-	maskModelProfiles(&Settings{Models: models})
+	maskModelProfiles(&models)
 	return &Settings{
 		Models: models,
 		Context: ContextSettings{
@@ -432,8 +618,7 @@ func stripGitHints(g *GitSettings) {
 	g.DefaultSSHKeyPath = ""
 }
 
-func validate(in Settings) error {
-	migrateLegacyModel(&in)
+func validateAI(in AISettings) error {
 	for _, m := range in.Models {
 		if m.MaxTokens < 0 {
 			return fmt.Errorf("模型 %s 的 max_tokens 不能为负数", m.Name)
@@ -442,27 +627,39 @@ func validate(in Settings) error {
 			return fmt.Errorf("已启用的模型 %s 须填写模型名称", m.Name)
 		}
 	}
-	if in.Worker.MaxAttempts < 1 {
+	if in.Security.ShellTimeout != "" {
+		if _, err := time.ParseDuration(in.Security.ShellTimeout); err != nil {
+			return fmt.Errorf("shell_timeout 格式无效，请使用如 60s、2m")
+		}
+	}
+	return nil
+}
+
+func validateGit(in GitSettings) error {
+	if in.CloneTimeout != "" {
+		if _, err := time.ParseDuration(in.CloneTimeout); err != nil {
+			return fmt.Errorf("clone_timeout 格式无效，请使用如 300s、5m")
+		}
+	}
+	return nil
+}
+
+func validateWorker(in WorkerSettings) error {
+	if in.MaxAttempts < 1 {
 		return fmt.Errorf("max_attempts 至少为 1")
 	}
-	if in.Worker.Concurrency < 1 {
+	if in.Concurrency < 1 {
 		return fmt.Errorf("concurrency 至少为 1")
 	}
-	for _, d := range []struct {
-		name string
-		val  string
-	}{
-		{"shell_timeout", in.Security.ShellTimeout},
-		{"clone_timeout", in.Git.CloneTimeout},
-		{"poll_interval", in.Worker.PollInterval},
-	} {
-		if d.val == "" {
-			continue
-		}
-		if _, err := time.ParseDuration(d.val); err != nil {
-			return fmt.Errorf("%s 格式无效，请使用如 60s、2m", d.name)
+	if in.PollInterval != "" {
+		if _, err := time.ParseDuration(in.PollInterval); err != nil {
+			return fmt.Errorf("poll_interval 格式无效，请使用如 2s、1m")
 		}
 	}
+	return nil
+}
+
+func validatePipeline(_ PipelineSettings) error {
 	return nil
 }
 

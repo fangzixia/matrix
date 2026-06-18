@@ -36,7 +36,7 @@ func normalizeRPCID(id interface{}) string {
 	}
 }
 
-// Client MCP 客户端
+// Client 是与 MCP 服务器通信的 JSON-RPC 客户端。
 type Client struct {
 	cmd           *exec.Cmd
 	stdin         io.WriteCloser

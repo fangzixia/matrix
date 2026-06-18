@@ -10,11 +10,13 @@ type Sink interface {
 // NopSink 丢弃所有消息，供非流式 Run 使用。
 type NopSink struct{}
 
+// Publish 丢弃所有消息（空实现）。
 func (NopSink) Publish(context.Context, Message) error { return nil }
 
 // FuncSink 使用函数实现 Sink。
 type FuncSink func(ctx context.Context, msg Message) error
 
+// Publish 调用底层函数处理消息。
 func (f FuncSink) Publish(ctx context.Context, msg Message) error {
 	if f == nil {
 		return nil
@@ -27,6 +29,7 @@ type ChanSink struct {
 	Ch chan<- Message
 }
 
+// Publish 阻塞发送消息至 channel，ctx 取消时返回错误。
 func (s ChanSink) Publish(ctx context.Context, msg Message) error {
 	if s.Ch == nil {
 		return nil

@@ -3,6 +3,7 @@ package harness
 const verifyPreset = `【验收评测】
 对照需求与代码产出评测报告（.matrix/EVAL-SPEC-*-*.md），每条 AC 给出结论与依据，含综合分（10 分制，≥8.0 为通过）。`
 
+// NewVerifyWorkflow 创建「验收评测」流水线工作流。
 func NewVerifyWorkflow(userInput, filePath string) Workflow {
 	return Workflow{
 		Kind:         KindVerify,

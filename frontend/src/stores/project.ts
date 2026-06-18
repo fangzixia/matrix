@@ -1,35 +1,37 @@
-import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { create } from 'zustand'
 import * as projectsApi from '@/api/projects'
 import type { Project } from '@/api/projects'
 
-export const useProjectStore = defineStore('project', () => {
-  const projects = ref<Project[]>([])
-  const current = ref<Project | null>(null)
-  const loading = ref(false)
+interface ProjectState {
+  projects: Project[]
+  current: Project | null
+  loading: boolean
+  fetchProjects: (scope?: 'yours' | 'explore' | 'starred') => Promise<void>
+  fetchProject: (id: string) => Promise<void>
+  clearCurrent: () => void
+}
 
-  async function fetchProjects(scope: 'yours' | 'explore' | 'starred' = 'yours') {
-    loading.value = true
+export const useProjectStore = create<ProjectState>((set) => ({
+  projects: [],
+  current: null,
+  loading: false,
+  fetchProjects: async (scope = 'yours') => {
+    set({ loading: true })
     try {
       const res = await projectsApi.listProjects(scope)
-      projects.value = res.projects
+      set({ projects: res.projects })
     } finally {
-      loading.value = false
+      set({ loading: false })
     }
-  }
-
-  async function fetchProject(id: string) {
-    loading.value = true
+  },
+  fetchProject: async (id) => {
+    set({ loading: true })
     try {
-      current.value = await projectsApi.getProject(id)
+      const current = await projectsApi.getProject(id)
+      set({ current })
     } finally {
-      loading.value = false
+      set({ loading: false })
     }
-  }
-
-  function clearCurrent() {
-    current.value = null
-  }
-
-  return { projects, current, loading, fetchProjects, fetchProject, clearCurrent }
-})
+  },
+  clearCurrent: () => set({ current: null }),
+}))

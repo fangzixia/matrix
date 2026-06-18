@@ -1,3 +1,4 @@
+// Package models 定义 GORM 持久化实体与 AutoMigrate 注册表。
 package models
 
 import (
@@ -7,6 +8,7 @@ import (
 	"gorm.io/gorm"
 )
 
+// User 是平台用户账户。
 type User struct {
 	ID           uuid.UUID `gorm:"type:uuid;primaryKey"`
 	Username     string    `gorm:"uniqueIndex;size:64;not null"`
@@ -21,6 +23,7 @@ type User struct {
 	UpdatedAt    time.Time
 }
 
+// BeforeCreate 在 User 入库前生成 UUID 主键。
 func (u *User) BeforeCreate(tx *gorm.DB) error {
 	if u.ID == uuid.Nil {
 		u.ID = uuid.New()
@@ -28,6 +31,7 @@ func (u *User) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// Session 是用户登录 Session 记录。
 type Session struct {
 	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
 	UserID    uuid.UUID `gorm:"type:uuid;index;not null"`
@@ -38,6 +42,7 @@ type Session struct {
 	CreatedAt time.Time
 }
 
+// BeforeCreate 在 Session 入库前生成 UUID 主键。
 func (s *Session) BeforeCreate(tx *gorm.DB) error {
 	if s.ID == uuid.Nil {
 		s.ID = uuid.New()
@@ -45,17 +50,16 @@ func (s *Session) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// Group 是用户组，用于项目权限继承。
 type Group struct {
-	ID         uuid.UUID  `gorm:"type:uuid;primaryKey"`
-	Name       string     `gorm:"size:255;not null"`
-	Path       string     `gorm:"uniqueIndex;size:255;not null"`
-	ParentID   *uuid.UUID `gorm:"type:uuid;index"`
-	Visibility string     `gorm:"size:16;default:private"`
-	OwnerID    uuid.UUID  `gorm:"type:uuid;index"`
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
+	Name      string    `gorm:"size:255;not null"`
+	OwnerID   uuid.UUID `gorm:"type:uuid;index"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
+// BeforeCreate 在 Group 入库前生成 UUID 主键。
 func (g *Group) BeforeCreate(tx *gorm.DB) error {
 	if g.ID == uuid.Nil {
 		g.ID = uuid.New()
@@ -63,6 +67,7 @@ func (g *Group) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// GroupMember 是用户组成员关系。
 type GroupMember struct {
 	GroupID   uuid.UUID `gorm:"type:uuid;primaryKey"`
 	UserID    uuid.UUID `gorm:"type:uuid;primaryKey"`
@@ -70,6 +75,7 @@ type GroupMember struct {
 	CreatedAt time.Time
 }
 
+// Project 是 Git 绑定的业务项目。
 type Project struct {
 	ID         uuid.UUID  `gorm:"type:uuid;primaryKey"`
 	Name       string     `gorm:"size:255;not null"`
@@ -83,6 +89,7 @@ type Project struct {
 	UpdatedAt  time.Time
 }
 
+// BeforeCreate 在 Project 入库前生成 UUID 主键。
 func (p *Project) BeforeCreate(tx *gorm.DB) error {
 	if p.ID == uuid.Nil {
 		p.ID = uuid.New()
@@ -90,6 +97,7 @@ func (p *Project) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// ProjectMember 是项目成员与角色。
 type ProjectMember struct {
 	ProjectID uuid.UUID `gorm:"type:uuid;primaryKey"`
 	UserID    uuid.UUID `gorm:"type:uuid;primaryKey"`
@@ -97,6 +105,7 @@ type ProjectMember struct {
 	CreatedAt time.Time
 }
 
+// ProjectRepository 是项目下的 Git 仓库绑定。
 type ProjectRepository struct {
 	ID            uuid.UUID `gorm:"type:uuid;primaryKey"`
 	ProjectID     uuid.UUID `gorm:"type:uuid;index;not null"`
@@ -110,6 +119,7 @@ type ProjectRepository struct {
 	UpdatedAt     time.Time
 }
 
+// BeforeCreate 在 ProjectRepository 入库前生成 UUID 主键。
 func (r *ProjectRepository) BeforeCreate(tx *gorm.DB) error {
 	if r.ID == uuid.Nil {
 		r.ID = uuid.New()
@@ -117,6 +127,7 @@ func (r *ProjectRepository) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// Run 是一次 AI 任务或 Chat 执行记录。
 type Run struct {
 	ID             uuid.UUID  `gorm:"type:uuid;primaryKey"`
 	ProjectID      uuid.UUID  `gorm:"type:uuid;index;not null"`
@@ -134,6 +145,7 @@ type Run struct {
 	UpdatedAt      time.Time
 }
 
+// BeforeCreate 在 Run 入库前生成 UUID 主键。
 func (r *Run) BeforeCreate(tx *gorm.DB) error {
 	if r.ID == uuid.Nil {
 		r.ID = uuid.New()
@@ -141,6 +153,7 @@ func (r *Run) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// RunStep 是 Run 内的流水线或 Harness 步骤。
 type RunStep struct {
 	ID            uuid.UUID `gorm:"type:uuid;primaryKey"`
 	RunID         uuid.UUID `gorm:"type:uuid;index;not null"`
@@ -153,6 +166,7 @@ type RunStep struct {
 	CreatedAt     time.Time
 }
 
+// BeforeCreate 在 RunStep 入库前生成 UUID 主键。
 func (s *RunStep) BeforeCreate(tx *gorm.DB) error {
 	if s.ID == uuid.Nil {
 		s.ID = uuid.New()
@@ -160,6 +174,7 @@ func (s *RunStep) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// RunEvent 是 Run 执行过程中的事件快照。
 type RunEvent struct {
 	ID        uuid.UUID  `gorm:"type:uuid;primaryKey"`
 	RunID     uuid.UUID  `gorm:"type:uuid;index;not null"`
@@ -169,6 +184,7 @@ type RunEvent struct {
 	CreatedAt time.Time
 }
 
+// BeforeCreate 在 RunEvent 入库前生成 UUID 主键。
 func (e *RunEvent) BeforeCreate(tx *gorm.DB) error {
 	if e.ID == uuid.Nil {
 		e.ID = uuid.New()
@@ -176,6 +192,7 @@ func (e *RunEvent) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// RunJob 是 Run 对应的异步任务队列条目。
 type RunJob struct {
 	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
 	RunID     uuid.UUID `gorm:"type:uuid;uniqueIndex;not null"`
@@ -187,6 +204,7 @@ type RunJob struct {
 	UpdatedAt time.Time
 }
 
+// BeforeCreate 在 RunJob 入库前生成 UUID 主键。
 func (j *RunJob) BeforeCreate(tx *gorm.DB) error {
 	if j.ID == uuid.Nil {
 		j.ID = uuid.New()
@@ -194,6 +212,7 @@ func (j *RunJob) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// Notification 是用户站内通知。
 type Notification struct {
 	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
 	UserID    uuid.UUID `gorm:"type:uuid;index;not null"`
@@ -205,6 +224,7 @@ type Notification struct {
 	CreatedAt time.Time
 }
 
+// BeforeCreate 在 Notification 入库前生成 UUID 主键。
 func (n *Notification) BeforeCreate(tx *gorm.DB) error {
 	if n.ID == uuid.Nil {
 		n.ID = uuid.New()
@@ -212,6 +232,7 @@ func (n *Notification) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// ChatSession 是项目内 Chat 会话与消息 JSON。
 type ChatSession struct {
 	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
 	ProjectID uuid.UUID `gorm:"type:uuid;index;not null"`
@@ -222,6 +243,7 @@ type ChatSession struct {
 	CreatedAt time.Time
 }
 
+// BeforeCreate 在 ChatSession 入库前生成 UUID 主键。
 func (c *ChatSession) BeforeCreate(tx *gorm.DB) error {
 	if c.ID == uuid.Nil {
 		c.ID = uuid.New()
@@ -229,18 +251,21 @@ func (c *ChatSession) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// ProjectSetting 是项目级集成设置 JSON。
 type ProjectSetting struct {
 	ProjectID uuid.UUID `gorm:"type:uuid;primaryKey"`
 	Settings  string    `gorm:"type:jsonb"`
 	UpdatedAt time.Time
 }
 
+// SystemSetting 是系统级配置域（ai/mcp/git 等）的 JSON 行。
 type SystemSetting struct {
 	ID        string `gorm:"primaryKey;size:32"`
 	Settings  string `gorm:"type:jsonb;not null"`
 	UpdatedAt time.Time
 }
 
+// Requirement 是项目需求文档元数据。
 type Requirement struct {
 	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
 	ProjectID uuid.UUID `gorm:"type:uuid;index"`
@@ -251,6 +276,7 @@ type Requirement struct {
 	CreatedAt time.Time
 }
 
+// BeforeCreate 在 Requirement 入库前生成 UUID 主键。
 func (r *Requirement) BeforeCreate(tx *gorm.DB) error {
 	if r.ID == uuid.Nil {
 		r.ID = uuid.New()
@@ -258,6 +284,7 @@ func (r *Requirement) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// Artifact 是评测或构建产物记录。
 type Artifact struct {
 	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
 	ProjectID uuid.UUID `gorm:"type:uuid;index"`
@@ -267,6 +294,7 @@ type Artifact struct {
 	CreatedAt time.Time
 }
 
+// BeforeCreate 在 Artifact 入库前生成 UUID 主键。
 func (a *Artifact) BeforeCreate(tx *gorm.DB) error {
 	if a.ID == uuid.Nil {
 		a.ID = uuid.New()
@@ -274,6 +302,7 @@ func (a *Artifact) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// All 返回 GORM AutoMigrate 应注册的全部模型指针。
 func All() []any {
 	return []any{
 		&User{}, &Session{}, &Group{}, &GroupMember{},

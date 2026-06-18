@@ -71,10 +71,9 @@ type state struct {
 	transition *TransitionReason
 }
 
-// ContextPolicy defines the query-loop owned context management policy.
+// ContextPolicy 定义 query 循环统一的上下文管理策略。
 //
-// It intentionally lives in query so every caller of Run, including coordinator
-// workers and resumed workers, goes through the same pre-request pipeline.
+// 放在 query 包中，使 Coordinator Worker 与恢复中的 Worker 均走同一套 pre-request 流水线。
 type ContextPolicy struct {
 	// MicroCompactThreshold is the estimated message-token threshold that
 	// triggers clearing older tool results. 0 disables micro compaction.

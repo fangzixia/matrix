@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
+// User 是对外暴露的用户 DTO。
 type User struct {
 	ID           uuid.UUID  `json:"id"`
 	Username     string     `json:"username"`
@@ -18,6 +19,7 @@ type User struct {
 	CreatedAt    time.Time  `json:"created_at"`
 }
 
+// CreateUserInput 是创建用户请求。
 type CreateUserInput struct {
 	Username string `json:"username"`
 	Email    string `json:"email"`
@@ -26,6 +28,7 @@ type CreateUserInput struct {
 	IsAdmin  bool   `json:"is_admin"`
 }
 
+// UpdateUserInput 是更新用户请求（字段为 nil 表示不修改）。
 type UpdateUserInput struct {
 	Email    *string `json:"email"`
 	Name     *string `json:"name"`

@@ -20,6 +20,7 @@ import (
 	platformhttp "matrix/internal/platform/http"
 )
 
+// registerMgmtRoutes 注册用户组、多仓库与 Run 详情等管理 API。
 func registerMgmtRoutes(api *gin.RouterGroup, d *app.Deps) {
 	api.GET("/groups", auth.RequireAuth(d.Sessions), func(c *gin.Context) { listGroups(c, d) })
 	api.POST("/groups", auth.RequireAuth(d.Sessions), func(c *gin.Context) { createGroup(c, d) })
@@ -100,7 +101,8 @@ func getGroup(c *gin.Context, d *app.Deps) {
 	if !requireGroup(c, d, iam.RoleGuest) {
 		return
 	}
-	g, err := d.Groups.Get(c.Request.Context(), groupID(c))
+	u, _ := auth.User(c)
+	g, err := d.Groups.GetForUser(c.Request.Context(), groupID(c), u.ID, u.IsAdmin)
 	if err != nil {
 		platformhttp.JSONError(c, 404, "not_found", "组不存在")
 		return
@@ -112,14 +114,19 @@ func updateGroup(c *gin.Context, d *app.Deps) {
 	if !requireGroup(c, d, iam.RoleMaintainer) {
 		return
 	}
+	u, _ := auth.User(c)
+	gid := groupID(c)
 	var body struct {
-		Name       *string `json:"name"`
-		Visibility *string `json:"visibility"`
+		Name *string `json:"name"`
 	}
 	_ = c.BindJSON(&body)
-	g, err := d.Groups.Update(c.Request.Context(), groupID(c), body.Name, body.Visibility)
-	if err != nil {
+	if _, err := d.Groups.Update(c.Request.Context(), gid, body.Name); err != nil {
 		platformhttp.JSONError(c, 400, "bad_request", err.Error())
+		return
+	}
+	g, err := d.Groups.GetForUser(c.Request.Context(), gid, u.ID, u.IsAdmin)
+	if err != nil {
+		platformhttp.JSONError(c, 404, "not_found", "组不存在")
 		return
 	}
 	c.JSON(200, g)
@@ -386,8 +393,15 @@ func streamNotifications(c *gin.Context, d *app.Deps) {
 			if !open {
 				return
 			}
-			b, _ := json.Marshal(msg)
-			fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", events.EventAgentStream, b)
+			eventName := events.EventAgentStream
+			var data []byte
+			if msg.Type == "notification" && msg.Output != "" {
+				eventName = events.EventNotification
+				data = []byte(msg.Output)
+			} else {
+				data, _ = json.Marshal(msg)
+			}
+			fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", eventName, data)
 			flusher.Flush()
 		case <-c.Request.Context().Done():
 			return

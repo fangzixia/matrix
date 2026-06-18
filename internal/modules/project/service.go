@@ -1,3 +1,4 @@
+// Package project 项目 CRUD、可见性与路径管理。
 package project
 
 import (
@@ -13,11 +14,15 @@ import (
 )
 
 const (
-	VisibilityPrivate  = "private"
+	// VisibilityPrivate 表示仅项目成员可见。
+	VisibilityPrivate = "private"
+	// VisibilityInternal 表示登录用户可见。
 	VisibilityInternal = "internal"
-	VisibilityPublic   = "public"
+	// VisibilityPublic 表示所有人可见。
+	VisibilityPublic = "public"
 )
 
+// Project 是项目 API 返回的数据传输对象。
 type Project struct {
 	ID              uuid.UUID               `json:"id"`
 	Name            string                  `json:"name"`
@@ -33,6 +38,7 @@ type Project struct {
 	Permissions     *iam.ProjectPermissions `json:"permissions,omitempty"`
 }
 
+// CreateInput 是创建项目时的请求参数。
 type CreateInput struct {
 	Name       string     `json:"name"`
 	Path       string     `json:"path"`
@@ -42,14 +48,17 @@ type CreateInput struct {
 	GroupID    *uuid.UUID `json:"group_id"`
 }
 
+// Service 提供项目 CRUD、可见性与路径管理。
 type Service struct {
 	db *gorm.DB
 }
 
+// NewService 创建项目服务实例。
 func NewService(db *gorm.DB) *Service {
 	return &Service{db: db}
 }
 
+// Create 创建记录。
 func (s *Service) Create(ctx context.Context, ownerID uuid.UUID, in CreateInput) (*Project, error) {
 	branch := in.GitBranch
 	if branch == "" {
@@ -72,6 +81,7 @@ func (s *Service) Create(ctx context.Context, ownerID uuid.UUID, in CreateInput)
 	return s.enrich(ctx, &m, ownerID, false), nil
 }
 
+// Get 执行对应操作。
 func (s *Service) Get(ctx context.Context, id uuid.UUID) (*Project, error) {
 	var m models.Project
 	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
@@ -80,6 +90,7 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID) (*Project, error) {
 	return toDTO(&m), nil
 }
 
+// GetForUser 按用户权限返回单条记录。
 func (s *Service) GetForUser(ctx context.Context, id, userID uuid.UUID, isAdmin bool) (*Project, error) {
 	var m models.Project
 	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
@@ -88,6 +99,7 @@ func (s *Service) GetForUser(ctx context.Context, id, userID uuid.UUID, isAdmin 
 	return s.enrich(ctx, &m, userID, isAdmin), nil
 }
 
+// ListForUser 返回当前用户可见的列表。
 func (s *Service) ListForUser(ctx context.Context, userID uuid.UUID, isAdmin bool, scope string) ([]Project, error) {
 	var rows []models.Project
 	q := s.db.WithContext(ctx).Model(&models.Project{})
@@ -118,9 +130,10 @@ func (s *Service) ListForUser(ctx context.Context, userID uuid.UUID, isAdmin boo
 		}
 		if !isAdmin {
 			q = q.Where(
-				"owner_id = ? OR id IN (?) OR visibility IN ?",
+				"owner_id = ? OR id IN (?) OR group_id IN (?) OR visibility IN ?",
 				userID,
 				s.db.Model(&models.ProjectMember{}).Select("project_id").Where("user_id = ?", userID),
+				s.db.Model(&models.GroupMember{}).Select("group_id").Where("user_id = ?", userID),
 				[]string{VisibilityInternal, VisibilityPublic},
 			)
 		}
@@ -136,6 +149,7 @@ func (s *Service) ListForUser(ctx context.Context, userID uuid.UUID, isAdmin boo
 	return out, nil
 }
 
+// Update 更新记录。
 func (s *Service) Update(ctx context.Context, id uuid.UUID, name, path, gitURL, branch, visibility *string, groupID *uuid.UUID) (*Project, error) {
 	var m models.Project
 	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
@@ -165,6 +179,7 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, name, path, gitURL, 
 	return toDTO(&m), nil
 }
 
+// Delete 删除记录。
 func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	return s.db.WithContext(ctx).Delete(&models.Project{}, "id = ?", id).Error
 }

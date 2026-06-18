@@ -47,6 +47,7 @@ func buildSpecPreset(mode string) string {
 	return specPresetBody + "\n操作模式: " + mode
 }
 
+// NewSpecWorkflow 创建「需求编写」流水线工作流。
 func NewSpecWorkflow(userInput, filePath string) Workflow {
 	return newSpecWorkflowAt(userInput, filePath, time.Now())
 }

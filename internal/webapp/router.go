@@ -1,3 +1,4 @@
+// Package webapp 注册 Gin 路由并将 HTTP 请求适配到各领域 Service。
 package webapp
 
 import (
@@ -21,17 +22,20 @@ import (
 	platformhttp "matrix/internal/platform/http"
 )
 
+// Register 挂载 REST API、Admin 路由与前端静态资源（SPA fallback）。
 func Register(r *gin.Engine, d *app.Deps, staticFS fs.FS) {
 	r.GET("/health", func(c *gin.Context) { c.JSON(200, gin.H{"status": "ok"}) })
 
 	api := r.Group("/api")
 	{
+		// --- 认证 ---
 		api.POST("/auth/login", func(c *gin.Context) { login(c, d) })
 		api.POST("/auth/logout", auth.RequireAuth(d.Sessions), func(c *gin.Context) { logout(c, d) })
 		api.GET("/auth/me", auth.RequireAuth(d.Sessions), func(c *gin.Context) { me(c, d) })
 
 		admin := api.Group("/admin", auth.RequireAuth(d.Sessions), auth.RequireAdmin())
 		{
+			// --- Admin 用户管理 ---
 			admin.GET("/users", func(c *gin.Context) { adminListUsers(c, d) })
 			admin.POST("/users", func(c *gin.Context) { adminCreateUser(c, d) })
 			admin.GET("/users/:uid", func(c *gin.Context) { adminGetUser(c, d) })
@@ -40,11 +44,12 @@ func Register(r *gin.Engine, d *app.Deps, staticFS fs.FS) {
 			admin.POST("/users/:uid/reset_password", func(c *gin.Context) { adminResetPassword(c, d) })
 			admin.POST("/users/:uid/block", func(c *gin.Context) { adminBlockUser(c, d) })
 			admin.POST("/users/:uid/unblock", func(c *gin.Context) { adminUnblockUser(c, d) })
-			registerSystemAdminRoutes(admin, d)
+			registerSystemAdminRoutes(admin, d) // root 系统配置（AI/MCP/Git/Worker/Pipeline）
 		}
 
 		api.GET("/users/search", auth.RequireAuth(d.Sessions), func(c *gin.Context) { searchUsers(c, d) })
 
+		// --- 项目 ---
 		api.GET("/projects", auth.RequireAuth(d.Sessions), func(c *gin.Context) { listProjects(c, d) })
 		api.POST("/projects", auth.RequireAuth(d.Sessions), func(c *gin.Context) { createProject(c, d) })
 		api.GET("/projects/:id", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { getProject(c, d) })
@@ -56,6 +61,7 @@ func Register(r *gin.Engine, d *app.Deps, staticFS fs.FS) {
 		api.PUT("/projects/:id/members/:uid", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleMaintainer), func(c *gin.Context) { updateMember(c, d) })
 		api.DELETE("/projects/:id/members/:uid", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleMaintainer), func(c *gin.Context) { removeMember(c, d) })
 
+		// --- Git 工作区 ---
 		api.GET("/projects/:id/repository/tree", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { listFiles(c, d) })
 		api.GET("/projects/:id/repository/file", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { readFile(c, d) })
 		api.POST("/projects/:id/repository/pull", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleDeveloper), func(c *gin.Context) { pullRepo(c, d) })
@@ -67,11 +73,13 @@ func Register(r *gin.Engine, d *app.Deps, staticFS fs.FS) {
 		api.GET("/projects/:id/requirements", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { listRequirements(c, d) })
 		api.GET("/projects/:id/evaluations", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { listEvaluations(c, d) })
 
+		// --- Run 任务与 SSE 流 ---
 		api.GET("/projects/:id/runs", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { listRuns(c, d) })
 		api.POST("/projects/:id/runs", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleDeveloper), func(c *gin.Context) { startRun(c, d) })
 		api.GET("/projects/:id/runs/:runId/stream", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { streamRun(c, d) })
 		api.POST("/projects/:id/runs/:runId/cancel", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleDeveloper), func(c *gin.Context) { cancelRun(c, d) })
 
+		// --- Chat 会话 ---
 		api.GET("/projects/:id/chat/sessions", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { listChat(c, d) })
 		api.PUT("/projects/:id/chat/sessions", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleDeveloper), func(c *gin.Context) { saveChat(c, d) })
 		api.POST("/projects/:id/chat/sessions/:sid/run", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleDeveloper), func(c *gin.Context) { runChat(c, d) })
@@ -82,6 +90,7 @@ func Register(r *gin.Engine, d *app.Deps, staticFS fs.FS) {
 	}
 
 	if staticFS != nil {
+		// 前端 SPA：/assets 静态资源，其余 GET 回退 index.html
 		r.GET("/assets/*filepath", func(c *gin.Context) {
 			fp := c.Param("filepath")
 			data, err := fs.ReadFile(staticFS, "assets"+fp)
@@ -528,6 +537,7 @@ func startRun(c *gin.Context, d *app.Deps) {
 	c.JSON(202, rn)
 }
 
+// streamRun 通过 SSE 推送 Run 执行事件（Agent 流式输出）。
 func streamRun(c *gin.Context, d *app.Deps) {
 	runID := c.Param("runId")
 	ch := d.Hub.Subscribe(runID)

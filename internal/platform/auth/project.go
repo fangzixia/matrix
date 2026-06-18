@@ -8,6 +8,7 @@ import (
 	platformhttp "matrix/internal/platform/http"
 )
 
+// RequireProject 校验用户对路径参数 :id 所指项目的最低角色权限。
 func RequireProject(enforcer *iam.Enforcer, minRole iam.Role) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		u, ok := User(c)
@@ -35,6 +36,7 @@ func RequireProject(enforcer *iam.Enforcer, minRole iam.Role) gin.HandlerFunc {
 	}
 }
 
+// ProjectID 从 Gin 上下文读取 RequireProject 解析出的项目 ID。
 func ProjectID(c *gin.Context) uuid.UUID {
 	v, _ := c.Get("project_id")
 	id, _ := v.(uuid.UUID)

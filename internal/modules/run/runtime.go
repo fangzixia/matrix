@@ -22,6 +22,7 @@ import (
 	"matrix/internal/platform/logging"
 )
 
+// Runtime 封装 AI Agent 会话执行：LLM 调用、MCP 工具与取消控制。
 type Runtime struct {
 	cfg *config.Config
 
@@ -29,6 +30,7 @@ type Runtime struct {
 	runCancels map[string]context.CancelFunc
 }
 
+// NewRuntime 创建 AI 运行时实例。
 func NewRuntime(cfg *config.Config) *Runtime {
 	return &Runtime{
 		cfg:        cfg,
@@ -36,8 +38,10 @@ func NewRuntime(cfg *config.Config) *Runtime {
 	}
 }
 
+// Close 释放运行时持有的资源。
 func (r *Runtime) Close() {}
 
+// Cancel 取消指定 Run 的执行。
 func (r *Runtime) Cancel(runID string) error {
 	r.mu.Lock()
 	cancel, ok := r.runCancels[runID]
@@ -49,6 +53,7 @@ func (r *Runtime) Cancel(runID string) error {
 	return nil
 }
 
+// Run 在沙箱中执行一次 AI Agent 会话并流式输出事件。
 func (r *Runtime) Run(ctx context.Context, req ports.RunRequest, sink stream.Sink) (ports.RunResult, error) {
 	if req.Model.APIKey == "" {
 		return ports.RunResult{}, errors.New("未配置 API Key")

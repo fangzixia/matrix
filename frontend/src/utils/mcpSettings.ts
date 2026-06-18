@@ -1,3 +1,6 @@
+/**
+ * MCP 配置 JSON 解析工具。
+ */
 import type { SystemMCPServer } from '@/api/system'
 
 /** 解析 MCP JSON，兼容 Cursor `mcp.json`（含 mcpServers 包装）与裸服务对象。 */

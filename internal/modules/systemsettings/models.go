@@ -8,66 +8,43 @@ import (
 	"matrix/internal/platform/config"
 )
 
-func migrateLegacyModel(st *Settings) {
-	if st == nil || len(st.Models) > 0 {
+// normalizeModelProfiles 补全 ID、默认 max_tokens 与显示名称。
+func normalizeModelProfiles(models *[]ModelProfileSettings) {
+	if models == nil {
 		return
 	}
-	leg := st.Model
-	if leg.Model == "" && leg.BaseURL == "" && !leg.APIKeySet && leg.APIKey == "" {
-		return
-	}
-	name := leg.Model
-	if name == "" {
-		name = "默认模型"
-	}
-	st.Models = []ModelProfileSettings{{
-		ID:        "default",
-		Name:      name,
-		BaseURL:   leg.BaseURL,
-		APIKey:    leg.APIKey,
-		APIKeySet: leg.APIKeySet || leg.APIKey != "",
-		Model:     leg.Model,
-		MaxTokens: leg.MaxTokens,
-		Enabled:   true,
-		Default:   true,
-	}}
-}
-
-func normalizeModelSettings(st *Settings) {
-	if st == nil {
-		return
-	}
-	migrateLegacyModel(st)
-	for i := range st.Models {
-		if st.Models[i].ID == "" {
-			st.Models[i].ID = uuid.NewString()
+	for i := range *models {
+		if (*models)[i].ID == "" {
+			(*models)[i].ID = uuid.NewString()
 		}
-		if st.Models[i].MaxTokens <= 0 {
-			st.Models[i].MaxTokens = 8192
+		if (*models)[i].MaxTokens <= 0 {
+			(*models)[i].MaxTokens = 8192
 		}
-		if strings.TrimSpace(st.Models[i].Name) == "" {
-			st.Models[i].Name = st.Models[i].Model
+		if strings.TrimSpace((*models)[i].Name) == "" {
+			(*models)[i].Name = (*models)[i].Model
 		}
-		if st.Models[i].Name == "" {
-			st.Models[i].Name = "未命名模型"
+		if (*models)[i].Name == "" {
+			(*models)[i].Name = "未命名模型"
 		}
 	}
-	profiles := toConfigModels(st.Models)
+	profiles := toConfigModels(*models)
 	profiles = config.NormalizeModelProfiles(profiles)
-	st.Models = fromConfigModels(profiles, config.ModelYAML{})
+	*models = fromConfigModels(profiles)
 }
 
-func maskModelProfiles(st *Settings) {
-	if st == nil {
+// maskModelProfiles 对外响应时清空 api_key，仅保留 api_key_set 标记。
+func maskModelProfiles(models *[]ModelProfileSettings) {
+	if models == nil {
 		return
 	}
-	for i := range st.Models {
-		key := st.Models[i].APIKey
-		st.Models[i].APIKeySet = key != "" || st.Models[i].APIKeySet
-		st.Models[i].APIKey = ""
+	for i := range *models {
+		key := (*models)[i].APIKey
+		(*models)[i].APIKeySet = key != "" || (*models)[i].APIKeySet
+		(*models)[i].APIKey = ""
 	}
 }
 
+// mergeModelAPIKeys 保存时若未提交新 Key，则沿用数据库中的旧值。
 func mergeModelAPIKeys(out *[]ModelProfileSettings, existing []ModelProfileSettings) {
 	if out == nil || len(existing) == 0 {
 		return
@@ -101,7 +78,7 @@ func toConfigModels(in []ModelProfileSettings) []config.ModelProfile {
 	return out
 }
 
-func fromConfigModels(in []config.ModelProfile, fallback config.ModelYAML) []ModelProfileSettings {
+func fromConfigModels(in []config.ModelProfile) []ModelProfileSettings {
 	if len(in) == 0 {
 		return nil
 	}
@@ -113,7 +90,6 @@ func fromConfigModels(in []config.ModelProfile, fallback config.ModelYAML) []Mod
 			Enabled: m.Enabled, Default: m.Default,
 		})
 	}
-	_ = fallback
 	return out
 }
 

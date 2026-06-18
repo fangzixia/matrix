@@ -1,3 +1,4 @@
+// Package gitutil 提供 Git URL 解析、SSH 密钥匹配与连通性测试。
 package gitutil
 
 import (

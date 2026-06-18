@@ -12,6 +12,7 @@ type ModelProfile struct {
 	Default   bool   `json:"default"`
 }
 
+// ToYAML 将 ModelProfile 转换为 YAML 持久化结构。
 func (p ModelProfile) ToYAML() ModelYAML {
 	max := p.MaxTokens
 	if max <= 0 {

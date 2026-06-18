@@ -8,48 +8,61 @@ import (
 	"github.com/google/uuid"
 )
 
-// 顶层消息 type 常量。
 const (
-	TypeProgress    = "progress"
+	// TypeProgress 是 progress 类型顶层消息。
+	TypeProgress = "progress"
+	// TypeStreamEvent 是 stream_event 类型顶层消息。
 	TypeStreamEvent = "stream_event"
-	TypeAssistant   = "assistant"
-	TypeResult      = "result"
+	// TypeAssistant 是 assistant 类型顶层消息。
+	TypeAssistant = "assistant"
+	// TypeResult 是 result 类型顶层消息。
+	TypeResult = "result"
 )
 
-// TurnProgress / MCP / 通用工具进度 data.type。
 const (
+	// DataTurnProgress 是 TAOR 轮次进度 data.type。
 	DataTurnProgress = "turn_progress"
-	DataMCPProgress  = "mcp_progress"
+	// DataMCPProgress 是 MCP 工具进度 data.type。
+	DataMCPProgress = "mcp_progress"
+	// DataToolProgress 是通用工具进度 data.type。
 	DataToolProgress = "tool_progress"
 )
 
-// stream_event.event.type。
 const (
-	EventMessageStart      = "message_start"
+	// EventMessageStart 是 message_start 流事件类型。
+	EventMessageStart = "message_start"
+	// EventContentBlockDelta 是 content_block_delta 流事件类型。
 	EventContentBlockDelta = "content_block_delta"
-	EventMessageDelta      = "message_delta"
-	EventMessageStop       = "message_stop"
+	// EventMessageDelta 是 message_delta 流事件类型。
+	EventMessageDelta = "message_delta"
+	// EventMessageStop 是 message_stop 流事件类型。
+	EventMessageStop = "message_stop"
 )
 
-// content_block_delta.delta.type。
 const (
-	DeltaText     = "text_delta"
+	// DeltaText 是 text_delta 内容块增量类型。
+	DeltaText = "text_delta"
+	// DeltaThinking 是 thinking_delta 内容块增量类型。
 	DeltaThinking = "thinking_delta"
 )
 
-// result.subtype。
 const (
-	ResultSuccess       = "success"
+	// ResultSuccess 是成功结束的 result.subtype。
+	ResultSuccess = "success"
+	// ResultErrorMaxTurns 是达到轮次上限的 result.subtype。
 	ResultErrorMaxTurns = "error_max_turns"
-	ResultError         = "error"
+	// ResultError 是错误结束的 result.subtype。
+	ResultError = "error"
 )
 
 // Scope 区分 Coordinator 主会话与子 Worker 流式消息。
 type Scope string
 
 const (
+	// ScopeCoordinator 表示 Coordinator 主会话流。
 	ScopeCoordinator Scope = "coordinator"
-	ScopeWorker      Scope = "worker"
+	// ScopeWorker 表示子 Worker 流。
+	ScopeWorker Scope = "worker"
 )
 
 // Message 为 Wails agent:stream 事件的 JSON 载荷。
@@ -163,6 +176,7 @@ type TagSink struct {
 	ParentToolUseID string
 }
 
+// Publish 为出站消息附加 Agent 元数据后转发至 Inner。
 func (t TagSink) Publish(ctx context.Context, msg Message) error {
 	if t.Inner == nil {
 		return nil
