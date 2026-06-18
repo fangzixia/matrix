@@ -127,72 +127,20 @@
 
 .project-picker {
   min-width: 280px;
-  max-width: 320px;
   background: var(--matrix-background-color-default);
   border-radius: var(--matrix-radius);
   box-shadow: var(--matrix-shadow-dropdown);
+  overflow: hidden;
+
+  .ant-dropdown-menu {
+    box-shadow: none;
+    border-radius: 0;
+  }
 }
 
 .project-picker__search {
   padding: var(--matrix-spacing-2);
   border-bottom: 1px solid var(--matrix-border-color-default);
-}
-
-.project-picker__list {
-  max-height: 280px;
-  overflow-y: auto;
-  padding: var(--matrix-spacing-1) 0;
-}
-
-.project-picker__item {
-  display: flex;
-  align-items: center;
-  gap: var(--matrix-spacing-2);
-  width: 100%;
-  padding: var(--matrix-spacing-2) var(--matrix-spacing-3);
-  border: none;
-  background: none;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  color: var(--matrix-text-color-default);
-
-  &:hover {
-    background: var(--matrix-color-blue-50);
-    color: var(--matrix-color-blue-600);
-  }
-
-  span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-}
-
-.project-picker__empty {
-  padding: var(--matrix-spacing-3);
-  margin: 0;
-  font-size: var(--matrix-font-size-sm);
-  text-align: center;
-}
-
-.project-picker__new {
-  display: block;
-  width: 100%;
-  padding: var(--matrix-spacing-2) var(--matrix-spacing-3);
-  border: none;
-  border-top: 1px solid var(--matrix-border-color-default);
-  background: var(--matrix-background-color-subtle);
-  font: inherit;
-  font-weight: 600;
-  font-size: var(--matrix-font-size-sm);
-  color: var(--matrix-color-blue-500);
-  cursor: pointer;
-  text-align: left;
-
-  &:hover {
-    background: var(--matrix-color-blue-50);
-  }
 }
 
 .app-shell__body {

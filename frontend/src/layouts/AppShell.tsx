@@ -6,6 +6,7 @@ import {
   PlusOutlined,
   BellOutlined,
   DownOutlined,
+  SearchOutlined,
   AppstoreOutlined,
   MessageOutlined,
   PlayCircleOutlined,
@@ -159,49 +160,42 @@ export function AppShell() {
     setNotifications(listRes.notifications)
   }
 
-  const projectPicker = (
-    <div className="project-picker">
-      <div className="matrix-search project-picker__search">
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="搜索项目"
-          onClick={(e) => e.stopPropagation()}
-        />
-      </div>
-      <div className="project-picker__list">
-        {filteredProjects.map((p) => (
-          <Button
-            key={p.id}
-            type="text"
-            block
-            className="project-picker__item"
-            onClick={() => {
-              setProjectPickerOpen(false)
-              navigate(`/projects/${p.id}`)
-            }}
-          >
-            <Avatar size={28} shape="square" style={{ backgroundColor: '#fc6d26', flexShrink: 0 }}>
-              {avatarInitials(p.name)}
-            </Avatar>
-            <span>{p.name}</span>
-          </Button>
-        ))}
-        {!filteredProjects.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="未找到项目" />}
-      </div>
-      <Button
-        type="link"
-        block
-        className="project-picker__new"
-        onClick={() => {
-          setProjectPickerOpen(false)
-          navigate('/projects/new')
-        }}
-      >
-        创建新项目
-      </Button>
-    </div>
-  )
+  const projectMenuItems = useMemo((): MenuProps['items'] => {
+    const items: MenuProps['items'] = filteredProjects.map((p) => ({
+      key: p.id,
+      icon: (
+        <Avatar size={28} shape="square" style={{ backgroundColor: '#fc6d26', flexShrink: 0 }}>
+          {avatarInitials(p.name)}
+        </Avatar>
+      ),
+      label: p.name,
+    }))
+
+    if (!items.length) {
+      items.push({ key: 'empty', label: '未找到项目', disabled: true })
+    }
+
+    items.push(
+      { type: 'divider' },
+      { key: 'new', label: '创建新项目' },
+    )
+
+    return items
+  }, [filteredProjects])
+
+  function onProjectMenuClick({ key }: { key: string }) {
+    setProjectPickerOpen(false)
+    if (key === 'new') {
+      navigate('/projects/new')
+    } else if (key !== 'empty') {
+      navigate(`/projects/${key}`)
+    }
+  }
+
+  function onProjectPickerOpenChange(open: boolean) {
+    setProjectPickerOpen(open)
+    if (!open) setSearch('')
+  }
 
   return (
     <div className="app-shell">
@@ -211,11 +205,31 @@ export function AppShell() {
           <nav className="top-bar__nav">
             <Dropdown
               open={projectPickerOpen}
-              onOpenChange={setProjectPickerOpen}
+              onOpenChange={onProjectPickerOpenChange}
               destroyOnHidden
               placement="bottomLeft"
-              dropdownRender={() => projectPicker}
               trigger={['click']}
+              menu={{
+                items: projectMenuItems,
+                onClick: onProjectMenuClick,
+                style: { maxHeight: 280, overflow: 'auto', boxShadow: 'none', minWidth: 280 },
+              }}
+              popupRender={(menu) => (
+                <div className="project-picker">
+                  <div className="project-picker__search">
+                    <Input
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="搜索项目"
+                      prefix={<SearchOutlined />}
+                      allowClear
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    />
+                  </div>
+                  {menu}
+                </div>
+              )}
             >
               <Button type="text" className="top-bar__nav-link">项目</Button>
             </Dropdown>
