@@ -185,3 +185,8 @@ func ProjectSubagentsDir(sessionsDir string) string {
 	return filepath.Join(filepath.Dir(sessionsDir), "subagents")
 
 }
+
+// RunWorktreeDir 返回单次 Run 的 Git worktree 工作目录。
+func RunWorktreeDir(p Paths, projectID, runID string) string {
+	return filepath.Join(p.WorkspacesDir, projectID, "runs", runID)
+}

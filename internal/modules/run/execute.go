@@ -127,15 +127,22 @@ func (s *Service) ExecuteRun(ctx context.Context, runID uuid.UUID) error {
 		return nil
 	}
 
-	unlock := s.sandboxLocks.acquire(m.ProjectID, m.RepositoryID)
-	defer unlock()
+	if err := s.prepareRunSandbox(ctx, &m); err != nil {
+		return err
+	}
+
+	var unlock func()
+	if s.shouldUseSharedLock(&m) {
+		unlock = s.sandboxLocks.acquire(m.ProjectID, m.RepositoryID)
+		defer unlock()
+	}
 
 	now := time.Now()
 	_ = s.db.WithContext(ctx).Model(&m).Updates(map[string]any{
 		"status": "running", "started_at": now, "finished_at": nil, "error_message": "",
 	}).Error
-	if s.notifier != nil {
-		s.notifier.NotifyRunStatus(ctx, m.CreatedBy, m.ProjectID, runID, "running", m.Title)
+	if s.notifier != nil && shouldNotifyRun(m.Kind) {
+		s.notifier.NotifyRunStatus(ctx, m.CreatedBy, m.ProjectID, runID, m.Kind, "running", m.Title)
 	}
 
 	var runErr error
@@ -156,14 +163,52 @@ func (s *Service) ExecuteRun(ctx context.Context, runID uuid.UUID) error {
 		status = "failed"
 		errMsg = runErr.Error()
 	}
-	_ = s.db.WithContext(ctx).Model(&models.Run{}).Where("id = ?", runID).Updates(map[string]any{
+
+	updates := map[string]any{
 		"status": status, "finished_at": fin, "error_message": errMsg,
-	}).Error
-	if s.notifier != nil {
-		s.notifier.NotifyRunStatus(ctx, m.CreatedBy, m.ProjectID, runID, status, m.Title)
+	}
+	if ms := s.mergeStatusAfterRun(&m, status); ms != "" {
+		updates["merge_status"] = ms
+	}
+	_ = s.db.WithContext(ctx).Model(&models.Run{}).Where("id = ?", runID).Updates(updates).Error
+
+	if runErr != nil && s.cfg.Run.CleanupOnFailure && m.SandboxPath != "" {
+		_ = s.workspace.RemoveRunWorktree(ctx, m.ProjectID, m.RepositoryID, runID, m.RunBranch, m.SandboxPath)
+		_ = s.db.WithContext(ctx).Model(&models.Run{}).Where("id = ?", runID).Updates(map[string]any{
+			"sandbox_path": "", "run_branch": "",
+		}).Error
+	}
+
+	if s.notifier != nil && shouldNotifyRun(m.Kind) {
+		s.notifier.NotifyRunStatus(ctx, m.CreatedBy, m.ProjectID, runID, m.Kind, status, m.Title)
 	}
 	s.hub.Publish(runID.String(), stream.ResultSuccessMsg(runID.String(), "", "", 0, time.Since(now)))
 	return runErr
+}
+
+func (s *Service) prepareRunSandbox(ctx context.Context, m *models.Run) error {
+	if !s.useWorktreeSandbox() {
+		return nil
+	}
+	if m.SandboxPath != "" {
+		return nil
+	}
+	sandboxPath, branch, err := s.workspace.CreateRunWorktree(ctx, m.ProjectID, m.RepositoryID, m.ID)
+	if err != nil {
+		return err
+	}
+	m.SandboxPath = sandboxPath
+	m.RunBranch = branch
+	return s.db.WithContext(ctx).Model(m).Updates(map[string]any{
+		"sandbox_path": sandboxPath, "run_branch": branch,
+	}).Error
+}
+
+func (s *Service) sandboxDir(ctx context.Context, m *models.Run) (string, error) {
+	if m.SandboxPath != "" {
+		return m.SandboxPath, nil
+	}
+	return s.workspace.RepoRootFor(ctx, m.ProjectID, m.RepositoryID)
 }
 
 func (s *Service) loadExistingSteps(ctx context.Context, runID uuid.UUID) (map[int]*models.RunStep, error) {
@@ -188,10 +233,16 @@ func (s *Service) executePipeline(ctx context.Context, m *models.Run) error {
 		return err
 	}
 
+	pullBefore := s.pipeline.PullBeforeStage() && !s.useWorktreeSandbox()
+	if pullBefore && s.pullAll != nil {
+		_ = s.pullAll(ctx, m.ProjectID)
+	}
+
 	for i, kind := range stages {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		kind = normalizeStageKind(kind)
 
 		seq := i + 1
 		if prev, ok := existing[seq]; ok && prev.Status == "succeeded" {
@@ -216,9 +267,6 @@ func (s *Service) executePipeline(ctx context.Context, m *models.Run) error {
 			existing[seq] = &step
 		}
 
-		if s.pipeline.PullBeforeStage() && s.pullAll != nil {
-			_ = s.pullAll(ctx, m.ProjectID)
-		}
 		err := s.executeSingle(ctx, m, kind, &stepID)
 		fin := time.Now()
 		stepStatus := "succeeded"
@@ -247,11 +295,12 @@ func (s *Service) executeSingle(ctx context.Context, m *models.Run, kind string,
 		}
 	}
 	msg := m.Title
-	repoRoot, err := s.workspace.RepoRootFor(ctx, m.ProjectID, m.RepositoryID)
+	sandboxDir, err := s.sandboxDir(ctx, m)
 	if err != nil {
 		return err
 	}
-	messages := BuildHarnessMessages(kind, msg, "", repoRoot)
+	kind = normalizeStageKind(kind)
+	messages := BuildHarnessMessages(kind, msg, m.FilePath, sandboxDir)
 	sessionsDir := storageProjectSessions(s.paths, m.ProjectID.String())
 	sink := s.compositeSink(m.ID, stepID)
 	mcpPorts := mcpConfigsToPorts(mcpMerged)
@@ -260,7 +309,7 @@ func (s *Service) executeSingle(ctx context.Context, m *models.Run, kind string,
 	}
 	result, runErr := s.runtime.Run(ctx, ports.RunRequest{
 		RunID: m.ID.String(), Kind: kind, Messages: messages,
-		SandboxDir: repoRoot, SessionsDir: sessionsDir,
+		SandboxDir: sandboxDir, SessionsDir: sessionsDir,
 		Model: ports.ModelConfig{
 			BaseURL: modelCfg.BaseURL, APIKey: modelCfg.APIKey,
 			Model: modelCfg.Model, MaxTokens: modelCfg.MaxTokens,
@@ -276,7 +325,43 @@ func (s *Service) executeSingle(ctx context.Context, m *models.Run, kind string,
 	if result.Err != nil {
 		return result.Err
 	}
+	s.indexHarnessOutputs(ctx, m, kind, sandboxDir)
 	return nil
+}
+
+func normalizeStageKind(kind string) string {
+	if kind == "spec" {
+		return "plan"
+	}
+	return kind
+}
+
+func shouldNotifyRun(kind string) bool {
+	switch normalizeStageKind(kind) {
+	case "plan", "implement", "verify", "build":
+		return true
+	default:
+		return false
+	}
+}
+
+// IsStageKind reports whether kind is a Harness workflow stage shown in the UI.
+func IsStageKind(kind string) bool {
+	return shouldNotifyRun(kind)
+}
+
+func (s *Service) indexHarnessOutputs(ctx context.Context, m *models.Run, kind, repoRoot string) {
+	kind = normalizeStageKind(kind)
+	switch kind {
+	case "plan":
+		if s.plans != nil {
+			_ = s.plans.IndexAfterRun(ctx, m.ProjectID, m.RepositoryID, m.ID, m.FilePath, repoRoot)
+		}
+	case "verify", "build":
+		if s.artifacts != nil {
+			_ = s.artifacts.IndexAfterRun(ctx, m.ProjectID, m.RepositoryID, m.ID, m.FilePath, repoRoot)
+		}
+	}
 }
 
 func storageProjectSessions(paths storage.Paths, projectID string) string {

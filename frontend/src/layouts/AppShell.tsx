@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ComponentType, type CSSProperties } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { Avatar, Badge, Button, Dropdown, Empty, Input, List } from 'antd'
+import { Avatar, Badge, Button, Card, Dropdown, Empty, Input, List, Typography } from 'antd'
 import type { MenuProps } from 'antd'
 import {
   PlusOutlined,
@@ -9,7 +9,10 @@ import {
   SearchOutlined,
   AppstoreOutlined,
   MessageOutlined,
-  PlayCircleOutlined,
+  FileTextOutlined,
+  CodeOutlined,
+  CheckCircleOutlined,
+  BuildOutlined,
   FolderOutlined,
   SettingOutlined,
 } from '@ant-design/icons'
@@ -24,12 +27,15 @@ import { subscribeNotificationStream } from '@/api/stream'
 import { formatRelativeTime } from '@/api/projects'
 import './layouts.scss'
 
-type ProjectNavIcon = 'overview' | 'chat' | 'runs' | 'repository' | 'settings'
+type ProjectNavIcon = 'overview' | 'chat' | 'plan' | 'implement' | 'verify' | 'build' | 'repository' | 'settings'
 
 const projectNavIcons: Record<ProjectNavIcon, ComponentType<{ style?: CSSProperties; className?: string }>> = {
   overview: AppstoreOutlined,
   chat: MessageOutlined,
-  runs: PlayCircleOutlined,
+  plan: FileTextOutlined,
+  implement: CodeOutlined,
+  verify: CheckCircleOutlined,
+  build: BuildOutlined,
   repository: FolderOutlined,
   settings: SettingOutlined,
 }
@@ -64,7 +70,10 @@ export function AppShell() {
     const items: { to: string; label: string; icon: ProjectNavIcon }[] = [
       { to: base, label: '概览', icon: 'overview' },
       { to: `${base}/chat`, label: '对话', icon: 'chat' },
-      { to: `${base}/runs`, label: '运行', icon: 'runs' },
+      { to: `${base}/plan`, label: '编写计划', icon: 'plan' },
+      { to: `${base}/implement`, label: '编码实现', icon: 'implement' },
+      { to: `${base}/verify`, label: '验证评测', icon: 'verify' },
+      { to: `${base}/build`, label: '执行构建', icon: 'build' },
       { to: `${base}/repository`, label: '仓库', icon: 'repository' },
     ]
     if (perms.canManageSettings) {
@@ -249,35 +258,38 @@ export function AppShell() {
             destroyOnHidden
             trigger={['click']}
             placement="bottomRight"
-            dropdownRender={() => (
-              <div className="notify-panel">
-                <div className="notify-panel__header">
-                  <strong>通知</strong>
-                  {unreadCount > 0 && (
-                    <Button type="link" size="small" onClick={markAllRead}>
-                      全部已读
-                    </Button>
-                  )}
-                </div>
+            popupRender={() => (
+              <Card
+                size="small"
+                title="通知"
+                extra={unreadCount > 0 ? (
+                  <Button type="link" size="small" onClick={markAllRead}>
+                    全部已读
+                  </Button>
+                ) : undefined}
+                style={{ width: 320 }}
+                styles={{ body: { maxHeight: 360, overflow: 'auto', padding: 0 } }}
+              >
                 {!notifications.length ? (
                   <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无通知" />
                 ) : (
                   <List
+                    size="small"
+                    split
                     dataSource={notifications}
                     renderItem={(n) => (
                       <List.Item
-                        className={`notify-item${!n.read_at ? ' unread' : ''}`}
                         onClick={() => markRead(n)}
-                        style={{ cursor: 'pointer' }}
+                        style={{ cursor: 'pointer', paddingInline: 16 }}
                       >
                         <List.Item.Meta
-                          title={n.title}
+                          title={<Typography.Text strong={!n.read_at}>{n.title}</Typography.Text>}
                           description={(
                             <>
-                              <div>{n.body}</div>
-                              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                              <Typography.Paragraph style={{ marginBottom: 4 }}>{n.body}</Typography.Paragraph>
+                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                                 {formatRelativeTime(n.created_at)}
-                              </div>
+                              </Typography.Text>
                             </>
                           )}
                         />
@@ -285,13 +297,12 @@ export function AppShell() {
                     )}
                   />
                 )}
-              </div>
+              </Card>
             )}
           >
             <Badge count={unreadCount} size="small">
               <Button
                 type="text"
-                className="notify-bell"
                 aria-label="通知"
                 title="通知"
                 icon={<BellOutlined style={{ fontSize: 18 }} />}

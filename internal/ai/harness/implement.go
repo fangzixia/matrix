@@ -1,7 +1,7 @@
 package harness
 
 const implementPreset = `【编码实现】
-根据需求文档在工作区内完成实现与必要自测，满足全部验收标准。`
+根据计划文档在工作区内完成实现与必要自测，满足全部验收标准。`
 
 // NewImplementWorkflow 创建「编码实现」流水线工作流。
 func NewImplementWorkflow(userInput, filePath string) Workflow {
@@ -11,15 +11,15 @@ func NewImplementWorkflow(userInput, filePath string) Workflow {
 		Preset:       implementPreset,
 		UserInput:    userInput,
 		FilePath:     filePath,
-		FileLabel:    "需求文档",
-		FileFallback: "未指定（请使用最新的 .matrix/SPEC-*.md）",
-		DefaultTask:  "请按需求文档完成实现。",
+		FileLabel:    "计划文档",
+		FileFallback: "未指定（请使用最新的 .matrix/PLAN-*.md）",
+		DefaultTask:  "请按计划文档完成实现。",
 		ExpectedArtifacts: []string{
-			"满足需求的代码变更",
+			"满足计划的代码变更",
 			"必要的测试或验证输出",
 		},
 		Acceptance: []string{
-			"逐条满足需求验收标准",
+			"逐条满足计划验收标准",
 			"相关测试或构建命令已执行并报告结果",
 		},
 		Recovery: []string{

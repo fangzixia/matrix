@@ -1,106 +1,96 @@
-/**
- * Run、流水线、Chat 会话 API。
- */
-import { api } from './client'
-
-/** AI 任务/Chat 运行记录 */
-export interface Run {
-  id: string
-  project_id: string
-  repository_id?: string
-  kind: string
-  status: string
-  title?: string
-  audit_path?: string
-  error_message?: string
-  started_at?: string
-  finished_at?: string
-  created_at: string
-}
-
-/** Run 内流水线步骤 */
-export interface RunStep {
-  id: string
-  run_id: string
-  kind: string
-  sequence: number
-  status: string
-  output_summary?: string
-  started_at?: string
-  finished_at?: string
-}
-
-/** Run 事件快照 */
-export interface RunEvent {
-  id: string
-  run_id: string
-  step_id?: string
-  event_type: string
-  payload?: string
-  created_at: string
-}
-
-/** Chat 会话元数据 */
-export interface ChatSession {
-  id: string
-  title: string
-  messages?: unknown[]
-}
-
-export function listRuns(projectId: string) {
-  return api<{ runs: Run[] }>(`/api/projects/${projectId}/runs`)
-}
-
-export function startRun(projectId: string, message: string, kind = 'task', filePath = '', sync = false) {
-  const q = sync ? '?sync=1' : ''
-  return api<Run>(`/api/projects/${projectId}/runs${q}`, {
-    method: 'POST',
-    body: JSON.stringify({ message, kind, file_path: filePath }),
-  })
-}
-
-export function startPipeline(projectId: string, message: string, stages?: string[], repositoryId?: string) {
-  return api<Run>(`/api/projects/${projectId}/pipelines`, {
-    method: 'POST',
-    body: JSON.stringify({ message, stages, repository_id: repositoryId || undefined }),
-  })
-}
-
-export function getRun(projectId: string, runId: string) {
-  return api<Run>(`/api/projects/${projectId}/runs/${runId}`)
-}
-
-export function listRunSteps(projectId: string, runId: string) {
-  return api<{ steps: RunStep[] }>(`/api/projects/${projectId}/runs/${runId}/steps`)
-}
-
-export function listRunEvents(projectId: string, runId: string, afterId?: string) {
-  const q = afterId ? `?after_id=${afterId}` : ''
-  return api<{ events: RunEvent[] }>(`/api/projects/${projectId}/runs/${runId}/events${q}`)
-}
-
-export function getRunAudit(projectId: string, runId: string) {
-  return api<{ content: string }>(`/api/projects/${projectId}/runs/${runId}/audit`)
-}
-
-export function cancelRun(projectId: string, runId: string) {
-  return api<{ ok: boolean }>(`/api/projects/${projectId}/runs/${runId}/cancel`, { method: 'POST' })
-}
-
-export function listChatSessions(projectId: string) {
-  return api<{ sessions: ChatSession[] }>(`/api/projects/${projectId}/chat/sessions`)
-}
-
-export function saveChatSessions(projectId: string, sessions: ChatSession[]) {
-  return api<{ ok: boolean }>(`/api/projects/${projectId}/chat/sessions`, {
-    method: 'PUT',
-    body: JSON.stringify({ sessions }),
-  })
-}
-
-export function runChat(projectId: string, sessionId: string, message: string) {
-  return api<Run>(`/api/projects/${projectId}/chat/sessions/${sessionId}/run`, {
-    method: 'POST',
-    body: JSON.stringify({ message }),
-  })
-}
+/**
+ * Run / 任务 API（内部执行单元，UI 层称「任务」）。
+ */
+import { api } from './client'
+
+/** AI 任务执行记录 */
+export interface Run {
+  id: string
+  project_id: string
+  repository_id?: string
+  kind: string
+  status: string
+  title?: string
+  audit_path?: string
+  sandbox_path?: string
+  run_branch?: string
+  merge_status?: string
+  error_message?: string
+  started_at?: string
+  finished_at?: string
+  created_at: string
+}
+
+/** Run 内步骤 */
+export interface RunStep {
+  id: string
+  run_id: string
+  kind: string
+  sequence: number
+  status: string
+  output_summary?: string
+  started_at?: string
+  finished_at?: string
+}
+
+/** Run 事件快照 */
+export interface RunEvent {
+  id: string
+  run_id: string
+  step_id?: string
+  event_type: string
+  payload?: string
+  created_at: string
+}
+
+export function listRuns(projectId: string, kind?: string) {
+  const q = kind ? `?kind=${encodeURIComponent(kind)}` : ''
+  return api<{ runs: Run[] }>(`/api/projects/${projectId}/runs${q}`)
+}
+
+export function startRun(projectId: string, message: string, kind = 'plan', filePath = '', sync = false) {
+  const q = sync ? '?sync=1' : ''
+  return api<Run>(`/api/projects/${projectId}/runs${q}`, {
+    method: 'POST',
+    body: JSON.stringify({ message, kind, file_path: filePath }),
+  })
+}
+
+export function getRun(projectId: string, runId: string) {
+  return api<Run>(`/api/projects/${projectId}/runs/${runId}`)
+}
+
+export function listRunSteps(projectId: string, runId: string) {
+  return api<{ steps: RunStep[] }>(`/api/projects/${projectId}/runs/${runId}/steps`)
+}
+
+export function listRunEvents(projectId: string, runId: string, afterId?: string) {
+  const q = afterId ? `?after_id=${afterId}` : ''
+  return api<{ events: RunEvent[] }>(`/api/projects/${projectId}/runs/${runId}/events${q}`)
+}
+
+export function getRunAudit(projectId: string, runId: string) {
+  return api<{ content: string }>(`/api/projects/${projectId}/runs/${runId}/audit`)
+}
+
+export function cancelRun(projectId: string, runId: string) {
+  return api<{ ok: boolean }>(`/api/projects/${projectId}/runs/${runId}/cancel`, { method: 'POST' })
+}
+
+export async function mergeRun(projectId: string, runId: string) {
+  const res = await fetch(`/api/projects/${projectId}/runs/${runId}/merge`, {
+    method: 'POST',
+    credentials: 'include',
+  })
+  const body = await res.json().catch(() => ({})) as Run & { error?: string; conflicts?: string[] }
+  if (!res.ok) {
+    const err = new Error(body.error || '合并失败') as Error & { conflicts?: string[] }
+    err.conflicts = body.conflicts
+    throw err
+  }
+  return body as Run
+}
+
+export function discardRun(projectId: string, runId: string) {
+  return api<Run>(`/api/projects/${projectId}/runs/${runId}/discard`, { method: 'POST' })
+}

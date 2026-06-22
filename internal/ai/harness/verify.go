@@ -1,7 +1,7 @@
 package harness
 
 const verifyPreset = `【验收评测】
-对照需求与代码产出评测报告（.matrix/EVAL-SPEC-*-*.md），每条 AC 给出结论与依据，含综合分（10 分制，≥8.0 为通过）。`
+对照计划与代码产出评测报告（.matrix/EVAL-PLAN-*-*.md），每条 AC 给出结论与依据，含综合分（10 分制，≥8.0 为通过）。`
 
 // NewVerifyWorkflow 创建「验收评测」流水线工作流。
 func NewVerifyWorkflow(userInput, filePath string) Workflow {
@@ -11,11 +11,11 @@ func NewVerifyWorkflow(userInput, filePath string) Workflow {
 		Preset:       verifyPreset,
 		UserInput:    userInput,
 		FilePath:     filePath,
-		FileLabel:    "需求文档",
-		FileFallback: "未指定（请使用最新的 .matrix/SPEC-*.md）",
-		DefaultTask:  "请对照需求验收当前实现，并生成评测报告。",
+		FileLabel:    "计划文档",
+		FileFallback: "未指定（请使用最新的 .matrix/PLAN-*.md）",
+		DefaultTask:  "请对照计划验收当前实现，并生成评测报告。",
 		ExpectedArtifacts: []string{
-			".matrix/EVAL-SPEC-*-*.md",
+			".matrix/EVAL-PLAN-*-*.md",
 		},
 		Acceptance: []string{
 			"每条 AC 有通过/失败结论和证据",

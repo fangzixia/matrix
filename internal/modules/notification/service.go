@@ -92,11 +92,11 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, kind, title, bod
 	return &d, nil
 }
 
-// NotifyRunStatus 在 Run 状态变更时推送通知。
-func (s *Service) NotifyRunStatus(ctx context.Context, userID uuid.UUID, projectID, runID uuid.UUID, status, title string) {
-	link := fmt.Sprintf("/projects/%s/runs/%s", projectID, runID)
-	body := fmt.Sprintf("Run %s", status)
-	_, _ = s.Create(ctx, userID, "run:"+status, title, body, link)
+// NotifyRunStatus 在四阶段任务状态变更时推送通知。
+func (s *Service) NotifyRunStatus(ctx context.Context, userID uuid.UUID, projectID, runID uuid.UUID, runKind, status, title string) {
+	link := fmt.Sprintf("/projects/%s/%s/%s", projectID, runKind, runID)
+	body := fmt.Sprintf("任务 %s", status)
+	_, _ = s.Create(ctx, userID, "task:"+status, title, body, link)
 }
 
 func toDTO(m *models.Notification) DTO {

@@ -54,3 +54,29 @@ func (r *ProjectRepoResolver) RepoRootFor(ctx context.Context, projectID uuid.UU
 	}
 	return r.WS.NamedRepoRoot(projectID, name), nil
 }
+
+// CreateRunWorktree 创建 Run 专用 worktree 沙箱。
+func (r *ProjectRepoResolver) CreateRunWorktree(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID, runID uuid.UUID) (sandboxPath, branch string, err error) {
+	if _, err := r.RepoRootFor(ctx, projectID, repositoryID); err != nil {
+		return "", "", err
+	}
+	sandboxPath, branch, _, err = r.WS.CreateRunWorktreeFor(ctx, projectID, repositoryID, runID)
+	return sandboxPath, branch, err
+}
+
+// RemoveRunWorktree 删除 Run worktree。
+func (r *ProjectRepoResolver) RemoveRunWorktree(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID, runID uuid.UUID, branch, sandboxPath string) error {
+	return r.WS.RemoveRunWorktreeFor(ctx, projectID, repositoryID, runID, branch, sandboxPath)
+}
+
+// MergeRunWorktree 合并 Run worktree 到主仓库。
+func (r *ProjectRepoResolver) MergeRunWorktree(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID, runID uuid.UUID, branch, sandboxPath string) ([]string, error) {
+	res, err := r.WS.MergeRunWorktreeFor(ctx, projectID, repositoryID, runID, branch, sandboxPath)
+	if err != nil && res != nil {
+		return res.Conflicts, err
+	}
+	if err != nil {
+		return nil, err
+	}
+	return nil, nil
+}

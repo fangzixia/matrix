@@ -29,7 +29,7 @@ type TodoItem struct {
 func NewTodoWriteTool() *Tool {
 	return &Tool{
 		Name: "todo_write",
-		Description: `创建或更新结构化 TODO 列表，用于任务规划与进度跟踪。
+		Description: `创建或更新结构化 TODO 列表，用于任务计划与进度跟踪。
 使用方式：
 - merge=false：用新 todos 完全替换现有列表
 - merge=true：按 id 合并更新；相同 id 覆盖，新 id 追加

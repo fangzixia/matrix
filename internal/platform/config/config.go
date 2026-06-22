@@ -25,6 +25,7 @@ type Config struct {
 	Git      GitConfig      `yaml:"git"`
 	Worker   WorkerConfig   `yaml:"worker"`
 	Pipeline PipelineConfig `yaml:"pipeline"`
+	Run      RunConfig      `yaml:"run"`
 }
 
 // SystemConfig 是运行环境标识。
@@ -159,6 +160,18 @@ type PipelineConfig struct {
 	PullBeforeStage bool     `yaml:"pull_before_stage"`
 }
 
+// RunConfig 是 Run 沙箱与并发相关配置。
+type RunConfig struct {
+	SandboxMode      string `yaml:"sandbox_mode"`       // worktree（默认）| shared
+	CleanupOnFailure bool   `yaml:"cleanup_on_failure"` // failed/cancelled 时删除 worktree
+}
+
+// SandboxModeWorktree 为每 Run 独立 worktree 沙箱（可并行）。
+const SandboxModeWorktree = "worktree"
+
+// SandboxModeShared 为共享主仓库沙箱（legacy，项目内串行）。
+const SandboxModeShared = "shared"
+
 var envPattern = regexp.MustCompile(`\$\{([^}:]+)(?::-([^}]*))?\}`)
 
 // Load 读取 YAML 配置文件，展开 ${ENV} 占位符并与 Default 合并。
@@ -235,10 +248,22 @@ func Default() *Config {
 			Concurrency:  2,
 		},
 		Pipeline: PipelineConfig{
-			DefaultStages:   []string{"spec", "implement", "verify", "build"},
+			DefaultStages:   []string{"plan", "implement", "verify", "build"},
 			PullBeforeStage: true,
 		},
+		Run: RunConfig{
+			SandboxMode:      SandboxModeWorktree,
+			CleanupOnFailure: true,
+		},
 	}
+}
+
+// ActiveSandboxMode 返回当前 Run 沙箱模式（默认 worktree）。
+func (c *Config) ActiveSandboxMode() string {
+	if c == nil || strings.TrimSpace(c.Run.SandboxMode) == "" {
+		return SandboxModeWorktree
+	}
+	return strings.TrimSpace(c.Run.SandboxMode)
 }
 
 func expandEnv(s string) string {

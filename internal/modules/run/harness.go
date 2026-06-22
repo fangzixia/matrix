@@ -10,8 +10,8 @@ import (
 func BuildHarnessMessages(kind, userMessage, filePath, sandboxDir string) []query.Message {
 	content := userMessage
 	switch kind {
-	case string(harness.KindSpec):
-		content = harness.BuildSpecTask(userMessage, filePath)
+	case string(harness.KindPlan):
+		content = harness.BuildPlanTask(userMessage, filePath)
 	case string(harness.KindImplement):
 		content = harness.BuildImplementTask(userMessage, filePath)
 	case string(harness.KindVerify):

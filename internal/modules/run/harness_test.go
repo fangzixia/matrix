@@ -5,18 +5,18 @@ import (
 	"testing"
 )
 
-func TestBuildHarnessMessages_spec(t *testing.T) {
-	msgs := BuildHarnessMessages("spec", "我的需求", "", "")
+func TestBuildHarnessMessages_plan(t *testing.T) {
+	msgs := BuildHarnessMessages("plan", "我的计划", "", "")
 	if len(msgs) != 1 || msgs[0].Role != "user" {
-		t.Fatal("expected single user message")
+		t.Fatal(msgs)
 	}
-	if !strings.Contains(msgs[0].Content, "创建需求") {
-		t.Fatalf("missing spec preset: %s", msgs[0].Content)
+	if !strings.Contains(msgs[0].Content, "创建计划") {
+		t.Fatal(msgs[0].Content)
 	}
 }
 
 func TestBuildHarnessMessages_implement(t *testing.T) {
-	msgs := BuildHarnessMessages("implement", "实现功能", ".matrix/SPEC-1.md", "")
+	msgs := BuildHarnessMessages("implement", "实现功能", ".matrix/PLAN-1.md", "")
 	if !strings.Contains(msgs[0].Content, "编码实现") {
 		t.Fatal(msgs[0].Content)
 	}
@@ -26,5 +26,14 @@ func TestBuildHarnessMessages_chat(t *testing.T) {
 	msgs := BuildHarnessMessages("chat", "hello", "", "")
 	if msgs[0].Content != "hello" {
 		t.Fatal(msgs[0].Content)
+	}
+}
+
+func TestNormalizeStageKind(t *testing.T) {
+	if normalizeStageKind("spec") != "plan" {
+		t.Fatal("legacy spec should map to plan")
+	}
+	if normalizeStageKind("implement") != "implement" {
+		t.Fatal()
 	}
 }

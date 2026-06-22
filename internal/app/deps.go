@@ -17,7 +17,7 @@ import (
 	"matrix/internal/modules/pipeline"
 	"matrix/internal/modules/project"
 	"matrix/internal/modules/repository"
-	"matrix/internal/modules/requirement"
+	"matrix/internal/modules/plan"
 	"matrix/internal/modules/run"
 	"matrix/internal/modules/systemsettings"
 	"matrix/internal/modules/workspace"
@@ -47,7 +47,7 @@ type Deps struct {
 	Jobs           *job.Service             // 任务队列
 	Pipeline       *pipeline.Service        // 流水线阶段
 	Notifications  *notification.Service    // 通知
-	Requirements   *requirement.Service     // 需求文档
+	Plans          *plan.Service            // 计划文档
 	Artifacts      *artifact.Service        // 评测产物
 	Runtime        *run.Runtime             // AI Agent 运行时
 	SystemSettings *systemsettings.Service  // 系统级配置（DB）
@@ -75,11 +75,16 @@ func NewDeps(cfg *config.Config, paths storage.Paths, db *gorm.DB, log *slog.Log
 	jobs := job.NewService(db, cfg.Worker.MaxAttempts)
 	notifications := notification.NewService(db, hub)
 
+	plans := plan.NewService(db, ws)
+	artifactsSvc := artifact.NewService(db, ws)
+
 	runs := run.NewService(db, rt, hub, paths, cfg, resolver, settings)
 	runs.SetJobEnqueuer(jobs)
 	runs.SetNotifier(notifications)
 	runs.SetPipeline(pipe)
 	runs.SetPullAll(ws.PullAll)
+	runs.SetPlans(plans)
+	runs.SetArtifacts(artifactsSvc)
 
 	return &Deps{
 		Config: cfg, Paths: paths, DB: db, Log: log, Hub: hub,
@@ -87,8 +92,7 @@ func NewDeps(cfg *config.Config, paths storage.Paths, db *gorm.DB, log *slog.Log
 		IAM: iam.NewEnforcer(db), Members: iam.NewMemberService(db),
 		Projects: projects, Settings: settings, Repositories: repos, Groups: groups,
 		Workspace: ws, Runs: runs, Jobs: jobs, Pipeline: pipe, Notifications: notifications,
-		Requirements: requirement.NewService(db, ws),
-		Artifacts:    artifact.NewService(db, ws),
+		Plans: plans, Artifacts: artifactsSvc,
 		Runtime:      rt, SystemSettings: sysSettings,
 	}
 }

@@ -137,6 +137,10 @@ type Run struct {
 	CreatedBy      uuid.UUID  `gorm:"type:uuid;index"`
 	AuditPath      string     `gorm:"size:1024"`
 	Title          string     `gorm:"size:512"`
+	FilePath       string     `gorm:"size:512"`
+	SandboxPath    string     `gorm:"size:1024"`
+	RunBranch      string     `gorm:"size:128"`
+	MergeStatus    string     `gorm:"size:32"`
 	PipelineStages string     `gorm:"type:jsonb"`
 	ErrorMessage   string     `gorm:"type:text"`
 	StartedAt      *time.Time
@@ -265,33 +269,40 @@ type SystemSetting struct {
 	UpdatedAt time.Time
 }
 
-// Requirement 是项目需求文档元数据。
-type Requirement struct {
-	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
-	ProjectID uuid.UUID `gorm:"type:uuid;index"`
-	Path      string    `gorm:"size:512"`
-	Title     string    `gorm:"size:512"`
-	Content   string    `gorm:"type:text"`
-	UpdatedAt time.Time
-	CreatedAt time.Time
+// Plan 是项目计划文档元数据索引（正文存于工作区 .matrix/PLAN-*.md）。
+type Plan struct {
+	ID             uuid.UUID  `gorm:"type:uuid;primaryKey"`
+	ProjectID      uuid.UUID  `gorm:"type:uuid;index;not null"`
+	RepositoryID   *uuid.UUID `gorm:"type:uuid;index"`
+	RunID          *uuid.UUID `gorm:"type:uuid;index"`
+	Path           string     `gorm:"size:512;not null"`
+	Title          string     `gorm:"size:512"`
+	UpdatedAt      time.Time
+	CreatedAt      time.Time
 }
 
-// BeforeCreate 在 Requirement 入库前生成 UUID 主键。
-func (r *Requirement) BeforeCreate(tx *gorm.DB) error {
-	if r.ID == uuid.Nil {
-		r.ID = uuid.New()
+// TableName 指定 GORM 表名。
+func (Plan) TableName() string { return "plans" }
+
+// BeforeCreate 在 Plan 入库前生成 UUID 主键。
+func (p *Plan) BeforeCreate(tx *gorm.DB) error {
+	if p.ID == uuid.Nil {
+		p.ID = uuid.New()
 	}
 	return nil
 }
 
-// Artifact 是评测或构建产物记录。
+// Artifact 是评测或构建产物元数据索引（正文存于工作区 .matrix/EVAL-PLAN-*.md）。
 type Artifact struct {
-	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
-	ProjectID uuid.UUID `gorm:"type:uuid;index"`
-	Kind      string    `gorm:"size:64"`
-	Path      string    `gorm:"size:512"`
-	Content   string    `gorm:"type:text"`
-	CreatedAt time.Time
+	ID           uuid.UUID  `gorm:"type:uuid;primaryKey"`
+	ProjectID    uuid.UUID  `gorm:"type:uuid;index;not null"`
+	RepositoryID *uuid.UUID `gorm:"type:uuid;index"`
+	RunID        *uuid.UUID `gorm:"type:uuid;index"`
+	Kind         string     `gorm:"size:64;not null"`
+	Path         string     `gorm:"size:512;not null"`
+	PlanPath     string     `gorm:"size:512"`
+	Title        string     `gorm:"size:512"`
+	CreatedAt    time.Time
 }
 
 // BeforeCreate 在 Artifact 入库前生成 UUID 主键。
@@ -310,6 +321,6 @@ func All() []any {
 		&Run{}, &RunStep{}, &RunEvent{}, &RunJob{},
 		&Notification{}, &ChatSession{}, &ProjectSetting{},
 		&SystemSetting{},
-		&Requirement{}, &Artifact{},
+		&Plan{}, &Artifact{},
 	}
 }

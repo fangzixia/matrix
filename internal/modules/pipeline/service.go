@@ -1,4 +1,4 @@
-// Package pipeline Harness 流水线阶段配置（Spec/Implement/Verify/Build 等）。
+// Package pipeline Harness 流水线阶段配置（Plan/Implement/Verify/Build 等）。
 package pipeline
 
 import (
@@ -29,7 +29,7 @@ func (s *Service) DefaultStages() []string {
 	if len(s.cfg.DefaultStages) > 0 {
 		return append([]string(nil), s.cfg.DefaultStages...)
 	}
-	return []string{"spec", "implement", "verify", "build"}
+	return []string{"plan", "implement", "verify", "build"}
 }
 
 // PullBeforeStage 返回阶段执行前是否拉取 Git。

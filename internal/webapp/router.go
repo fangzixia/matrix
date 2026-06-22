@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"matrix/internal/app"
+	"matrix/internal/ai/query"
 	"matrix/internal/modules/iam"
 	"matrix/internal/modules/identity"
 	"matrix/internal/modules/project"
@@ -70,7 +71,7 @@ func Register(r *gin.Engine, d *app.Deps, staticFS fs.FS) {
 		api.GET("/projects/:id/settings/integrations", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { getIntegrations(c, d) })
 		api.PUT("/projects/:id/settings/integrations", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleMaintainer), func(c *gin.Context) { saveIntegrations(c, d) })
 
-		api.GET("/projects/:id/requirements", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { listRequirements(c, d) })
+		api.GET("/projects/:id/plans", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { listPlans(c, d) })
 		api.GET("/projects/:id/evaluations", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { listEvaluations(c, d) })
 
 		// --- Run 任务与 SSE 流 ---
@@ -78,6 +79,8 @@ func Register(r *gin.Engine, d *app.Deps, staticFS fs.FS) {
 		api.POST("/projects/:id/runs", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleDeveloper), func(c *gin.Context) { startRun(c, d) })
 		api.GET("/projects/:id/runs/:runId/stream", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { streamRun(c, d) })
 		api.POST("/projects/:id/runs/:runId/cancel", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleDeveloper), func(c *gin.Context) { cancelRun(c, d) })
+		api.POST("/projects/:id/runs/:runId/merge", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleDeveloper), func(c *gin.Context) { mergeRun(c, d) })
+		api.POST("/projects/:id/runs/:runId/discard", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleDeveloper), func(c *gin.Context) { discardRun(c, d) })
 
 		// --- Chat 会话 ---
 		api.GET("/projects/:id/chat/sessions", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { listChat(c, d) })
@@ -470,15 +473,15 @@ func readFile(c *gin.Context, d *app.Deps) {
 	c.JSON(200, gin.H{"content": content})
 }
 
-func listRequirements(c *gin.Context, d *app.Deps) {
+func listPlans(c *gin.Context, d *app.Deps) {
 	pid := auth.ProjectID(c)
 	repoID := parseRepositoryIDQuery(c)
-	items, err := d.Requirements.List(c.Request.Context(), pid, repoID)
+	items, err := d.Plans.List(c.Request.Context(), pid, repoID)
 	if err != nil {
 		platformhttp.JSONError(c, 500, "internal", err.Error())
 		return
 	}
-	c.JSON(200, gin.H{"requirements": items})
+	c.JSON(200, gin.H{"plans": items})
 }
 
 func listEvaluations(c *gin.Context, d *app.Deps) {
@@ -506,7 +509,8 @@ func parseRepositoryIDQuery(c *gin.Context) *uuid.UUID {
 
 func listRuns(c *gin.Context, d *app.Deps) {
 	pid := auth.ProjectID(c)
-	runs, err := d.Runs.List(c.Request.Context(), pid)
+	kind := c.Query("kind")
+	runs, err := d.Runs.List(c.Request.Context(), pid, kind)
 	if err != nil {
 		platformhttp.JSONError(c, 500, "internal", err.Error())
 		return
@@ -570,6 +574,30 @@ func cancelRun(c *gin.Context, d *app.Deps) {
 	c.JSON(200, gin.H{"ok": true})
 }
 
+func mergeRun(c *gin.Context, d *app.Deps) {
+	rid, _ := uuid.Parse(c.Param("runId"))
+	rn, conflicts, err := d.Runs.MergeRun(c.Request.Context(), rid)
+	if err != nil {
+		if len(conflicts) > 0 {
+			c.JSON(409, gin.H{"error": err.Error(), "conflicts": conflicts, "run": rn})
+			return
+		}
+		platformhttp.JSONError(c, 400, "bad_request", err.Error())
+		return
+	}
+	c.JSON(200, rn)
+}
+
+func discardRun(c *gin.Context, d *app.Deps) {
+	rid, _ := uuid.Parse(c.Param("runId"))
+	rn, err := d.Runs.DiscardRun(c.Request.Context(), rid)
+	if err != nil {
+		platformhttp.JSONError(c, 400, "bad_request", err.Error())
+		return
+	}
+	c.JSON(200, rn)
+}
+
 func listChat(c *gin.Context, d *app.Deps) {
 	pid := auth.ProjectID(c)
 	sessions, _ := d.Runs.ListChatSessions(c.Request.Context(), pid)
@@ -590,11 +618,31 @@ func saveChat(c *gin.Context, d *app.Deps) {
 func runChat(c *gin.Context, d *app.Deps) {
 	u, _ := auth.User(c)
 	pid := auth.ProjectID(c)
+	sidParam := c.Param("sid")
+	var sessionID uuid.UUID
+	if sidParam != "" && sidParam != "default" {
+		if parsed, err := uuid.Parse(sidParam); err == nil {
+			sessionID = parsed
+		}
+	}
 	var body struct {
 		Message string `json:"message"`
 	}
-	_ = c.BindJSON(&body)
-	rn, err := d.Runs.RunChat(c.Request.Context(), pid, u.ID, uuid.Nil, body.Message, nil)
+	if c.BindJSON(&body) != nil {
+		platformhttp.JSONError(c, 400, "bad_request", "无效请求")
+		return
+	}
+	var history []query.Message
+	if sessionID != uuid.Nil {
+		sessions, _ := d.Runs.ListChatSessions(c.Request.Context(), pid)
+		for _, s := range sessions {
+			if s.ID == sessionID {
+				history = run.MessagesFromJSON(s.Messages)
+				break
+			}
+		}
+	}
+	rn, err := d.Runs.RunChat(c.Request.Context(), pid, u.ID, sessionID, body.Message, history)
 	if err != nil {
 		platformhttp.JSONError(c, 400, "bad_request", err.Error())
 		return

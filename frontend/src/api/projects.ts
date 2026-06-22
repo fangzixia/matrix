@@ -54,12 +54,13 @@ export interface FileEntry {
   size?: number
 }
 
-/** 需求文档摘要 */
-export interface RequirementItem {
+/** 计划文档摘要 */
+export interface PlanItem {
   id?: string
   path: string
   title: string
   content?: string
+  run_id?: string
 }
 
 /** 评测/产物摘要 */
@@ -67,8 +68,10 @@ export interface EvaluationItem {
   id?: string
   kind?: string
   path: string
+  plan_path?: string
   title: string
   content?: string
+  run_id?: string
 }
 
 /** 项目级模型与 MCP 覆盖配置 */
@@ -157,8 +160,8 @@ export function readFile(projectId: string, path: string) {
   return api<{ content: string }>(`/api/projects/${projectId}/repository/file?path=${encodeURIComponent(path)}`)
 }
 
-export function listRequirements(projectId: string) {
-  return api<{ requirements: RequirementItem[] | null }>(`/api/projects/${projectId}/requirements`)
+export function listPlans(projectId: string) {
+  return api<{ plans: PlanItem[] | null }>(`/api/projects/${projectId}/plans`)
 }
 
 export function listEvaluations(projectId: string) {

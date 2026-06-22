@@ -1,4 +1,4 @@
-// Package harness 定义 Spec/Implement/Verify/Build/UI Scan 任务流与 Prompt 模板。
+// Package harness 定义 Plan/Implement/Verify/Build/UI Scan 任务流与 Prompt 模板。
 package harness
 
 import "strings"
@@ -7,8 +7,8 @@ import "strings"
 type Kind string
 
 const (
-	// KindSpec 是需求规格阶段。
-	KindSpec Kind = "spec"
+	// KindPlan 是计划编写阶段。
+	KindPlan Kind = "plan"
 	// KindImplement 是代码实现阶段。
 	KindImplement Kind = "implement"
 	// KindVerify 是验证阶段。
