@@ -1,8 +1,10 @@
-// Package artifact 评测与构建产物（.matrix/EVAL-PLAN-*.md）索引与列表查询。
+// Package artifact 评测与构建产物（docs/evaluations/EVAL-*.md）索引与列表查询。
 package artifact
 
 import (
 	"context"
+	"matrix/internal/modules/workspace"
+	"matrix/internal/platform/db/models"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,16 +12,9 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-
-	"matrix/internal/modules/workspace"
-	"matrix/internal/platform/db/models"
 )
 
-const (
-	evalDirMatrix    = ".matrix"
-	evalDirLegacy    = ".spec/evaluations"
-	evalPrefix       = "EVAL-"
-)
+const evalPrefix = "EVAL-"
 
 // Service 管理评测与构建产物索引。
 type Service struct {
@@ -43,74 +38,74 @@ type Item struct {
 	RunID    string    `json:"run_id,omitempty"`
 }
 
-// ListEvaluations 返回评测产物列表（正文从磁盘读取）。
+// ListEvaluations 返回评测产物列表（正文从 docs 目录读取）。
 func (s *Service) ListEvaluations(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID) ([]Item, error) {
-	root, err := s.ws.SandboxRoot(ctx, projectID, repositoryID)
+	if err := s.ws.EnsureDocsLayout(projectID); err != nil {
+		return nil, err
+	}
+	docsRoot, err := s.ws.DocsRoot(projectID)
 	if err != nil {
 		return nil, err
 	}
 	seen := make(map[string]struct{})
 	var out []Item
-
 	collectFile := func(rel, title string) {
 		if _, ok := seen[rel]; ok {
 			return
 		}
 		seen[rel] = struct{}{}
-		full := filepath.Join(root, filepath.FromSlash(rel))
+		full, err := s.ws.ResolveDocPath(projectID, rel)
+		if err != nil {
+			return
+		}
 		b, _ := os.ReadFile(full)
 		out = append(out, Item{
-			Kind: "evaluation", Path: rel, Title: title,
+			Kind: "evaluation", Path: rel,
+			Title:   titleOrFromContent(title, string(b)),
 			Content: string(b),
 		})
 	}
-
-	matrixDir := filepath.Join(root, evalDirMatrix)
-	if st, err := os.Stat(matrixDir); err == nil && st.IsDir() {
-		entries, _ := os.ReadDir(matrixDir)
+	evalsDir := filepath.Join(docsRoot, "evaluations")
+	if st, err := os.Stat(evalsDir); err == nil && st.IsDir() {
+		entries, _ := os.ReadDir(evalsDir)
 		for _, e := range entries {
 			name := e.Name()
 			if e.IsDir() || !isEvalFileName(name) {
 				continue
 			}
-			collectFile(filepath.ToSlash(filepath.Join(evalDirMatrix, name)), name)
+			collectFile(filepath.ToSlash(filepath.Join(workspace.DocsEvaluationsRel, name)), name)
 		}
 	}
-
-	legacyDir := filepath.Join(root, evalDirLegacy)
-	_ = filepath.WalkDir(legacyDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return nil
-		}
-		collectFile(filepath.ToSlash(rel), filepath.Base(path))
-		return nil
-	})
-
 	var rows []models.Artifact
 	_ = s.db.WithContext(ctx).Where("project_id = ? AND kind = ?", projectID, "evaluation").
 		Order("created_at desc").Find(&rows).Error
 	for _, r := range rows {
-		if _, ok := seen[r.Path]; ok {
+		rel, err := workspace.SanitizeDocLogicalPath(r.Path)
+		if err != nil || rel == "" {
 			continue
 		}
-		seen[r.Path] = struct{}{}
+		if _, ok := seen[rel]; ok {
+			continue
+		}
+		seen[rel] = struct{}{}
+		planPath, _ := workspace.SanitizeDocLogicalPath(r.PlanPath)
 		item := Item{
-			ID: r.ID, Kind: r.Kind, Path: r.Path,
-			PlanPath: r.PlanPath, Title: r.Title,
+			ID: r.ID, Kind: r.Kind, Path: rel,
+			PlanPath: planPath, Title: r.Title,
 		}
 		if item.Title == "" {
-			item.Title = r.Path
+			item.Title = rel
 		}
 		if r.RunID != nil {
 			item.RunID = r.RunID.String()
 		}
-		full := filepath.Join(root, filepath.FromSlash(r.Path))
-		if b, err := os.ReadFile(full); err == nil {
-			item.Content = string(b)
+		if full, err := s.ws.ResolveDocPath(projectID, rel); err == nil {
+			if b, err := os.ReadFile(full); err == nil {
+				item.Content = string(b)
+				if item.Title == "" || item.Title == rel {
+					item.Title = titleOrFromContent(filepath.Base(rel), item.Content)
+				}
+			}
 		}
 		out = append(out, item)
 	}
@@ -118,24 +113,33 @@ func (s *Service) ListEvaluations(ctx context.Context, projectID uuid.UUID, repo
 }
 
 // IndexAfterRun 在 verify/build 阶段成功后，将评测文件路径写入 DB 索引。
-func (s *Service) IndexAfterRun(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID, runID uuid.UUID, planPath, repoRoot string) error {
-	evalPath := findLatestEvalFile(repoRoot)
+func (s *Service) IndexAfterRun(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID, runID uuid.UUID, planPath, docsRoot string) error {
+	evalPath := findLatestEvalFile(docsRoot)
 	if evalPath == "" {
 		return nil
 	}
-	return s.upsert(ctx, projectID, repositoryID, runID, evalPath, planPath, repoRoot)
+	planPath, err := workspace.SanitizeDocLogicalPath(planPath)
+	if err != nil {
+		return err
+	}
+	return s.upsert(ctx, projectID, repositoryID, runID, evalPath, planPath)
 }
 
-func (s *Service) upsert(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID, runID uuid.UUID, evalPath, planPath, repoRoot string) error {
-	evalPath = filepath.ToSlash(strings.TrimSpace(evalPath))
-	title := filepath.Base(evalPath)
-	if planPath != "" {
-		planPath = filepath.ToSlash(strings.TrimSpace(planPath))
+// upsert 插入或更新数据库索引行。
+func (s *Service) upsert(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID, runID uuid.UUID, evalPath, planPath string) error {
+	evalPath, err := workspace.SanitizeDocLogicalPath(evalPath)
+	if err != nil {
+		return err
 	}
-
+	title := filepath.Base(evalPath)
+	if full, err := s.ws.ResolveDocPath(projectID, evalPath); err == nil {
+		if b, err := os.ReadFile(full); err == nil {
+			title = titleOrFromContent(title, string(b))
+		}
+	}
 	var existing models.Artifact
 	q := s.db.WithContext(ctx).Where("project_id = ? AND path = ?", projectID, evalPath)
-	err := q.First(&existing).Error
+	err = q.First(&existing).Error
 	if err == nil {
 		existing.RunID = &runID
 		existing.PlanPath = planPath
@@ -145,7 +149,6 @@ func (s *Service) upsert(ctx context.Context, projectID uuid.UUID, repositoryID 
 		}
 		return s.db.WithContext(ctx).Save(&existing).Error
 	}
-
 	row := models.Artifact{
 		ProjectID: projectID, RepositoryID: repositoryID, RunID: &runID,
 		Kind: "evaluation", Path: evalPath, PlanPath: planPath, Title: title,
@@ -154,13 +157,15 @@ func (s *Service) upsert(ctx context.Context, projectID uuid.UUID, repositoryID 
 	return s.db.WithContext(ctx).Create(&row).Error
 }
 
+// isEvalFileName 判断文件名是否为评测报告。
 func isEvalFileName(name string) bool {
 	up := strings.ToUpper(name)
 	return strings.HasPrefix(up, evalPrefix) && strings.HasSuffix(strings.ToLower(name), ".md")
 }
 
-func findLatestEvalFile(repoRoot string) string {
-	dir := filepath.Join(repoRoot, evalDirMatrix)
+// findLatestEvalFile 在文档目录中查找最新评测文件。
+func findLatestEvalFile(docsRoot string) string {
+	dir := filepath.Join(docsRoot, "evaluations")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return ""
@@ -177,8 +182,19 @@ func findLatestEvalFile(repoRoot string) string {
 		}
 		if info.ModTime().After(bestTime) {
 			bestTime = info.ModTime()
-			best = filepath.ToSlash(filepath.Join(evalDirMatrix, e.Name()))
+			best = filepath.ToSlash(filepath.Join(workspace.DocsEvaluationsRel, e.Name()))
 		}
 	}
 	return best
+}
+
+// titleOrFromContent 从内容提取标题或使用文件名。
+func titleOrFromContent(fallback, content string) string {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "# ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "# "))
+		}
+	}
+	return fallback
 }

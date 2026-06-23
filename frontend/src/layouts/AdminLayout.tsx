@@ -1,42 +1,86 @@
-import { Link, NavLink, Outlet } from 'react-router-dom'
-import { DashboardOutlined, LeftOutlined, SettingOutlined, UserOutlined } from '@ant-design/icons'
-import { MatrixLogo } from '@/components/MatrixLogo'
-import { useAuthStore } from '@/stores/auth'
-import './admin-layout.scss'
+import { useMemo } from "react";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Button, Layout, Menu, theme, Typography } from "antd";
+import type { MenuProps } from "antd";
+import {
+  DashboardOutlined,
+  LeftOutlined,
+  SettingOutlined,
+  UserOutlined,
+} from "@ant-design/icons";
+import { MatrixLogo } from "@/components/MatrixLogo";
+import { useAuthStore } from "@/stores/auth";
+
+const { Header, Sider, Content } = Layout;
 
 export function AdminLayout() {
-  const isRoot = useAuthStore((s) => s.isRoot())
-
+  const isRoot = useAuthStore((s) => s.isRoot());
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { token } = theme.useToken();
+  const menuItems: MenuProps["items"] = useMemo(() => {
+    const items: MenuProps["items"] = [
+      { key: "/admin", icon: <DashboardOutlined />, label: "概览" },
+      { key: "/admin/users", icon: <UserOutlined />, label: "用户" },
+    ];
+    if (isRoot) {
+      items.push({
+        key: "/admin/system",
+        icon: <SettingOutlined />,
+        label: "系统配置",
+      });
+    }
+    return items;
+  }, [isRoot]);
+  const selectedKey = useMemo(() => {
+    const path = location.pathname;
+    if (path.startsWith("/admin/system")) return "/admin/system";
+    if (path.startsWith("/admin/users")) return "/admin/users";
+    if (path === "/admin" || path === "/admin/") return "/admin";
+    return path;
+  }, [location.pathname]);
   return (
-    <div className="admin-layout">
-      <header className="admin-layout__header">
-        <Link to="/projects" className="admin-layout__back">
-          <LeftOutlined /> 返回应用
+    <Layout style={{ minHeight: "100vh" }}>
+      <Header
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 16,
+          padding: "0 24px",
+          background: token.colorBgContainer,
+          borderBottom: `1px solid ${token.colorBorderSecondary}`,
+        }}
+      >
+        <Link to="/projects">
+          <Button type="text" icon={<LeftOutlined />}>
+            返回应用
+          </Button>
         </Link>
         <MatrixLogo showText={false} size={20} />
-        <span className="admin-layout__title">管理区域</span>
-      </header>
-      <div className="admin-layout__body">
-        <aside className="admin-layout__sidebar">
-          <p className="admin-layout__section">管理</p>
-          <nav className="admin-layout__nav">
-            <NavLink to="/admin" end className={({ isActive }) => (isActive ? 'nav-link-active' : undefined)}>
-              <DashboardOutlined className="matrix-nav-icon" style={{ fontSize: 16 }} /> 概览
-            </NavLink>
-            <NavLink to="/admin/users" className={({ isActive }) => (isActive ? 'nav-link-active' : undefined)}>
-              <UserOutlined className="matrix-nav-icon" style={{ fontSize: 16 }} /> 用户
-            </NavLink>
-            {isRoot && (
-              <NavLink to="/admin/system" className={({ isActive }) => (isActive ? 'nav-link-active' : undefined)}>
-                <SettingOutlined className="matrix-nav-icon" style={{ fontSize: 16 }} /> 系统配置
-              </NavLink>
-            )}
-          </nav>
-        </aside>
-        <section className="admin-layout__content">
+        <Typography.Title level={5} style={{ margin: 0 }}>
+          管理区域
+        </Typography.Title>
+      </Header>
+      <Layout>
+        <Sider
+          width={220}
+          style={{
+            background: token.colorBgContainer,
+            borderRight: `1px solid ${token.colorBorderSecondary}`,
+          }}
+        >
+          <Menu
+            mode="inline"
+            selectedKeys={[selectedKey]}
+            items={menuItems}
+            onClick={({ key }) => navigate(key)}
+            style={{ borderInlineEnd: "none", paddingTop: 8 }}
+          />
+        </Sider>
+        <Content style={{ padding: 24, background: token.colorBgLayout }}>
           <Outlet />
-        </section>
-      </div>
-    </div>
-  )
+        </Content>
+      </Layout>
+    </Layout>
+  );
 }

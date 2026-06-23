@@ -6,3 +6,4 @@
 /frontend/dist/
 /logs/
 /config/config.yml
+/frontend/package-lock.json

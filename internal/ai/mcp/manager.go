@@ -81,7 +81,6 @@ func (m *Manager) GetClient(name string) (*Client, error) {
 	if !exists {
 		return nil, fmt.Errorf("server %s not configured", name)
 	}
-
 	if config.Disabled {
 		return nil, fmt.Errorf("server %s is disabled", name)
 	}
@@ -108,10 +107,8 @@ func (m *Manager) GetClient(name string) (*Client, error) {
 		client.Close()
 		return nil, fmt.Errorf("initialize: %w", err)
 	}
-
 	m.clients[name] = client
 	logging.Infof("MCP server started: %s", name)
-
 	return client, nil
 }
 
@@ -124,16 +121,13 @@ func (m *Manager) TestServer(name string) *ServerStatus {
 		Tools:      []string{},
 		LastTested: time.Now().Format("2006-01-02 15:04:05"),
 	}
-
 	m.mu.RLock()
 	config, exists := m.configs[name]
 	m.mu.RUnlock()
-
 	if !exists {
 		status.Error = "服务未配置"
 		return status
 	}
-
 	if config.Disabled {
 		status.Error = "服务已禁用"
 		return status
@@ -158,13 +152,11 @@ func (m *Manager) TestServer(name string) *ServerStatus {
 		status.Error = fmt.Sprintf("列出工具失败: %v", err)
 		return status
 	}
-
 	status.Available = true
 	status.ToolCount = len(tools)
 	for _, tool := range tools {
 		status.Tools = append(status.Tools, tool.Name)
 	}
-
 	return status
 }
 
@@ -172,7 +164,6 @@ func (m *Manager) TestServer(name string) *ServerStatus {
 func (m *Manager) ReconnectAll() map[string]*ServerStatus {
 	m.connect.Lock()
 	defer m.connect.Unlock()
-
 	m.mu.Lock()
 	for name, client := range m.clients {
 		client.Close()
@@ -190,12 +181,10 @@ func (m *Manager) TestAllServers() map[string]*ServerStatus {
 		configs[k] = v
 	}
 	m.mu.RUnlock()
-
 	results := make(map[string]*ServerStatus)
 	for name := range configs {
 		results[name] = m.TestServer(name)
 	}
-
 	return results
 }
 
@@ -203,35 +192,29 @@ func (m *Manager) TestAllServers() map[string]*ServerStatus {
 func (m *Manager) GetServerStatus(name string) *ServerStatus {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-
 	status := &ServerStatus{
 		Name:      name,
 		Available: false,
 	}
-
 	config, exists := m.configs[name]
 	if !exists {
 		status.Error = "服务未配置"
 		return status
 	}
-
 	if config.Disabled {
 		status.Error = "服务已禁用"
 		return status
 	}
-
 	client, exists := m.clients[name]
 	if !exists {
 		// 未连接时仅返回配置状态；需完整信息请调用 GetClient/TestServer
 		return status
 	}
-
 	serverInfo := client.GetServerInfo()
 	if serverInfo != nil {
 		status.ServerInfo = serverInfo
 		status.Available = true
 	}
-
 	return status
 }
 
@@ -239,12 +222,10 @@ func (m *Manager) GetServerStatus(name string) *ServerStatus {
 func (m *Manager) GetAllServerStatuses() map[string]*ServerStatus {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-
 	results := make(map[string]*ServerStatus)
 	for name := range m.configs {
 		results[name] = m.GetServerStatus(name)
 	}
-
 	return results
 }
 
@@ -254,7 +235,6 @@ func (m *Manager) CallTool(serverName, toolName string, arguments map[string]int
 	if err != nil {
 		return nil, fmt.Errorf("get client: %w", err)
 	}
-
 	return client.CallTool(toolName, arguments)
 }
 
@@ -264,7 +244,6 @@ func (m *Manager) ListTools(serverName string) ([]Tool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get client: %w", err)
 	}
-
 	return client.ListTools()
 }
 
@@ -278,7 +257,6 @@ func (m *Manager) ListAllTools() (map[string][]Tool, error) {
 		}
 	}
 	m.mu.RUnlock()
-
 	results := make(map[string][]Tool)
 	for name := range configs {
 		tools, err := m.ListTools(name)
@@ -288,7 +266,6 @@ func (m *Manager) ListAllTools() (map[string][]Tool, error) {
 		}
 		results[name] = tools
 	}
-
 	return results, nil
 }
 
@@ -296,12 +273,10 @@ func (m *Manager) ListAllTools() (map[string][]Tool, error) {
 func (m *Manager) Close() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
 	for name, client := range m.clients {
 		logging.Infof("Closing MCP server: %s", name)
 		client.Close()
 	}
-
 	m.clients = make(map[string]*Client)
 }
 
@@ -309,18 +284,15 @@ func (m *Manager) Close() {
 func (m *Manager) IsAutoApproved(serverName, toolName string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-
 	config, exists := m.configs[serverName]
 	if !exists {
 		return false
 	}
-
 	for _, approved := range config.AutoApprove {
 		if approved == toolName || approved == "*" {
 			return true
 		}
 	}
-
 	return false
 }
 

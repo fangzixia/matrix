@@ -3,190 +3,137 @@ package storage
 
 import (
 	"fmt"
-
-	"os"
-
-	"path/filepath"
-
-	"strings"
-
 	"matrix/internal/platform/config"
+	"os"
+	"path/filepath"
+	"strings"
 )
 
 // Paths 是解析后的本地存储目录绝对路径集合。
 type Paths struct {
-	DataDir string
-
+	DataDir       string
 	WorkspacesDir string
-
-	AuditDir string
-
-	ExportsDir string
-
-	LogDir string
-
-	LogFile string
+	AuditDir      string
+	ExportsDir    string
+	LogDir        string
+	LogFile       string
 }
 
 // Resolve 根据配置计算各数据目录的绝对路径并校验 allowed_roots。
 func Resolve(cfg *config.Config) (Paths, error) {
-
 	base := config.ResolvePath(".", cfg.Storage.BaseDir)
-
 	data := config.ResolvePath(base, cfg.Storage.DataDir)
-
 	p := Paths{
-
-		DataDir: data,
-
+		DataDir:       data,
 		WorkspacesDir: config.ResolvePath(data, cfg.Storage.WorkspacesDir),
-
-		AuditDir: config.ResolvePath(data, cfg.Storage.AuditDir),
-
-		ExportsDir: config.ResolvePath(data, cfg.Storage.ExportsDir),
-
-		LogDir: config.ResolvePath(".", cfg.Logging.Dir),
-
-		LogFile: filepath.Join(config.ResolvePath(".", cfg.Logging.Dir), cfg.Logging.File),
+		AuditDir:      config.ResolvePath(data, cfg.Storage.AuditDir),
+		ExportsDir:    config.ResolvePath(data, cfg.Storage.ExportsDir),
+		LogDir:        config.ResolvePath(".", cfg.Logging.Dir),
+		LogFile:       filepath.Join(config.ResolvePath(".", cfg.Logging.Dir), cfg.Logging.File),
 	}
-
 	if err := validateAllowedRoots(cfg.Storage.AllowedRoots, p); err != nil {
-
 		return Paths{}, err
-
 	}
-
 	return p, nil
-
 }
 
+// validateAllowedRoots 校验存储路径是否在允许根目录下。
 func validateAllowedRoots(allowed []string, p Paths) error {
-
 	if len(allowed) == 0 {
-
 		return nil
-
 	}
-
 	paths := []string{p.DataDir, p.WorkspacesDir, p.AuditDir, p.ExportsDir, p.LogDir}
-
 	for _, target := range paths {
-
 		abs, err := filepath.Abs(target)
-
 		if err != nil {
-
 			return fmt.Errorf("storage: resolve %s: %w", target, err)
-
 		}
-
 		if !underAllowedRoot(abs, allowed) {
-
 			return fmt.Errorf("storage: path %s not under allowed_roots", abs)
-
 		}
-
 	}
-
 	return nil
-
 }
 
+// underAllowedRoot 判断路径是否位于允许的根目录内。
 func underAllowedRoot(path string, allowed []string) bool {
-
 	path = filepath.Clean(path)
-
 	for _, root := range allowed {
-
 		root = strings.TrimSpace(root)
-
 		if root == "" {
-
 			continue
-
 		}
-
 		abs, err := filepath.Abs(root)
-
 		if err != nil {
-
 			continue
-
 		}
-
 		abs = filepath.Clean(abs)
-
 		if path == abs || strings.HasPrefix(path, abs+string(os.PathSeparator)) {
-
 			return true
-
 		}
-
 	}
-
 	return false
-
 }
 
 // EnsureLayout 创建 DataDir、WorkspacesDir 等必要目录。
 func EnsureLayout(p Paths) error {
-
 	for _, dir := range []string{p.DataDir, p.WorkspacesDir, p.AuditDir, p.ExportsDir, p.LogDir} {
-
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-
 			return fmt.Errorf("storage: mkdir %s: %w", dir, err)
-
 		}
-
 	}
-
 	return nil
-
 }
 
 // ProjectRepoDir 返回项目默认 Git 仓库克隆目录。
-func ProjectRepoDir(p Paths, projectID string) string {
-	return filepath.Join(p.WorkspacesDir, projectID, "repo")
+func ProjectRepoDir(p Paths, projectKey string) string {
+	return filepath.Join(p.WorkspacesDir, projectKey, "repo")
 }
 
 // ProjectNamedRepoDir 返回项目具名 Git 仓库克隆目录。
-func ProjectNamedRepoDir(p Paths, projectID, repoName string) string {
+func ProjectNamedRepoDir(p Paths, projectKey, repoName string) string {
 	if repoName == "" || repoName == "default" {
-		return ProjectRepoDir(p, projectID)
+		return ProjectRepoDir(p, projectKey)
 	}
-	return filepath.Join(p.WorkspacesDir, projectID, "repos", repoName)
+	return filepath.Join(p.WorkspacesDir, projectKey, "repos", repoName)
 }
 
 // ProjectAuditDir 返回项目审计日志根目录。
-func ProjectAuditDir(p Paths, projectID string) string {
-
-	return filepath.Join(p.AuditDir, projectID)
-
+func ProjectAuditDir(p Paths, projectKey string) string {
+	return filepath.Join(p.AuditDir, projectKey)
 }
 
 // ProjectSessionsDir 返回项目 Chat/Agent 会话 transcript 目录。
-func ProjectSessionsDir(p Paths, projectID string) string {
-
-	return filepath.Join(ProjectAuditDir(p, projectID), "sessions")
-
+func ProjectSessionsDir(p Paths, projectKey string) string {
+	return filepath.Join(ProjectAuditDir(p, projectKey), "sessions")
 }
 
 // RunAuditFile 返回单次 Run 的 JSONL 审计文件路径。
-func RunAuditFile(p Paths, projectID, runID string) string {
-
-	return filepath.Join(ProjectAuditDir(p, projectID), runID+".jsonl")
-
+func RunAuditFile(p Paths, projectKey, runID string) string {
+	return filepath.Join(ProjectAuditDir(p, projectKey), runID+".jsonl")
 }
 
 // ProjectSubagentsDir 返回项目子 Agent sidechain transcript 目录。
 func ProjectSubagentsDir(sessionsDir string) string {
-
 	return filepath.Join(filepath.Dir(sessionsDir), "subagents")
-
 }
 
 // RunWorktreeDir 返回单次 Run 的 Git worktree 工作目录。
-func RunWorktreeDir(p Paths, projectID, runID string) string {
-	return filepath.Join(p.WorkspacesDir, projectID, "runs", runID)
+func RunWorktreeDir(p Paths, projectKey, runID string) string {
+	return filepath.Join(p.WorkspacesDir, projectKey, "runs", runID)
+}
+
+// ProjectDocsDir 返回项目计划/评测文档根目录（独立于 Git 源码仓库）。
+func ProjectDocsDir(p Paths, projectKey string) string {
+	return filepath.Join(p.WorkspacesDir, projectKey, "docs")
+}
+
+// ProjectDocsPlansDir 返回计划文档目录。
+func ProjectDocsPlansDir(p Paths, projectKey string) string {
+	return filepath.Join(ProjectDocsDir(p, projectKey), "plans")
+}
+
+// ProjectDocsEvaluationsDir 返回评测报告目录。
+func ProjectDocsEvaluationsDir(p Paths, projectKey string) string {
+	return filepath.Join(ProjectDocsDir(p, projectKey), "evaluations")
 }

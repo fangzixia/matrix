@@ -1,7 +1,29 @@
-import { useEffect, useMemo, useState, type ComponentType, type CSSProperties } from 'react'
-import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { Avatar, Badge, Button, Card, Dropdown, Empty, Input, List, Typography } from 'antd'
-import type { MenuProps } from 'antd'
+import { useEffect, useMemo, useState } from "react";
+import {
+  Link,
+  Outlet,
+  useLocation,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
+import {
+  Avatar,
+  Badge,
+  Breadcrumb,
+  Button,
+  Card,
+  Dropdown,
+  Empty,
+  Flex,
+  Input,
+  Layout,
+  List,
+  Menu,
+  Space,
+  theme,
+  Typography,
+} from "antd";
+import type { MenuProps } from "antd";
 import {
   PlusOutlined,
   BellOutlined,
@@ -15,21 +37,20 @@ import {
   BuildOutlined,
   FolderOutlined,
   SettingOutlined,
-} from '@ant-design/icons'
-import { useAuthStore } from '@/stores/auth'
-import { useProjectStore } from '@/stores/project'
-import { useProjectPermissions } from '@/hooks/useProjectPermissions'
-import { MatrixLogoLink } from '@/components/MatrixLogo'
-import { avatarInitials } from '@/utils/avatar'
-import * as notificationsApi from '@/api/notifications'
-import type { Notification } from '@/api/notifications'
-import { subscribeNotificationStream } from '@/api/stream'
-import { formatRelativeTime } from '@/api/projects'
-import './layouts.scss'
+} from "@ant-design/icons";
+import { useAuthStore } from "@/stores/auth";
+import { useProjectStore } from "@/stores/project";
+import { useProjectPermissions } from "@/hooks/useProjectPermissions";
+import { MatrixLogoLink } from "@/components/MatrixLogo";
+import { avatarInitials } from "@/utils/avatar";
+import * as notificationsApi from "@/api/notifications";
+import type { Notification } from "@/api/notifications";
+import { subscribeNotificationStream } from "@/api/stream";
+import { formatRelativeTime } from "@/api/projects";
 
-type ProjectNavIcon = 'overview' | 'chat' | 'plan' | 'implement' | 'verify' | 'build' | 'repository' | 'settings'
+const { Header, Sider, Content } = Layout;
 
-const projectNavIcons: Record<ProjectNavIcon, ComponentType<{ style?: CSSProperties; className?: string }>> = {
+const projectNavIcons = {
   overview: AppstoreOutlined,
   chat: MessageOutlined,
   plan: FileTextOutlined,
@@ -38,240 +59,323 @@ const projectNavIcons: Record<ProjectNavIcon, ComponentType<{ style?: CSSPropert
   build: BuildOutlined,
   repository: FolderOutlined,
   settings: SettingOutlined,
+} as const;
+
+type ProjectNavIcon = keyof typeof projectNavIcons;
+
+function resolveProjectNavKey(pathname: string, projectId: string): string {
+  const base = `/projects/${projectId}`;
+  if (pathname === base || pathname === `${base}/`) return "overview";
+  if (pathname.includes("/chat")) return "chat";
+  if (pathname.includes("/plan")) return "plan";
+  if (pathname.includes("/implement")) return "implement";
+  if (pathname.includes("/verify")) return "verify";
+  if (pathname.includes("/build")) return "build";
+  if (pathname.includes("/repository")) return "repository";
+  if (pathname.includes("/-/settings")) return "settings";
+  return "overview";
 }
 
 export function AppShell() {
-  const user = useAuthStore((s) => s.user)
-  const isAdmin = useAuthStore((s) => s.user?.is_admin ?? false)
-  const projects = useProjectStore((s) => s.projects)
-  const currentProject = useProjectStore((s) => s.current)
-  const fetchProjects = useProjectStore((s) => s.fetchProjects)
-  const { id: projectId } = useParams()
-  const location = useLocation()
-  const navigate = useNavigate()
-  const [search, setSearch] = useState('')
-  const [projectPickerOpen, setProjectPickerOpen] = useState(false)
-  const [notifyOpen, setNotifyOpen] = useState(false)
-  const [unreadCount, setUnreadCount] = useState(0)
-  const [notifications, setNotifications] = useState<Notification[]>([])
-
-  const perms = useProjectPermissions(currentProject)
-  const displayName = user?.name || user?.username
-
+  const { token } = theme.useToken();
+  const user = useAuthStore((s) => s.user);
+  const isAdmin = useAuthStore((s) => s.user?.is_admin ?? false);
+  const projects = useProjectStore((s) => s.projects);
+  const currentProject = useProjectStore((s) => s.current);
+  const fetchProjects = useProjectStore((s) => s.fetchProjects);
+  const { id: projectId } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [search, setSearch] = useState("");
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [notifyOpen, setNotifyOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const perms = useProjectPermissions(currentProject);
+  const displayName = user?.name || user?.username;
   const filteredProjects = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return projects
-    return projects.filter((p) => p.name.toLowerCase().includes(q))
-  }, [search, projects])
-
+    const q = search.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter((p) => p.name.toLowerCase().includes(q));
+  }, [search, projects]);
   const navItems = useMemo(() => {
-    if (!projectId) return [] as const
-    const base = `/projects/${projectId}`
-    const items: { to: string; label: string; icon: ProjectNavIcon }[] = [
-      { to: base, label: '概览', icon: 'overview' },
-      { to: `${base}/chat`, label: '对话', icon: 'chat' },
-      { to: `${base}/plan`, label: '编写计划', icon: 'plan' },
-      { to: `${base}/implement`, label: '编码实现', icon: 'implement' },
-      { to: `${base}/verify`, label: '验证评测', icon: 'verify' },
-      { to: `${base}/build`, label: '执行构建', icon: 'build' },
-      { to: `${base}/repository`, label: '仓库', icon: 'repository' },
-    ]
+    if (!projectId)
+      return [] as {
+        key: string;
+        to: string;
+        label: string;
+        icon: ProjectNavIcon;
+      }[];
+    const base = `/projects/${projectId}`;
+    const items: {
+      key: string;
+      to: string;
+      label: string;
+      icon: ProjectNavIcon;
+    }[] = [
+      { key: "overview", to: base, label: "概览", icon: "overview" },
+      { key: "chat", to: `${base}/chat`, label: "对话", icon: "chat" },
+      { key: "plan", to: `${base}/plan`, label: "编写计划", icon: "plan" },
+      {
+        key: "implement",
+        to: `${base}/implement`,
+        label: "编码实现",
+        icon: "implement",
+      },
+      {
+        key: "verify",
+        to: `${base}/verify`,
+        label: "验证评测",
+        icon: "verify",
+      },
+      { key: "build", to: `${base}/build`, label: "执行构建", icon: "build" },
+      {
+        key: "repository",
+        to: `${base}/repository`,
+        label: "仓库",
+        icon: "repository",
+      },
+    ];
     if (perms.canManageSettings) {
-      items.push({ to: `${base}/-/settings/general`, label: '设置', icon: 'settings' })
+      items.push({
+        key: "settings",
+        to: `${base}/-/settings/general`,
+        label: "设置",
+        icon: "settings",
+      });
     }
-    return items
-  }, [projectId, perms.canManageSettings])
-
-  const userMenuItems: MenuProps['items'] = [
+    return items;
+  }, [projectId, perms.canManageSettings]);
+  const siderMenuItems: MenuProps["items"] = useMemo(
+    () =>
+      navItems.map((item) => {
+        const Icon = projectNavIcons[item.icon];
+        return { key: item.key, icon: <Icon />, label: item.label };
+      }),
+    [navItems],
+  );
+  const selectedNavKey = projectId
+    ? resolveProjectNavKey(location.pathname, projectId)
+    : "";
+  const userMenuItems: MenuProps["items"] = [
     {
-      key: 'header',
-      type: 'group',
+      key: "header",
+      type: "group",
       label: (
-        <div className="user-menu__header">
-          <Avatar size={40} style={{ backgroundColor: '#fc6d26', flexShrink: 0 }}>
+        <Flex gap={12} align="center">
+          <Avatar
+            style={{ backgroundColor: token.colorPrimary, flexShrink: 0 }}
+          >
             {avatarInitials(displayName)}
           </Avatar>
           <div>
-            <div className="user-menu__display">{displayName}</div>
-            <div className="user-menu__username muted">@{user?.username}</div>
+            <Typography.Text strong>{displayName}</Typography.Text>
+            <br />
+            <Typography.Text type="secondary">
+              @{user?.username}
+            </Typography.Text>
           </div>
-        </div>
+        </Flex>
       ),
     },
-    { type: 'divider' },
-    { key: 'profile', label: '编辑资料', onClick: () => navigate('/profile') },
-    ...(isAdmin ? [{ key: 'admin', label: '管理区域', onClick: () => navigate('/admin') }] : []),
-    { type: 'divider' },
-    { key: 'signout', label: '退出登录', danger: true, onClick: () => navigate('/users/sign_out') },
-  ]
-
+    { type: "divider" },
+    { key: "profile", label: "编辑资料", onClick: () => navigate("/profile") },
+    ...(isAdmin
+      ? [{ key: "admin", label: "管理区域", onClick: () => navigate("/admin") }]
+      : []),
+    { type: "divider" },
+    {
+      key: "signout",
+      label: "退出登录",
+      danger: true,
+      onClick: () => navigate("/users/sign_out"),
+    },
+  ];
   useEffect(() => {
     if (!projects.length) {
-      fetchProjects()
+      fetchProjects();
     }
-  }, [projects.length, fetchProjects])
-
+  }, [projects.length, fetchProjects]);
   useEffect(() => {
-    setProjectPickerOpen(false)
-    setNotifyOpen(false)
-  }, [location.pathname])
-
+    setProjectPickerOpen(false);
+    setNotifyOpen(false);
+  }, [location.pathname]);
   useEffect(() => {
-    let cancelled = false
-
+    let cancelled = false;
     async function loadNotifications() {
-      if (!user) return
+      if (!user) return;
       try {
         const [countRes, listRes] = await Promise.all([
           notificationsApi.unreadCount(),
           notificationsApi.listNotifications(),
-        ])
+        ]);
         if (!cancelled) {
-          setUnreadCount(countRes.count)
-          setNotifications(listRes.notifications)
+          setUnreadCount(countRes.count);
+          setNotifications(listRes.notifications);
         }
       } catch {
         /* ignore */
       }
     }
-
-    loadNotifications()
-    const timer = setInterval(loadNotifications, 30000)
-
+    loadNotifications();
+    const timer = setInterval(loadNotifications, 30000);
     const unsubscribe = subscribeNotificationStream(() => {
-      loadNotifications()
-    })
-
+      loadNotifications();
+    });
     return () => {
-      cancelled = true
-      clearInterval(timer)
-      unsubscribe()
-    }
-  }, [user])
-
+      cancelled = true;
+      clearInterval(timer);
+      unsubscribe();
+    };
+  }, [user]);
   async function markAllRead() {
-    await notificationsApi.markAllRead()
-    setUnreadCount(0)
-    setNotifications((prev) => prev.map((n) => ({ ...n, read_at: n.read_at || new Date().toISOString() })))
+    await notificationsApi.markAllRead();
+    setUnreadCount(0);
+    setNotifications((prev) =>
+      prev.map((n) => ({
+        ...n,
+        read_at: n.read_at || new Date().toISOString(),
+      })),
+    );
   }
-
   async function markRead(n: Notification) {
     if (!n.read_at) {
-      await notificationsApi.markRead(n.id)
+      await notificationsApi.markRead(n.id);
     }
-    if (n.link) navigate(n.link)
-    setNotifyOpen(false)
+    if (n.link) navigate(n.link);
+    setNotifyOpen(false);
     const [countRes, listRes] = await Promise.all([
       notificationsApi.unreadCount(),
       notificationsApi.listNotifications(),
-    ])
-    setUnreadCount(countRes.count)
-    setNotifications(listRes.notifications)
+    ]);
+    setUnreadCount(countRes.count);
+    setNotifications(listRes.notifications);
   }
-
-  const projectMenuItems = useMemo((): MenuProps['items'] => {
-    const items: MenuProps['items'] = filteredProjects.map((p) => ({
+  const projectMenuItems = useMemo((): MenuProps["items"] => {
+    const items: MenuProps["items"] = filteredProjects.map((p) => ({
       key: p.id,
       icon: (
-        <Avatar size={28} shape="square" style={{ backgroundColor: '#fc6d26', flexShrink: 0 }}>
+        <Avatar
+          size={28}
+          shape="square"
+          style={{ backgroundColor: token.colorPrimary, flexShrink: 0 }}
+        >
           {avatarInitials(p.name)}
         </Avatar>
       ),
       label: p.name,
-    }))
-
+    }));
     if (!items.length) {
-      items.push({ key: 'empty', label: '未找到项目', disabled: true })
+      items.push({ key: "empty", label: "未找到项目", disabled: true });
     }
-
-    items.push(
-      { type: 'divider' },
-      { key: 'new', label: '创建新项目' },
-    )
-
-    return items
-  }, [filteredProjects])
-
+    items.push({ type: "divider" }, { key: "new", label: "创建新项目" });
+    return items;
+  }, [filteredProjects, token.colorPrimary]);
   function onProjectMenuClick({ key }: { key: string }) {
-    setProjectPickerOpen(false)
-    if (key === 'new') {
-      navigate('/projects/new')
-    } else if (key !== 'empty') {
-      navigate(`/projects/${key}`)
+    setProjectPickerOpen(false);
+    if (key === "new") {
+      navigate("/projects/new");
+    } else if (key !== "empty") {
+      navigate(`/projects/${key}`);
     }
   }
-
   function onProjectPickerOpenChange(open: boolean) {
-    setProjectPickerOpen(open)
-    if (!open) setSearch('')
+    setProjectPickerOpen(open);
+    if (!open) setSearch("");
   }
-
+  function onSiderMenuClick({ key }: { key: string }) {
+    const item = navItems.find((n) => n.key === key);
+    if (item) navigate(item.to);
+  }
   return (
-    <div className="app-shell">
-      <header className="top-bar">
-        <div className="top-bar__left">
+    <Layout style={{ minHeight: "100vh" }}>
+      <Header
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "0 16px",
+          background: token.colorBgContainer,
+          borderBottom: `1px solid ${token.colorBorderSecondary}`,
+        }}
+      >
+        <Flex align="center" gap={8} wrap="nowrap">
           <MatrixLogoLink />
-          <nav className="top-bar__nav">
-            <Dropdown
-              open={projectPickerOpen}
-              onOpenChange={onProjectPickerOpenChange}
-              destroyOnHidden
-              placement="bottomLeft"
-              trigger={['click']}
-              menu={{
-                items: projectMenuItems,
-                onClick: onProjectMenuClick,
-                style: { maxHeight: 280, overflow: 'auto', boxShadow: 'none', minWidth: 280 },
-              }}
-              popupRender={(menu) => (
-                <div className="project-picker">
-                  <div className="project-picker__search">
-                    <Input
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      placeholder="搜索项目"
-                      prefix={<SearchOutlined />}
-                      allowClear
-                      onClick={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => e.stopPropagation()}
-                    />
-                  </div>
-                  {menu}
-                </div>
-              )}
-            >
-              <Button type="text" className="top-bar__nav-link">项目</Button>
-            </Dropdown>
-            <Link to="/groups" className="top-bar__nav-link">组</Link>
-          </nav>
+          <Dropdown
+            open={projectPickerOpen}
+            onOpenChange={onProjectPickerOpenChange}
+            destroyOnHidden
+            placement="bottomLeft"
+            trigger={["click"]}
+            menu={{
+              items: projectMenuItems,
+              onClick: onProjectMenuClick,
+              style: { maxHeight: 280, overflow: "auto", minWidth: 280 },
+            }}
+            popupRender={(menu) => (
+              <Card size="small" styles={{ body: { padding: 8 } }}>
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="搜索项目"
+                  prefix={<SearchOutlined />}
+                  allowClear
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  style={{ marginBottom: 4 }}
+                />
+                {menu}
+              </Card>
+            )}
+          >
+            <Button type="text">项目</Button>
+          </Dropdown>
+          <Link to="/groups">
+            <Button type="text">组</Button>
+          </Link>
           {projectId && currentProject && (
-            <div className="top-bar__breadcrumb">
-              <span className="top-bar__sep">/</span>
-              <Link to={`/projects/${projectId}`}>{currentProject.name}</Link>
-            </div>
+            <Breadcrumb
+              items={[
+                {
+                  title: (
+                    <Link to={`/projects/${projectId}`}>
+                      {currentProject.name}
+                    </Link>
+                  ),
+                },
+              ]}
+              style={{ marginLeft: 8 }}
+            />
           )}
-        </div>
-        <div className="top-bar__right">
+        </Flex>
+        <Space>
           <Dropdown
             open={notifyOpen}
             onOpenChange={setNotifyOpen}
             destroyOnHidden
-            trigger={['click']}
+            trigger={["click"]}
             placement="bottomRight"
             popupRender={() => (
               <Card
                 size="small"
                 title="通知"
-                extra={unreadCount > 0 ? (
-                  <Button type="link" size="small" onClick={markAllRead}>
-                    全部已读
-                  </Button>
-                ) : undefined}
+                extra={
+                  unreadCount > 0 ? (
+                    <Button type="link" size="small" onClick={markAllRead}>
+                      全部已读
+                    </Button>
+                  ) : undefined
+                }
                 style={{ width: 320 }}
-                styles={{ body: { maxHeight: 360, overflow: 'auto', padding: 0 } }}
+                styles={{
+                  body: { maxHeight: 360, overflow: "auto", padding: 0 },
+                }}
               >
                 {!notifications.length ? (
-                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无通知" />
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description="暂无通知"
+                  />
                 ) : (
                   <List
                     size="small"
@@ -280,18 +384,27 @@ export function AppShell() {
                     renderItem={(n) => (
                       <List.Item
                         onClick={() => markRead(n)}
-                        style={{ cursor: 'pointer', paddingInline: 16 }}
+                        style={{ cursor: "pointer", paddingInline: 16 }}
                       >
                         <List.Item.Meta
-                          title={<Typography.Text strong={!n.read_at}>{n.title}</Typography.Text>}
-                          description={(
+                          title={
+                            <Typography.Text strong={!n.read_at}>
+                              {n.title}
+                            </Typography.Text>
+                          }
+                          description={
                             <>
-                              <Typography.Paragraph style={{ marginBottom: 4 }}>{n.body}</Typography.Paragraph>
-                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                              <Typography.Paragraph style={{ marginBottom: 4 }}>
+                                {n.body}
+                              </Typography.Paragraph>
+                              <Typography.Text
+                                type="secondary"
+                                style={{ fontSize: 12 }}
+                              >
                                 {formatRelativeTime(n.created_at)}
                               </Typography.Text>
                             </>
-                          )}
+                          }
                         />
                       </List.Item>
                     )}
@@ -309,58 +422,69 @@ export function AppShell() {
               />
             </Badge>
           </Dropdown>
-          <Button type="text" className="top-bar__action" title="新建项目" onClick={() => navigate('/projects/new')}>
-            <PlusOutlined />
-            <span className="top-bar__action-label">新建</span>
+          <Button
+            type="text"
+            title="新建项目"
+            icon={<PlusOutlined />}
+            onClick={() => navigate("/projects/new")}
+          >
+            新建
           </Button>
           <Dropdown
             menu={{ items: userMenuItems }}
-            trigger={['click']}
+            trigger={["click"]}
             placement="bottomRight"
             destroyOnHidden
           >
-            <Button type="text" className="user-menu__trigger">
-              <Avatar size={26} style={{ backgroundColor: '#fc6d26', flexShrink: 0 }}>
-                {avatarInitials(displayName)}
-              </Avatar>
-              <DownOutlined className="user-menu__chevron" style={{ fontSize: 10 }} />
+            <Button type="text">
+              <Space size={4}>
+                <Avatar
+                  size={26}
+                  style={{ backgroundColor: token.colorPrimary }}
+                >
+                  {avatarInitials(displayName)}
+                </Avatar>
+                <DownOutlined style={{ fontSize: 10 }} />
+              </Space>
             </Button>
           </Dropdown>
-        </div>
-      </header>
-      <div className="app-shell__body">
+        </Space>
+      </Header>
+      <Layout>
         {projectId && currentProject && (
-          <aside className="project-sidebar">
-            <Link to={`/projects/${projectId}`} className="project-sidebar__head">
-              <Avatar size={32} shape="square" style={{ backgroundColor: '#fc6d26', flexShrink: 0 }}>
+          <Sider
+            width={220}
+            style={{
+              background: token.colorBgContainer,
+              borderRight: `1px solid ${token.colorBorderSecondary}`,
+            }}
+          >
+            <Flex align="center" gap={8} style={{ padding: "16px 16px 8px" }}>
+              <Avatar
+                shape="square"
+                style={{ backgroundColor: token.colorPrimary, flexShrink: 0 }}
+              >
                 {avatarInitials(currentProject.name)}
               </Avatar>
-              <span className="project-sidebar__name">{currentProject.name}</span>
-            </Link>
-            <nav className="project-sidebar__nav">
-              {navItems.map((item) => {
-                const Icon = projectNavIcons[item.icon]
-                return (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    end={item.icon === 'overview'}
-                    className={({ isActive }) => `project-sidebar__link${isActive ? ' nav-link-active' : ''}`}
-                  >
-                    <Icon className="matrix-nav-icon" style={{ fontSize: 16 }} />
-                    <span>{item.label}</span>
-                  </NavLink>
-                )
-              })}
-            </nav>
-          </aside>
+              <Typography.Text strong ellipsis style={{ flex: 1 }}>
+                {currentProject.name}
+              </Typography.Text>
+            </Flex>
+            <Menu
+              mode="inline"
+              selectedKeys={[selectedNavKey]}
+              items={siderMenuItems}
+              onClick={onSiderMenuClick}
+              style={{ borderInlineEnd: "none" }}
+            />
+          </Sider>
         )}
-        <main className="app-shell__main">
-          <div className="app-shell__content page-container">
+        <Content style={{ padding: 24, background: token.colorBgLayout }}>
+          <div style={{ maxWidth: 1280, margin: "0 auto" }}>
             <Outlet />
           </div>
-        </main>
-      </div>
-    </div>
-  )
+        </Content>
+      </Layout>
+    </Layout>
+  );
 }

@@ -60,7 +60,6 @@ func execFileEdit(ctx context.Context, args map[string]any) (string, error) {
 	oldStr, _ := getString(args, "old_string")
 	newStr, _ := getString(args, "new_string")
 	replaceAll, _ := args["replace_all"].(bool)
-
 	resolvedPath, resolveErr := ResolveAndValidateToolPath(ctx, filePath)
 	if resolveErr != nil {
 		return "", fmt.Errorf("str_replace_editor: %w", resolveErr)
@@ -96,7 +95,6 @@ func execFileEdit(ctx context.Context, args map[string]any) (string, error) {
 	if !fileExists {
 		return "", fmt.Errorf("str_replace_editor: 文件不存在: %s", filePath)
 	}
-
 	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
 		return "", fmt.Errorf("str_replace_editor: 创建目录失败: %w", err)
 	}
@@ -126,11 +124,9 @@ func execFileEdit(ctx context.Context, args map[string]any) (string, error) {
 	} else {
 		newContent = strings.Replace(content, oldStr, newStr, 1)
 	}
-
 	if err := os.WriteFile(filePath, []byte(newContent), 0o644); err != nil {
 		return "", fmt.Errorf("str_replace_editor: 写入失败: %w", err)
 	}
-
 	if replaceAll && matches > 1 {
 		return fmt.Sprintf("已更新 %s（替换了 %d 处匹配）", filePath, matches), nil
 	}

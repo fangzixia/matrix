@@ -75,21 +75,17 @@ type state struct {
 //
 // 放在 query 包中，使 Coordinator Worker 与恢复中的 Worker 均走同一套 pre-request 流水线。
 type ContextPolicy struct {
-	// MicroCompactThreshold is the estimated message-token threshold that
-	// triggers clearing older tool results. 0 disables micro compaction.
+	// MicroCompactThreshold 为触发清理较早工具结果的估算消息 token 阈值；0 表示禁用微压缩。
 	MicroCompactThreshold int
-	// KeepRecentToolResults keeps the newest N tool results intact when micro
-	// compaction runs. Values below 1 are normalized to 1.
+	// KeepRecentToolResults 在微压缩时保留最近 N 条工具结果；小于 1 的值会规范化为 1。
 	KeepRecentToolResults int
-	// ClearedPlaceholder replaces old tool result content.
+	// ClearedPlaceholder 用于替换被清理的旧工具结果内容。
 	ClearedPlaceholder string
-	// ContextLimitTokens is the model context window. When set, Run prevents
-	// estimated input + MaxTokens + margin from exceeding this value.
+	// ContextLimitTokens 为模型上下文窗口大小；设置后 Run 会阻止估算输入 + MaxTokens + 余量超过该值。
 	ContextLimitTokens int
-	// ContextSafetyMarginTokens reserves extra room for estimation error and
-	// provider-side message/tool overhead.
+	// ContextSafetyMarginTokens 为估算误差及提供方消息/工具开销预留额外 token 余量。
 	ContextSafetyMarginTokens int
-	// MaxAsyncResultRunes limits injected async worker result messages.
+	// MaxAsyncResultRunes 限制注入的异步 Worker 结果消息长度（按 rune 计）。
 	MaxAsyncResultRunes int
 	// AutoCompactThreshold 为估算 token 达到该值时触发 LLM 全量会话摘要（0 禁用）。
 	// 达到该阈值时触发 LLM 全量会话摘要。
@@ -128,7 +124,7 @@ type Config struct {
 	// HasPendingAsync 返回当前是否还有未完成的异步子 Agent。
 	// nil 或返回 false 时，queryLoop 不等待异步结果，直接正常结束。
 	HasPendingAsync func() bool
-	// ContextPolicy configures query-loop owned context management.
+	// ContextPolicy 配置 query 循环负责的上下文管理策略。
 	ContextPolicy ContextPolicy
 	// MaxToolResultRunes 限制单条 tool 消息写入历史的最大字符数（按 Unicode rune 计）；
 	// 超出部分截断并追加省略标记。0 表示不限制。

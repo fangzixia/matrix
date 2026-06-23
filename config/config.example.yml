@@ -36,6 +36,3 @@ auth:
   bootstrap:
     admin_username: root
     admin_password: "${MATRIX_BOOTSTRAP_PASSWORD:-changeme}"  # 首装管理员密码
-
-# 模型、MCP、Git、Worker 并发、流水线等运行参数请在 Web 管理端配置：
-# root 用户登录 → 管理区域 → 系统配置（/admin/system），写入数据库后覆盖代码默认值。

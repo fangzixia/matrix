@@ -4,12 +4,11 @@ package job
 import (
 	"context"
 	"errors"
+	"matrix/internal/platform/db/models"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-
-	"matrix/internal/platform/db/models"
 )
 
 // Executor 执行已认领的 Run 任务。

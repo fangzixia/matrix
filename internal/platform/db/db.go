@@ -3,14 +3,13 @@ package db
 
 import (
 	"fmt"
+	"matrix/internal/platform/config"
+	"matrix/internal/platform/db/models"
 	"time"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
-
-	"matrix/internal/platform/config"
-	"matrix/internal/platform/db/models"
 )
 
 // Open 打开 PostgreSQL 连接并配置连接池。

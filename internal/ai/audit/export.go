@@ -4,15 +4,14 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"matrix/internal/platform/storage"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"matrix/internal/platform/storage"
 )
 
-// ListSessions returns recent session indexes (newest first).
+// ListSessions 返回最近会话索引列表（按时间倒序）。
 func ListSessions(sessionsDir string, limit int) ([]SessionIndex, error) {
 	dir := sessionsDir
 	entries, err := os.ReadDir(dir)
@@ -55,7 +54,7 @@ func ListSessions(sessionsDir string, limit int) ([]SessionIndex, error) {
 	return out, nil
 }
 
-// ReadSession loads meta and events for a session.
+// ReadSession 加载指定会话的 meta 与事件。
 func ReadSession(sessionsDir, sessionID string, opts ExportOptions) (ExportBundle, error) {
 	if sessionsDir == "" || sessionID == "" {
 		return ExportBundle{}, fmt.Errorf("audit: sessions dir or session_id empty")
@@ -63,18 +62,15 @@ func ReadSession(sessionsDir, sessionID string, opts ExportOptions) (ExportBundl
 	dir := sessionsDir
 	metaPath := filepath.Join(dir, sessionID+".meta.json")
 	jsonlPath := filepath.Join(dir, sessionID+".jsonl")
-
 	var meta SessionMeta
 	if data, err := os.ReadFile(metaPath); err == nil {
 		_ = json.Unmarshal(data, &meta)
 	}
 	meta.SessionID = sessionID
-
 	events, err := readJSONLEvents(jsonlPath, opts.MaxEvents)
 	if err != nil {
 		return ExportBundle{}, err
 	}
-
 	return ExportBundle{
 		Meta:      meta,
 		Events:    events,
@@ -84,6 +80,7 @@ func ReadSession(sessionsDir, sessionID string, opts ExportOptions) (ExportBundl
 	}, nil
 }
 
+// readJSONLEvents 从 JSONL 文件读取审计事件列表。
 func readJSONLEvents(path string, maxEvents int) ([]Event, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -93,7 +90,6 @@ func readJSONLEvents(path string, maxEvents int) ([]Event, error) {
 		return nil, err
 	}
 	defer f.Close()
-
 	var all []Event
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -117,7 +113,7 @@ func readJSONLEvents(path string, maxEvents int) ([]Event, error) {
 	return all, nil
 }
 
-// FormatForLLM renders a Markdown timeline for pasting into an LLM.
+// FormatForLLM 渲染 Markdown 时间线，便于粘贴给 LLM 分析。
 func FormatForLLM(bundle ExportBundle) string {
 	var b strings.Builder
 	m := bundle.Meta
@@ -157,7 +153,6 @@ func FormatForLLM(bundle ExportBundle) string {
 	if bundle.Subagents != "" {
 		b.WriteString(fmt.Sprintf("- **subagents_dir**: %s (per-agent *.jsonl sidechains)\n", bundle.Subagents))
 	}
-
 	b.WriteString("\n## Timeline\n\n")
 	for _, ev := range bundle.Events {
 		line := fmt.Sprintf("`%s` **%s**", ev.Ts, ev.Event)
@@ -181,17 +176,15 @@ func FormatForLLM(bundle ExportBundle) string {
 		}
 		b.WriteString("\n")
 	}
-
 	b.WriteString("## Notes for analysis\n\n")
 	b.WriteString("- Use stop_reason and error to diagnose failures.\n")
 	b.WriteString("- Review turn.tool_call / turn.tool_result for tool-related issues.\n")
 	b.WriteString("- context.compact events show when history was compressed.\n")
 	b.WriteString("- For full sub-agent streams, inspect files under subagents_dir.\n")
-
 	return b.String()
 }
 
-// WriteExportFiles writes LLM markdown and optionally copies JSONL to destDir.
+// WriteExportFiles 写入 LLM Markdown，并可选将 JSONL 复制到 destDir。
 func WriteExportFiles(bundle ExportBundle, destDir string) (mdPath, jsonlCopy string, err error) {
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return "", "", err
@@ -216,7 +209,7 @@ func WriteExportFiles(bundle ExportBundle, destDir string) (mdPath, jsonlCopy st
 	return mdPath, jsonlCopy, nil
 }
 
-// ToDiagnosticDTO converts a bundle for Bridge API (default 200 tail events).
+// ToDiagnosticDTO 将数据包转换为 Bridge API 用的 DiagnosticDTO（默认保留末尾 200 条事件）。
 func ToDiagnosticDTO(bundle ExportBundle, maxTail int) DiagnosticDTO {
 	events := bundle.Events
 	if maxTail <= 0 {

@@ -4,12 +4,11 @@ package iam
 import (
 	"context"
 	"errors"
+	"matrix/internal/platform/db/models"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-
-	"matrix/internal/platform/db/models"
 )
 
 // Role 是项目成员角色。
@@ -210,6 +209,7 @@ func (e *Enforcer) Can(ctx context.Context, userID uuid.UUID, action, resourceTy
 	}
 }
 
+// roleForAction 将 IAM 动作映射为最低所需角色。
 func roleForAction(action string) Role {
 	switch action {
 	case "member:manage", "project:settings":

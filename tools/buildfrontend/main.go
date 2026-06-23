@@ -8,34 +8,32 @@ import (
 	"path/filepath"
 )
 
+// main 程序入口。
 func main() {
 	if os.Getenv("SKIP_FRONTEND") != "" {
 		return
 	}
-
 	root, err := findModuleRoot()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-
 	frontend := filepath.Join(root, "frontend")
 	if _, err := os.Stat(filepath.Join(frontend, "package.json")); err != nil {
 		fmt.Fprintf(os.Stderr, "frontend/package.json not found under %s\n", root)
 		os.Exit(1)
 	}
-
 	if _, err := os.Stat(filepath.Join(frontend, "node_modules")); err != nil {
 		if err := runDir(frontend, "npm", "install"); err != nil {
 			os.Exit(1)
 		}
 	}
-
 	if err := runDir(frontend, "npm", "run", "build"); err != nil {
 		os.Exit(1)
 	}
 }
 
+// findModuleRoot 向上查找 Go 模块根目录。
 func findModuleRoot() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
@@ -53,6 +51,7 @@ func findModuleRoot() (string, error) {
 	}
 }
 
+// runDir 在指定目录执行命令并继承输出。
 func runDir(dir, name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir

@@ -4,16 +4,15 @@ import (
 	"context"
 	"fmt"
 	"matrix/internal/ai/audit"
+	"matrix/internal/ai/llm"
+	"matrix/internal/ai/stream"
+	"matrix/internal/ai/tools"
 	"matrix/internal/platform/logging"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-
-	"matrix/internal/ai/llm"
-	"matrix/internal/ai/stream"
-	"matrix/internal/ai/tools"
 )
 
 // logLinePrefix 返回非空的日志/事件行前缀（含尾部空格），用于区分父子 Agent 的 TAOR 循环。
@@ -25,6 +24,7 @@ func logLinePrefix(cfg Config) string {
 	return "[" + s + "] "
 }
 
+// sessionID 返回或生成当前会话 ID。
 func sessionID(cfg Config) string {
 	if cfg.SessionID != "" {
 		return cfg.SessionID
@@ -50,6 +50,7 @@ func RunSession(ctx context.Context, cfg Config, sink StreamSink) Result {
 	return result
 }
 
+// auditComponent 返回审计日志组件名。
 func auditComponent(cfg Config) string {
 	if strings.TrimSpace(cfg.LogPrefix) != "" {
 		return "coordinator:" + cfg.LogPrefix
@@ -57,6 +58,7 @@ func auditComponent(cfg Config) string {
 	return "query"
 }
 
+// publishResult 推送 TAOR 循环最终结果。
 func publishResult(ctx context.Context, sid string, sink StreamSink, r Result, start time.Time) {
 	if sink == nil {
 		return
@@ -88,6 +90,7 @@ func publishResult(ctx context.Context, sid string, sink StreamSink, r Result, s
 	}
 }
 
+// publish 将流式消息推送到 Sink。
 func publish(ctx context.Context, sink StreamSink, msg stream.Message) {
 	if sink == nil {
 		return
@@ -102,23 +105,18 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 		messages:  append([]Message(nil), cfg.InitialMessages...),
 		turnCount: 1,
 	}
-
 	for {
 		if err := ctx.Err(); err != nil {
 			return Result{StopReason: StopAborted, TurnCount: s.turnCount, Err: err, Messages: s.messages}
 		}
-
 		prepareHistoryForRequest(ctx, cfg, &s.messages)
-
 		if cfg.MaxTurns > 0 && s.turnCount > cfg.MaxTurns {
 			logging.InfoCtx(ctx, "loop: max turns reached", "turns", s.turnCount)
 			return Result{StopReason: StopMaxTurns, TurnCount: s.turnCount, Messages: s.messages}
 		}
-
 		trans := transitionStr(s.transition)
 		summary := fmt.Sprintf("%s第 %d 轮（跃迁: %s）", logLinePrefix(cfg), s.turnCount, trans)
 		publish(ctx, sink, stream.TurnProgress(sid, s.turnCount, trans, summary))
-
 		ctx = logging.With(ctx, logging.Fields{
 			logging.FieldSessionID: sid,
 			logging.FieldTurn:      fmt.Sprint(s.turnCount),
@@ -136,12 +134,10 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 			"message_count", len(s.messages),
 			"transition", trans,
 		)
-
 		turn, err := think(ctx, cfg, s.turnCount, s.messages, sink)
 		if err != nil {
 			return Result{StopReason: StopModelError, TurnCount: s.turnCount, Err: err, Messages: s.messages}
 		}
-
 		assistantMsg := Message{
 			Role:      RoleAssistant,
 			Content:   turn.Content,
@@ -149,12 +145,9 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 			ToolCalls: turn.ToolCalls,
 		}
 		s.messages = append(s.messages, assistantMsg)
-
 		toolBlocks := toolCallsToBlocks(turn.ToolCalls)
 		publish(ctx, sink, stream.Assistant(sid, turn.Content, turn.Thinking, toolBlocks, turn.FinishReason))
-
 		needsFollowUp := len(turn.ToolCalls) > 0
-
 		if !needsFollowUp {
 			if blockingErr := report(s.messages, cfg.StopHook); blockingErr != "" {
 				logging.InfoCtx(ctx, "loop: stop hook blocking", "error", blockingErr)
@@ -168,15 +161,12 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 				}
 				continue
 			}
-
 			prevLen := len(s.messages)
 			s.messages = drainAsyncResults(cfg, s.turnCount, s.messages, cfg.AsyncResults, cfg.ContextPolicy.MaxAsyncResultRunes)
-
 			if len(s.messages) > prevLen {
 				logging.InfoCtx(ctx, "loop: async results drained", "new_messages", len(s.messages)-prevLen)
 				continue
 			}
-
 			if cfg.HasPendingAsync != nil && cfg.HasPendingAsync() {
 				logging.InfoCtx(ctx, "loop: waiting for async sub-agents")
 				select {
@@ -191,7 +181,6 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 					continue
 				}
 			}
-
 			return Result{
 				StopReason: StopCompleted,
 				TurnCount:  s.turnCount,
@@ -199,10 +188,8 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 				Messages:   s.messages,
 			}
 		}
-
 		toolResults := act(ctx, cfg, s.turnCount, turn.ToolCalls, sink)
 		observeMsgs := observe(ctx, cfg, s.turnCount, toolResults)
-
 		allMsgs := append(s.messages, observeMsgs...)
 		allMsgs = drainAsyncResults(cfg, s.turnCount, allMsgs, cfg.AsyncResults, cfg.ContextPolicy.MaxAsyncResultRunes)
 		s = state{
@@ -210,7 +197,6 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 			turnCount:  s.turnCount + 1,
 			transition: new(TransitionNextTurn),
 		}
-
 		logging.InfoCtx(ctx, "loop: turn completed",
 			"completed_turn", s.turnCount-1,
 			"tool_calls", len(turn.ToolCalls),
@@ -218,6 +204,7 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 	}
 }
 
+// emitAsyncAudit 记录异步子 Agent 相关审计事件。
 func emitAsyncAudit(cfg Config, turn int, msg Message) {
 	if cfg.Audit == nil {
 		return
@@ -227,6 +214,7 @@ func emitAsyncAudit(cfg Config, turn int, msg Message) {
 	})
 }
 
+// drainAsyncResults 非阻塞消费异步 Worker 结果通道。
 func drainAsyncResults(cfg Config, turn int, msgs []Message, ch <-chan Message, maxRunes int) []Message {
 	if ch == nil {
 		return msgs
@@ -242,6 +230,7 @@ func drainAsyncResults(cfg Config, turn int, msgs []Message, ch <-chan Message, 
 	}
 }
 
+// toolCallsToBlocks 将工具调用列表转换为 LLM 消息块。
 func toolCallsToBlocks(calls []llm.ToolCall) []stream.ToolUseBlock {
 	out := make([]stream.ToolUseBlock, 0, len(calls))
 	for _, tc := range calls {
@@ -254,6 +243,7 @@ func toolCallsToBlocks(calls []llm.ToolCall) []stream.ToolUseBlock {
 	return out
 }
 
+// think 执行 TAOR 循环的 T（思考）阶段：调用 LLM 并流式接收响应。
 func think(
 	ctx context.Context,
 	cfg Config,
@@ -271,7 +261,6 @@ func think(
 		})
 	}
 	logging.InfoCtx(ctx, "loop: llm request", "model", cfg.Model, "history_len", len(history), "tokens_est", tokensEst)
-
 	req := llm.ChatRequest{
 		Model:     cfg.Model,
 		Messages:  buildChatMessages(cfg.SystemPrompt, history),
@@ -280,9 +269,7 @@ func think(
 	if cfg.Registry != nil {
 		req.Tools = cfg.Registry.LLMTools()
 	}
-
 	publish(ctx, sink, stream.MessageStart(sid))
-
 	var finalTurn *llm.AssistantTurn
 	blockIndex := 0
 	for ev := range cfg.LLM.Stream(ctx, req) {
@@ -299,13 +286,10 @@ func think(
 			finalTurn = ev.Turn
 		}
 	}
-
 	publish(ctx, sink, stream.MessageStop(sid))
-
 	if finalTurn == nil {
 		return nil, fmt.Errorf("loop: 模型流结束但未收到完整 turn")
 	}
-
 	if cfg.Audit != nil {
 		cfg.Audit.Emit("turn.llm_response", turn, auditComponent(cfg), map[string]any{
 			"finish_reason":    finalTurn.FinishReason,
@@ -322,6 +306,7 @@ func think(
 	return finalTurn, nil
 }
 
+// act 执行 TAOR 循环的 A（行动）阶段：执行工具调用。
 func act(
 	ctx context.Context,
 	cfg Config,
@@ -342,7 +327,6 @@ func act(
 			})
 		}
 	}
-
 	onProgress := func(toolUseID string, data stream.ToolProgressData) {
 		msg := stream.Message{
 			Type:      stream.TypeProgress,
@@ -353,7 +337,6 @@ func act(
 		}
 		publish(ctx, sink, msg)
 	}
-
 	results := tools.RunTools(ctx, toolCalls, cfg.Registry, cfg.CanUseTool, onProgress)
 	for _, r := range results {
 		logging.InfoCtx(ctx, "loop: tool result", "tool_name", r.ToolName, "is_error", r.IsError)
@@ -361,6 +344,7 @@ func act(
 	return results
 }
 
+// observe 执行 TAOR 循环的 O（观察）阶段：将工具结果打包为用户消息。
 func observe(ctx context.Context, cfg Config, turn int, results []tools.Result) []Message {
 	msgs := make([]Message, 0, len(results))
 	for _, r := range results {
@@ -387,6 +371,7 @@ func observe(ctx context.Context, cfg Config, turn int, results []tools.Result) 
 	return msgs
 }
 
+// truncateRunes 按 Unicode rune 截断字符串。
 func truncateRunes(s string, maxRunes int) string {
 	if maxRunes <= 0 {
 		return s
@@ -401,6 +386,7 @@ func truncateRunes(s string, maxRunes int) string {
 	return string(runes) + "\n…（工具输出已按 MaxToolResultRunes 截断）"
 }
 
+// report 执行 TAOR 循环的 R（汇报）阶段：Stop Hook 检查并输出最终答案。
 func report(history []Message, stopHook func([]Message) string) string {
 	if stopHook == nil {
 		return ""
@@ -408,16 +394,15 @@ func report(history []Message, stopHook func([]Message) string) string {
 	return stopHook(history)
 }
 
+// buildChatMessages 将内部 Message 列表转换为 LLM API 消息格式。
 func buildChatMessages(systemPrompt string, history []Message) []llm.ChatMessage {
 	var msgs []llm.ChatMessage
-
 	if systemPrompt != "" {
 		msgs = append(msgs, llm.ChatMessage{
 			Role:    string(RoleSystem),
 			Content: systemPrompt,
 		})
 	}
-
 	for _, m := range history {
 		switch m.Role {
 		case RoleUser:
@@ -425,7 +410,6 @@ func buildChatMessages(systemPrompt string, history []Message) []llm.ChatMessage
 				Role:    "user",
 				Content: m.Content,
 			})
-
 		case RoleAssistant:
 			msg := llm.ChatMessage{
 				Role:             "assistant",
@@ -437,7 +421,6 @@ func buildChatMessages(systemPrompt string, history []Message) []llm.ChatMessage
 				msg.Content = ""
 			}
 			msgs = append(msgs, msg)
-
 		case RoleTool:
 			msgs = append(msgs, llm.ChatMessage{
 				Role:       "tool",
@@ -445,7 +428,6 @@ func buildChatMessages(systemPrompt string, history []Message) []llm.ChatMessage
 				ToolCallID: m.ToolCallID,
 				Name:       m.ToolName,
 			})
-
 		case RoleSystem:
 			msgs = append(msgs, llm.ChatMessage{
 				Role:    "system",
@@ -456,6 +438,7 @@ func buildChatMessages(systemPrompt string, history []Message) []llm.ChatMessage
 	return msgs
 }
 
+// transitionStr 将跃迁原因枚举格式化为字符串。
 func transitionStr(t *TransitionReason) string {
 	if t == nil {
 		return "initial"

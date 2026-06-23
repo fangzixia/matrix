@@ -75,17 +75,17 @@ type Message struct {
 	ParentAgentID   string  `json:"parent_agent_id,omitempty"`
 	ParentToolUseID *string `json:"parent_tool_use_id,omitempty"`
 
-	// progress
+	// progress 类型字段
 	ToolUseID string            `json:"tool_use_id,omitempty"`
 	Data      *ToolProgressData `json:"data,omitempty"`
 
-	// stream_event
+	// stream_event 类型字段
 	Event *StreamEventPayload `json:"event,omitempty"`
 
-	// assistant
+	// assistant 类型字段
 	Assistant *AssistantPayload `json:"message,omitempty"`
 
-	// result
+	// result 类型字段
 	Subtype      string `json:"subtype,omitempty"`
 	StopReason   string `json:"stop_reason,omitempty"`
 	NumTurns     int    `json:"num_turns,omitempty"`
@@ -145,10 +145,12 @@ type ToolUseBlock struct {
 	Input string `json:"input"`
 }
 
+// newUUID 生成新的 UUID 字符串。
 func newUUID() string {
 	return uuid.NewString()
 }
 
+// base 构造带公共字段的基础流式消息。
 func base(sessionID string) Message {
 	return Message{
 		SessionID: sessionID,
@@ -339,6 +341,7 @@ func ResultErrorMsg(sessionID, stopReason, errMsg string, numTurns int, duration
 	return m
 }
 
+// truncate 按 rune 数截断字符串。
 func truncate(s string, max int) string {
 	if max <= 0 || len(s) <= max {
 		return s

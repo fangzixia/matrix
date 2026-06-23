@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Writer appends session diagnostic events to sessionsDir.
+// Writer 将会话诊断事件追加写入 sessionsDir。
 type Writer struct {
 	mu        sync.Mutex
 	root      string
@@ -20,7 +20,7 @@ type Writer struct {
 	parentID  string
 }
 
-// NewWriter creates audit JSONL under sessionsDir.
+// NewWriter 在 sessionsDir 下创建审计 JSONL。
 func NewWriter(sessionsDir, workspacePath, sessionID string) *Writer {
 	if sessionsDir == "" || sessionID == "" {
 		return &Writer{}
@@ -43,7 +43,7 @@ func NewWriter(sessionsDir, workspacePath, sessionID string) *Writer {
 	return w
 }
 
-// SetAgentContext sets optional agent lineage for subsequent events.
+// SetAgentContext 为后续事件设置可选的 Agent 血缘信息。
 func (w *Writer) SetAgentContext(agentID, parentAgentID string) {
 	if w == nil {
 		return
@@ -54,7 +54,7 @@ func (w *Writer) SetAgentContext(agentID, parentAgentID string) {
 	w.parentID = parentAgentID
 }
 
-// SessionID returns the bound session id.
+// SessionID 返回绑定的会话 ID。
 func (w *Writer) SessionID() string {
 	if w == nil {
 		return ""
@@ -62,7 +62,7 @@ func (w *Writer) SessionID() string {
 	return w.sessionID
 }
 
-// JSONLPath returns the events file path.
+// JSONLPath 返回事件文件路径。
 func (w *Writer) JSONLPath() string {
 	if w == nil {
 		return ""
@@ -70,7 +70,7 @@ func (w *Writer) JSONLPath() string {
 	return w.jsonlPath
 }
 
-// Emit appends one audit event; failures are silent.
+// Emit 追加一条审计事件；失败时静默忽略。
 func (w *Writer) Emit(event string, turn int, component string, data map[string]any) {
 	if w == nil || w.sessionID == "" {
 		return
@@ -90,7 +90,7 @@ func (w *Writer) Emit(event string, turn int, component string, data map[string]
 	w.appendEvent(ev)
 }
 
-// EmitWithTool is Emit with tool_use_id set.
+// EmitWithTool 等同于 Emit，并设置 tool_use_id。
 func (w *Writer) EmitWithTool(event string, turn int, component, toolUseID string, data map[string]any) {
 	if w == nil || w.sessionID == "" {
 		return
@@ -111,7 +111,7 @@ func (w *Writer) EmitWithTool(event string, turn int, component, toolUseID strin
 	w.appendEvent(ev)
 }
 
-// UpdateMeta merges fields into meta.json (e.g. model, task on session.start).
+// UpdateMeta 将字段合并写入 meta.json（如 session.start 时的 model、task）。
 func (w *Writer) UpdateMeta(patch SessionMeta) {
 	if w == nil || w.metaPath == "" {
 		return
@@ -134,7 +134,7 @@ func (w *Writer) UpdateMeta(patch SessionMeta) {
 	w.writeMetaLocked(meta)
 }
 
-// Close finalizes meta.json with session end fields.
+// Close 写入会话结束字段并完成 meta.json。
 func (w *Writer) Close(meta SessionMeta) error {
 	if w == nil || w.metaPath == "" {
 		return nil
@@ -163,6 +163,7 @@ func (w *Writer) Close(meta SessionMeta) error {
 	return nil
 }
 
+// appendEvent 将审计事件追加写入 JSONL 文件。
 func (w *Writer) appendEvent(ev Event) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -175,12 +176,14 @@ func (w *Writer) appendEvent(ev Event) {
 	_ = enc.Encode(ev)
 }
 
+// writeMeta 写入会话 meta.json（加锁）。
 func (w *Writer) writeMeta(meta SessionMeta) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.writeMetaLocked(meta)
 }
 
+// readMetaLocked 在持锁状态下读取 meta.json。
 func (w *Writer) readMetaLocked() SessionMeta {
 	meta := SessionMeta{SessionID: w.sessionID, StartedAt: formatTimeUTC(w.started)}
 	data, err := os.ReadFile(w.metaPath)
@@ -194,6 +197,7 @@ func (w *Writer) readMetaLocked() SessionMeta {
 	return meta
 }
 
+// writeMetaLocked 在持锁状态下写入 meta.json。
 func (w *Writer) writeMetaLocked(meta SessionMeta) {
 	if meta.SessionID == "" {
 		meta.SessionID = w.sessionID

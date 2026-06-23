@@ -4,14 +4,13 @@ package group
 import (
 	"context"
 	"errors"
+	"matrix/internal/modules/iam"
+	"matrix/internal/platform/db/models"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-
-	"matrix/internal/modules/iam"
-	"matrix/internal/platform/db/models"
 )
 
 // GroupDTO 是用户组 API 返回的数据传输对象。
@@ -183,6 +182,7 @@ func (s *Service) RemoveMember(ctx context.Context, groupID, userID uuid.UUID) e
 		Delete(&models.GroupMember{}).Error
 }
 
+// enrich 为实体补充当前用户权限等扩展字段。
 func (s *Service) enrich(ctx context.Context, m *models.Group, userID uuid.UUID, isAdmin bool) *GroupDTO {
 	g := toDTO(m)
 	enforcer := iam.NewEnforcer(s.db)
@@ -199,6 +199,7 @@ func (s *Service) enrich(ctx context.Context, m *models.Group, userID uuid.UUID,
 	return g
 }
 
+// toDTO 将数据库模型转换为 API DTO。
 func toDTO(m *models.Group) *GroupDTO {
 	return &GroupDTO{
 		ID: m.ID, Name: m.Name, OwnerID: m.OwnerID,

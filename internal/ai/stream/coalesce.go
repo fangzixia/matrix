@@ -29,6 +29,7 @@ func NewCoalesceSink(inner Sink, sessionID string, interval time.Duration) *Coal
 	return c
 }
 
+// loop 运行流式消息合并器的后台刷新循环。
 func (c *CoalesceSink) loop(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -45,6 +46,7 @@ func (c *CoalesceSink) loop(interval time.Duration) {
 	}
 }
 
+// flush 将 pending 的流式 delta 写出到 Sink。
 func (c *CoalesceSink) flush() {
 	c.mu.Lock()
 	defer c.mu.Unlock()

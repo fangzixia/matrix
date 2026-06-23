@@ -7,6 +7,7 @@ var (
 	builtinToolNamesSet  map[string]struct{}
 )
 
+// loadBuiltinToolNames 加载内置工具名称列表。
 func loadBuiltinToolNames() {
 	builtinToolNamesOnce.Do(func() {
 		names := DefaultRegistry().Names()

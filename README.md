@@ -24,8 +24,8 @@ Matrix 是一款 **私有化 B/S Web 平台**，内置 AI Agent 内核，用于�
 | **项目管理** | 项目 CRUD、成员管理、Git 仓库绑定 |
 | **AI Chat / Run** | 自由对话与任务 Run，SSE 流式输出 |
 | **Git 工作区** | 按项目克隆/拉取，文件树浏览 |
-| **Harness 任务流** | Spec / Implement / Verify / Build / UI Scan |
-| **MCP** | YAML 配置 MCP 服务器（默认禁用 command MCP） |
+| **Harness 任务流** | Spec / Implement / Verify / Build |
+| **MCP** | Web 管理端配置 MCP 服务器（默认禁用 command MCP） |
 
 ---
 
@@ -52,7 +52,7 @@ Matrix 是一款 **私有化 B/S Web 平台**，内置 AI Agent 内核，用于�
 
 # 2. 配置
 cp config/config.example.yml config/config.yml
-# 编辑 database.dsn 与 ai.default_model.api_key
+# 编辑 database.dsn；模型、MCP 等请在 Web 管理端 /admin/system 配置
 
 # 3. 安装前端依赖（日常开发只需一次）
 cd frontend && npm install && cd ..

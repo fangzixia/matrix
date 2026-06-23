@@ -4,6 +4,10 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"matrix/internal/modules/repository"
+	"matrix/internal/platform/config"
+	"matrix/internal/platform/gitutil"
+	"matrix/internal/platform/storage"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,11 +15,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
-	"matrix/internal/modules/repository"
-	"matrix/internal/platform/config"
-	"matrix/internal/platform/gitutil"
-	"matrix/internal/platform/storage"
 )
 
 // Service 管理 Git 工作区：克隆、拉取、推送、文件树与多仓库解析。
@@ -23,6 +22,7 @@ type Service struct {
 	paths storage.Paths
 	git   config.GitConfig
 	repos *repository.Service
+	keys  ProjectKeyResolver
 }
 
 // NewService 创建工作区服务实例。
@@ -35,14 +35,27 @@ func (s *Service) UpdateGit(git config.GitConfig) {
 	s.git = git
 }
 
+// SetProjectKeyResolver 注入项目工作区目录键解析器。
+func (s *Service) SetProjectKeyResolver(r ProjectKeyResolver) {
+	s.keys = r
+}
+
+// ProjectWorkspaceKey 返回项目工作区目录键（项目编码）。
+func (s *Service) ProjectWorkspaceKey(ctx context.Context, projectID uuid.UUID) (string, error) {
+	if s.keys == nil {
+		return "", fmt.Errorf("workspace: project key resolver not configured")
+	}
+	return s.keys.ProjectWorkspaceKey(ctx, projectID)
+}
+
 // RepoRoot 返回项目默认仓库根目录。
-func (s *Service) RepoRoot(projectID uuid.UUID) string {
-	return s.namedRepoRoot(projectID, "")
+func (s *Service) RepoRoot(projectID uuid.UUID) (string, error) {
+	return s.namedRepoRoot(context.Background(), projectID, "")
 }
 
 // NamedRepoRoot 按仓库名返回根目录。
-func (s *Service) NamedRepoRoot(projectID uuid.UUID, repoName string) string {
-	return s.namedRepoRoot(projectID, repoName)
+func (s *Service) NamedRepoRoot(projectID uuid.UUID, repoName string) (string, error) {
+	return s.namedRepoRoot(context.Background(), projectID, repoName)
 }
 
 // SandboxRoot 解析 Run/API 使用的沙箱根目录（支持多仓 repository_id）。
@@ -55,21 +68,26 @@ func (s *Service) SandboxRoot(ctx context.Context, projectID uuid.UUID, reposito
 		if r.ProjectID != projectID {
 			return "", fmt.Errorf("repository does not belong to project")
 		}
-		return s.namedRepoRoot(projectID, r.Name), nil
+		return s.namedRepoRoot(ctx, projectID, r.Name)
 	}
 	if s.repos != nil {
 		if r, err := s.repos.GetDefault(ctx, projectID); err == nil {
-			return s.namedRepoRoot(projectID, r.Name), nil
+			return s.namedRepoRoot(ctx, projectID, r.Name)
 		}
 	}
-	return s.namedRepoRoot(projectID, "default"), nil
+	return s.namedRepoRoot(ctx, projectID, "default")
 }
 
-func (s *Service) namedRepoRoot(projectID uuid.UUID, repoName string) string {
+// namedRepoRoot 返回指定名称仓库的根目录。
+func (s *Service) namedRepoRoot(ctx context.Context, projectID uuid.UUID, repoName string) (string, error) {
 	if repoName == "" {
 		repoName = "default"
 	}
-	return storage.ProjectNamedRepoDir(s.paths, projectID.String(), repoName)
+	key, err := s.ProjectWorkspaceKey(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	return storage.ProjectNamedRepoDir(s.paths, key, repoName), nil
 }
 
 // EnsureClone 确保默认仓库已克隆。
@@ -79,7 +97,10 @@ func (s *Service) EnsureClone(ctx context.Context, projectID uuid.UUID, gitURL, 
 
 // EnsureRepo 确保指定仓库已克隆。
 func (s *Service) EnsureRepo(ctx context.Context, projectID uuid.UUID, name, gitURL, branch string) error {
-	root := s.namedRepoRoot(projectID, name)
+	root, err := s.namedRepoRoot(ctx, projectID, name)
+	if err != nil {
+		return err
+	}
 	if _, err := os.Stat(filepath.Join(root, ".git")); err == nil {
 		return s.PullNamed(ctx, projectID, name)
 	}
@@ -116,7 +137,10 @@ func (s *Service) Pull(ctx context.Context, projectID uuid.UUID) error {
 
 // PullNamed 拉取指定名称的仓库。
 func (s *Service) PullNamed(ctx context.Context, projectID uuid.UUID, name string) error {
-	root := s.namedRepoRoot(projectID, name)
+	root, err := s.namedRepoRoot(ctx, projectID, name)
+	if err != nil {
+		return err
+	}
 	cmd := exec.CommandContext(ctx, "git", "-C", root, "pull", "--ff-only")
 	if env := gitutil.SSHCommandEnv(s.git, s.remoteURL(ctx, projectID, name)); env != nil {
 		cmd.Env = env
@@ -164,7 +188,10 @@ func (s *Service) Push(ctx context.Context, projectID uuid.UUID, message string)
 
 // PushNamed 推送指定名称的仓库。
 func (s *Service) PushNamed(ctx context.Context, projectID uuid.UUID, name, message string) error {
-	root := s.namedRepoRoot(projectID, name)
+	root, err := s.namedRepoRoot(ctx, projectID, name)
+	if err != nil {
+		return err
+	}
 	if message == "" {
 		message = "matrix: agent changes"
 	}
@@ -273,12 +300,17 @@ func (s *Service) WriteFileFor(projectID uuid.UUID, repoName, rel, content strin
 	return os.WriteFile(full, []byte(content), 0o644)
 }
 
+// resolve 解析。
 func (s *Service) resolve(projectID uuid.UUID, rel string) (string, error) {
 	return s.resolveFor(projectID, "", rel)
 }
 
+// resolveFor 解析For。
 func (s *Service) resolveFor(projectID uuid.UUID, repoName, rel string) (string, error) {
-	root := s.namedRepoRoot(projectID, repoName)
+	root, err := s.namedRepoRoot(context.Background(), projectID, repoName)
+	if err != nil {
+		return "", err
+	}
 	rel = strings.TrimPrefix(filepath.Clean(rel), "/")
 	if rel == "." {
 		return root, nil
@@ -292,7 +324,10 @@ func (s *Service) resolveFor(projectID uuid.UUID, repoName, rel string) (string,
 
 // Status 返回 Git 工作区状态。
 func (s *Service) Status(ctx context.Context, projectID uuid.UUID) (string, error) {
-	root := s.namedRepoRoot(projectID, "default")
+	root, err := s.namedRepoRoot(context.Background(), projectID, "default")
+	if err != nil {
+		return "", err
+	}
 	cmd := exec.CommandContext(ctx, "git", "-C", root, "status", "--short")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -320,6 +355,7 @@ func (s *Service) ReadSeek(projectID uuid.UUID, rel string, max int) ([]byte, er
 	return buf[:n], nil
 }
 
+// remoteURL 解析项目或仓库的 Git 远程 URL。
 func (s *Service) remoteURL(ctx context.Context, projectID uuid.UUID, name string) string {
 	if name == "" {
 		name = "default"
@@ -339,7 +375,10 @@ func (s *Service) remoteURL(ctx context.Context, projectID uuid.UUID, name strin
 			}
 		}
 	}
-	root := s.namedRepoRoot(projectID, name)
+	root, err := s.namedRepoRoot(ctx, projectID, name)
+	if err != nil {
+		return ""
+	}
 	cmd := exec.CommandContext(ctx, "git", "-C", root, "remote", "get-url", "origin")
 	out, err := cmd.Output()
 	if err != nil {

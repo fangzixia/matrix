@@ -5,12 +5,11 @@ package tools
 import (
 	"context"
 	"fmt"
+	"matrix/internal/ai/llm"
+	"matrix/internal/ai/stream"
 	"strings"
 	"sync"
 	"time"
-
-	"matrix/internal/ai/llm"
-	"matrix/internal/ai/stream"
 )
 
 // JSONSchema 是工具参数的最小化 JSON Schema 描述。
@@ -218,6 +217,7 @@ func runParallel(
 	return results
 }
 
+// runSerial 串行执行多个工具调用。
 func runSerial(
 	ctx context.Context,
 	calls []llm.ToolCall,
@@ -232,6 +232,7 @@ func runSerial(
 	return results
 }
 
+// execOne 执行单个工具调用并返回结果。
 func execOne(
 	ctx context.Context,
 	call llm.ToolCall,
@@ -250,7 +251,6 @@ func execOne(
 			IsError:    true,
 		}
 	}
-
 	if canUse != nil && !canUse(call.Function.Name, args) {
 		out := fmt.Sprintf("permission denied: %s", call.Function.Name)
 		emitToolDone(onProgress, call, "failed", 0, out)
@@ -261,7 +261,6 @@ func execOne(
 			IsError:    true,
 		}
 	}
-
 	t := reg.Get(call.Function.Name)
 	if t == nil {
 		var out string
@@ -281,7 +280,6 @@ func execOne(
 			IsError:    true,
 		}
 	}
-
 	emitProgress(onProgress, call.ID, stream.ToolProgressData{
 		Type:     stream.DataToolProgress,
 		Status:   "started",
@@ -297,7 +295,6 @@ func execOne(
 			ToolName:   tool,
 		})
 	}
-
 	start := time.Now()
 	output, execErr := t.Execute(ContextWithToolCallID(ctx, call.ID), args)
 	elapsed := time.Since(start).Milliseconds()
@@ -322,6 +319,7 @@ func execOne(
 	}
 }
 
+// emitProgress 推送工具执行进度事件。
 func emitProgress(fn ProgressFn, toolUseID string, data stream.ToolProgressData) {
 	if fn == nil || toolUseID == "" {
 		return
@@ -331,6 +329,7 @@ func emitProgress(fn ProgressFn, toolUseID string, data stream.ToolProgressData)
 
 const toolOutputPreviewMax = 500
 
+// previewToolOutput 生成工具输出的审计预览。
 func previewToolOutput(s string) string {
 	if s == "" {
 		return ""
@@ -342,6 +341,7 @@ func previewToolOutput(s string) string {
 	return string(runes[:toolOutputPreviewMax]) + "…"
 }
 
+// emitToolDone 推送工具执行完成事件。
 func emitToolDone(fn ProgressFn, call llm.ToolCall, status string, elapsedMs int64, output string) {
 	if fn == nil {
 		return
@@ -367,6 +367,7 @@ func emitToolDone(fn ProgressFn, call llm.ToolCall, status string, elapsedMs int
 	}
 }
 
+// parseMCPToolName 解析 MCP 复合工具名称。
 func parseMCPToolName(name string) (server, tool string) {
 	if !strings.HasPrefix(name, "mcp_") {
 		return "", name

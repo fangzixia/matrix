@@ -3,12 +3,11 @@ package gitutil
 import (
 	"context"
 	"fmt"
+	"matrix/internal/platform/config"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
-
-	"matrix/internal/platform/config"
 )
 
 // ResolveSSHKey 按仓库 URL 匹配 Git 访问配置中的私钥路径。

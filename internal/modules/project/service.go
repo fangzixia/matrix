@@ -3,14 +3,14 @@ package project
 
 import (
 	"context"
+	"fmt"
+	"matrix/internal/modules/iam"
+	"matrix/internal/platform/db/models"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-
-	"matrix/internal/modules/iam"
-	"matrix/internal/platform/db/models"
 )
 
 const (
@@ -68,8 +68,24 @@ func (s *Service) Create(ctx context.Context, ownerID uuid.UUID, in CreateInput)
 	if vis == "" {
 		vis = VisibilityPrivate
 	}
+	if strings.TrimSpace(in.Path) == "" {
+		return nil, fmt.Errorf("项目编码不能为空")
+	}
+	code := NormalizeProjectCode(in.Path)
+	if code == "" {
+		return nil, fmt.Errorf("项目编码不能为空")
+	}
+	if err := ValidateProjectCode(code); err != nil {
+		return nil, err
+	}
+	var existing models.Project
+	if err := s.db.WithContext(ctx).Where("path = ?", code).First(&existing).Error; err == nil {
+		return nil, fmt.Errorf("项目编码 %q 已被使用", code)
+	} else if err != gorm.ErrRecordNotFound {
+		return nil, err
+	}
 	m := models.Project{
-		Name: in.Name, Path: in.Path, GitURL: in.GitURL, GitBranch: branch,
+		Name: in.Name, Path: code, GitURL: in.GitURL, GitBranch: branch,
 		Visibility: vis, GroupID: in.GroupID, OwnerID: ownerID,
 	}
 	if err := s.db.WithContext(ctx).Create(&m).Error; err != nil {
@@ -103,7 +119,6 @@ func (s *Service) GetForUser(ctx context.Context, id, userID uuid.UUID, isAdmin 
 func (s *Service) ListForUser(ctx context.Context, userID uuid.UUID, isAdmin bool, scope string) ([]Project, error) {
 	var rows []models.Project
 	q := s.db.WithContext(ctx).Model(&models.Project{})
-
 	switch scope {
 	case "explore":
 		if !isAdmin {
@@ -138,7 +153,6 @@ func (s *Service) ListForUser(ctx context.Context, userID uuid.UUID, isAdmin boo
 			)
 		}
 	}
-
 	if err := q.Order("updated_at desc").Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -159,7 +173,20 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, name, path, gitURL, 
 		m.Name = *name
 	}
 	if path != nil {
-		m.Path = *path
+		code := NormalizeProjectCode(*path)
+		if code == "" {
+			return nil, fmt.Errorf("项目编码不能为空")
+		}
+		if err := ValidateProjectCode(code); err != nil {
+			return nil, err
+		}
+		var dup models.Project
+		if err := s.db.WithContext(ctx).Where("path = ? AND id <> ?", code, id).First(&dup).Error; err == nil {
+			return nil, fmt.Errorf("项目编码 %q 已被使用", code)
+		} else if err != gorm.ErrRecordNotFound {
+			return nil, err
+		}
+		m.Path = code
 	}
 	if gitURL != nil {
 		m.GitURL = *gitURL
@@ -184,6 +211,23 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	return s.db.WithContext(ctx).Delete(&models.Project{}, "id = ?", id).Error
 }
 
+// ProjectWorkspaceKey 返回项目工作区目录键（项目编码）；无编码时返回错误，不使用 UUID 兜底。
+func (s *Service) ProjectWorkspaceKey(ctx context.Context, projectID uuid.UUID) (string, error) {
+	var m models.Project
+	if err := s.db.WithContext(ctx).First(&m, "id = ?", projectID).Error; err != nil {
+		return "", err
+	}
+	code := NormalizeProjectCode(m.Path)
+	if code == "" {
+		return "", fmt.Errorf("项目未配置编码")
+	}
+	if err := ValidateProjectCode(code); err != nil {
+		return "", err
+	}
+	return code, nil
+}
+
+// enrich 为实体补充当前用户权限等扩展字段。
 func (s *Service) enrich(ctx context.Context, m *models.Project, userID uuid.UUID, isAdmin bool) *Project {
 	p := toDTO(m)
 	enforcer := iam.NewEnforcer(s.db)
@@ -204,6 +248,7 @@ func (s *Service) enrich(ctx context.Context, m *models.Project, userID uuid.UUI
 	return p
 }
 
+// toDTO 将数据库模型转换为 API DTO。
 func toDTO(m *models.Project) *Project {
 	vis := m.Visibility
 	if vis == "" {

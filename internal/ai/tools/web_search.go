@@ -65,46 +65,38 @@ func execWebSearch(ctx context.Context, args map[string]any) (string, error) {
 				"请设置环境变量 BRAVE_SEARCH_API_KEY（Brave Search 免费层每月 2000 次）。\n" +
 				"申请地址：https://api.search.brave.com/register")
 	}
-
 	query, _ := getString(args, "query")
 	count := 10
 	if v, ok := args["count"].(float64); ok && v > 0 {
 		count = minInt(int(v), 20)
 	}
-
 	apiURL := fmt.Sprintf(
 		"https://api.search.brave.com/res/v1/web/search?q=%s&count=%d",
 		url.QueryEscape(query), count,
 	)
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("web_search: 创建请求失败: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("X-Subscription-Token", apiKey)
-
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("web_search: 请求失败: %w", err)
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return "", fmt.Errorf("web_search: API 返回 %d: %s", resp.StatusCode, body)
 	}
-
 	var result braveSearchResult
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", fmt.Errorf("web_search: 解析响应失败: %w", err)
 	}
-
 	if len(result.Web.Results) == 0 {
 		return fmt.Sprintf("未找到 %q 的搜索结果", query), nil
 	}
-
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("搜索 %q 的结果：\n\n", query))
 	for i, r := range result.Web.Results {

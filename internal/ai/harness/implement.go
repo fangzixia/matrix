@@ -12,7 +12,7 @@ func NewImplementWorkflow(userInput, filePath string) Workflow {
 		UserInput:    userInput,
 		FilePath:     filePath,
 		FileLabel:    "计划文档",
-		FileFallback: "未指定（请使用最新的 .matrix/PLAN-*.md）",
+		FileFallback: "未指定（请使用最新的 docs/plans/PLAN-*.md）",
 		DefaultTask:  "请按计划文档完成实现。",
 		ExpectedArtifacts: []string{
 			"满足计划的代码变更",

@@ -5,23 +5,23 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"matrix/internal/ai/ports"
+	"matrix/internal/ai/query"
+	"matrix/internal/modules/artifact"
+	"matrix/internal/modules/pipeline"
+	"matrix/internal/modules/plan"
+	"matrix/internal/modules/workspace"
+	"matrix/internal/platform/config"
+	"matrix/internal/platform/db/models"
+	"matrix/internal/platform/events"
+	"matrix/internal/platform/storage"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-
-	"matrix/internal/ai/ports"
-	"matrix/internal/ai/query"
-	"matrix/internal/modules/pipeline"
-	"matrix/internal/modules/plan"
-	"matrix/internal/modules/artifact"
-	"matrix/internal/modules/project"
-	"matrix/internal/platform/config"
-	"matrix/internal/platform/db/models"
-	"matrix/internal/platform/events"
-	"matrix/internal/platform/storage"
 )
 
 // JobEnqueuer 将 Run 入队到异步任务队列。
@@ -43,38 +43,45 @@ type WorkspaceResolver interface {
 	RepoRootFor(ctx context.Context, projectID uuid.UUID, repoID *uuid.UUID) (string, error)
 }
 
-// RunSandbox 扩展工作区解析，支持 Run 级 worktree 沙箱与合并。
+// RunSandbox 扩展工作区解析，支持 Run 级 worktree 沙箱、文档目录与合并。
 type RunSandbox interface {
 	WorkspaceResolver
+	ProjectWorkspaceKey(ctx context.Context, projectID uuid.UUID) (string, error)
 	CreateRunWorktree(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID, runID uuid.UUID) (sandboxPath, branch string, err error)
 	RemoveRunWorktree(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID, runID uuid.UUID, branch, sandboxPath string) error
 	MergeRunWorktree(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID, runID uuid.UUID, branch, sandboxPath string) ([]string, error)
+	DocsRoot(ctx context.Context, projectID uuid.UUID) (string, error)
+	ResolveDocPath(projectID uuid.UUID, logicalPath string) (string, error)
+	SanitizeDocLogicalPath(logicalPath string) (string, error)
+	DocSandboxDir(ctx context.Context, projectID uuid.UUID) (string, error)
 }
 
 // Service 管理 AI 运行生命周期：入队、执行、步骤/事件持久化与沙箱隔离。
 type Service struct {
-	db        *gorm.DB
-	runtime   *Runtime
-	hub       *events.Hub
-	paths     storage.Paths
-	cfg       *config.Config
-	workspace RunSandbox
-	settings  SettingsResolver
-	jobs      JobEnqueuer
-	notifier  RunNotifier
-	pipeline  *pipeline.Service
-	pullAll   PullAllFunc
-	plans     *plan.Service
-	artifacts *artifact.Service
-
+	db           *gorm.DB
+	runtime      *Runtime
+	hub          *events.Hub
+	paths        storage.Paths
+	runtimeCfg   *config.RuntimeConfig
+	workspace    RunSandbox
+	jobs         JobEnqueuer
+	notifier     RunNotifier
+	pipeline     *pipeline.Service
+	pullAll      PullAllFunc
+	plans        *plan.Service
+	artifacts    *artifact.Service
 	sandboxLocks *sandboxLocks
 	lifecycleCtx context.Context
 	lifecycleMu  sync.RWMutex
 }
 
-// SettingsResolver 读取项目级集成设置（模型与 MCP 覆盖）。
-type SettingsResolver interface {
-	GetIntegrations(ctx context.Context, projectID uuid.UUID) (*project.IntegrationSettings, error)
+// NewService 创建 Run 服务实例。
+func NewService(db *gorm.DB, rt *Runtime, hub *events.Hub, paths storage.Paths, runtime *config.RuntimeConfig, ws RunSandbox) *Service {
+	return &Service{
+		db: db, runtime: rt, hub: hub, paths: paths, runtimeCfg: runtime,
+		workspace:    ws,
+		sandboxLocks: newSandboxLocks(),
+	}
 }
 
 // StartInput 是启动一次 Run 或 Chat 的请求参数。
@@ -83,19 +90,11 @@ type StartInput struct {
 	Title        string
 	Message      string
 	FilePath     string
+	EvalFilePath string
 	Messages     []query.Message
 	RepositoryID *uuid.UUID
 	Stages       []string
 	Sync         bool
-}
-
-// NewService 创建 Run 服务实例。
-func NewService(db *gorm.DB, rt *Runtime, hub *events.Hub, paths storage.Paths, cfg *config.Config, ws RunSandbox, settings SettingsResolver) *Service {
-	return &Service{
-		db: db, runtime: rt, hub: hub, paths: paths, cfg: cfg,
-		workspace: ws, settings: settings,
-		sandboxLocks: newSandboxLocks(),
-	}
 }
 
 // SetJobEnqueuer 注入异步任务入队器。
@@ -123,6 +122,7 @@ func (s *Service) SetLifecycle(ctx context.Context) {
 	s.lifecycleMu.Unlock()
 }
 
+// runCtx 返回 Run 生命周期上下文。
 func (s *Service) runCtx() context.Context {
 	s.lifecycleMu.RLock()
 	ctx := s.lifecycleCtx
@@ -141,6 +141,8 @@ type RunDTO struct {
 	Kind         string     `json:"kind"`
 	Status       string     `json:"status"`
 	Title        string     `json:"title,omitempty"`
+	FilePath     string     `json:"file_path,omitempty"`
+	EvalFilePath string     `json:"eval_file_path,omitempty"`
 	AuditPath    string     `json:"audit_path,omitempty"`
 	SandboxPath  string     `json:"sandbox_path,omitempty"`
 	RunBranch    string     `json:"run_branch,omitempty"`
@@ -158,7 +160,7 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID, kind string) ([
 		if !IsStageKind(kind) {
 			return []RunDTO{}, nil
 		}
-		q = q.Where("kind = ?", normalizeStageKind(kind))
+		q = q.Where("kind = ?", kind)
 	}
 	var rows []models.Run
 	if err := q.Order("created_at desc").Find(&rows).Error; err != nil {
@@ -182,16 +184,10 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID) (*RunDTO, error) {
 
 // Start 启动 Run。
 func (s *Service) Start(ctx context.Context, projectID, userID uuid.UUID, in StartInput) (*RunDTO, error) {
-	modelCfg := s.cfg.AI.ActiveModel()
-	if s.settings != nil {
-		if integ, err := s.settings.GetIntegrations(ctx, projectID); err == nil && integ != nil {
-			modelCfg = project.MergeModel(modelCfg, integ.Model)
-		}
+	modelCfg, ok := s.runtimeCfg.AI.ActiveModel()
+	if !ok || !config.ModelConfigured(modelCfg) {
+		return nil, errors.New("未配置模型：请在管理区域 → 系统配置中设置并启用默认模型")
 	}
-	if modelCfg.APIKey == "" {
-		return nil, errors.New("未配置 API Key")
-	}
-
 	kind := in.Kind
 	if kind == "" {
 		kind = "task"
@@ -199,7 +195,6 @@ func (s *Service) Start(ctx context.Context, projectID, userID uuid.UUID, in Sta
 	if len(in.Stages) > 0 || kind == "pipeline" {
 		kind = "pipeline"
 	}
-
 	title := in.Title
 	if title == "" {
 		title = in.Message
@@ -211,13 +206,45 @@ func (s *Service) Start(ctx context.Context, projectID, userID uuid.UUID, in Sta
 		status = "running"
 		startedAt = new(time.Now())
 	}
-
+	filePath, err := s.workspace.SanitizeDocLogicalPath(strings.TrimSpace(in.FilePath))
+	if err != nil {
+		return nil, fmt.Errorf("file_path: %w", err)
+	}
+	evalFilePath, err := s.workspace.SanitizeDocLogicalPath(strings.TrimSpace(in.EvalFilePath))
+	if err != nil {
+		return nil, fmt.Errorf("eval_file_path: %w", err)
+	}
+	if evalFilePath != "" && kind != "build" {
+		return nil, errors.New("eval_file_path 仅用于 build 阶段")
+	}
+	if filePath != "" && !strings.HasPrefix(filePath, workspace.DocsPlansRel+"/") {
+		return nil, errors.New("file_path 必须在 docs/plans/ 下")
+	}
+	if evalFilePath != "" && !strings.HasPrefix(evalFilePath, workspace.DocsEvaluationsRel+"/") {
+		return nil, errors.New("eval_file_path 必须在 docs/evaluations/ 下")
+	}
+	if RequiresPlanFile(kind) && filePath == "" {
+		return nil, errors.New("请选择计划文件")
+	}
+	if RequiresApprovedPlan(kind) && filePath != "" && s.plans != nil {
+		ok, err := s.plans.IsApproved(ctx, projectID, filePath)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, errors.New("计划尚未批准，请先确认风险、冲突与待澄清项")
+		}
+	}
+	projectCode, err := s.workspace.ProjectWorkspaceKey(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
 	m := models.Run{
 		ID: runID, ProjectID: projectID, RepositoryID: in.RepositoryID,
 		Kind: kind, Status: status, CreatedBy: userID, Title: title,
-		FilePath: strings.TrimSpace(in.FilePath),
+		FilePath: filePath, EvalFilePath: evalFilePath,
 		StartedAt: startedAt,
-		AuditPath: storage.RunAuditFile(s.paths, projectID.String(), runID.String()),
+		AuditPath: storage.RunAuditFile(s.paths, projectCode, runID.String()),
 	}
 	q := s.db.WithContext(ctx)
 	if kind == "pipeline" && s.pipeline != nil {
@@ -228,7 +255,6 @@ func (s *Service) Start(ctx context.Context, projectID, userID uuid.UUID, in Sta
 	if err := q.Create(&m).Error; err != nil {
 		return nil, err
 	}
-
 	execCtx := s.runCtx()
 	if in.Sync {
 		go func() { _ = s.ExecuteRun(execCtx, runID) }()
@@ -239,11 +265,11 @@ func (s *Service) Start(ctx context.Context, projectID, userID uuid.UUID, in Sta
 	} else {
 		go func() { _ = s.ExecuteRun(execCtx, runID) }()
 	}
-
 	return new(toRunDTO(&m)), nil
 }
 
-func mcpConfigsToPorts(servers map[string]config.MCPServerYAML) []ports.MCPServerConfig {
+// mcpConfigsToPorts 将 MCP YAML 配置转换为运行时端口配置。
+func mcpConfigsToPorts(servers map[string]config.MCPServerConfig) []ports.MCPServerConfig {
 	if len(servers) == 0 {
 		return nil
 	}
@@ -328,10 +354,13 @@ func MessagesFromJSON(raw string) []query.Message {
 	return msgs
 }
 
+// toRunDTO 将 Run 模型转换为 API DTO。
 func toRunDTO(m *models.Run) RunDTO {
 	return RunDTO{
 		ID: m.ID, ProjectID: m.ProjectID, RepositoryID: m.RepositoryID,
-		Kind: m.Kind, Status: m.Status, Title: m.Title, AuditPath: m.AuditPath,
+		Kind: m.Kind, Status: m.Status, Title: m.Title,
+		FilePath: m.FilePath, EvalFilePath: m.EvalFilePath,
+		AuditPath:   m.AuditPath,
 		SandboxPath: m.SandboxPath, RunBranch: m.RunBranch, MergeStatus: m.MergeStatus,
 		ErrorMessage: m.ErrorMessage, StartedAt: m.StartedAt,
 		FinishedAt: m.FinishedAt, CreatedAt: m.CreatedAt,
@@ -352,11 +381,6 @@ func (s *Service) MergeRun(ctx context.Context, runID uuid.UUID) (*RunDTO, []str
 		return new(toRunDTO(&m)), conflicts, err
 	}
 	_ = s.workspace.RemoveRunWorktree(ctx, m.ProjectID, m.RepositoryID, runID, m.RunBranch, m.SandboxPath)
-	mainRoot, _ := s.workspace.RepoRootFor(ctx, m.ProjectID, m.RepositoryID)
-	if mainRoot != "" {
-		s.indexHarnessOutputs(ctx, &m, "plan", mainRoot)
-		s.indexHarnessOutputs(ctx, &m, "verify", mainRoot)
-	}
 	_ = s.db.WithContext(ctx).Model(&m).Updates(map[string]any{
 		"merge_status": "merged", "sandbox_path": "", "run_branch": "",
 	}).Error

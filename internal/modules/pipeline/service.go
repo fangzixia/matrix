@@ -3,10 +3,9 @@ package pipeline
 
 import (
 	"context"
+	"matrix/internal/platform/config"
 
 	"github.com/google/uuid"
-
-	"matrix/internal/platform/config"
 )
 
 // Service 管理 Harness 流水线阶段配置（Spec/Implement/Verify/Build 等）。
@@ -29,7 +28,7 @@ func (s *Service) DefaultStages() []string {
 	if len(s.cfg.DefaultStages) > 0 {
 		return append([]string(nil), s.cfg.DefaultStages...)
 	}
-	return []string{"plan", "implement", "verify", "build"}
+	return []string{"plan", "build"}
 }
 
 // PullBeforeStage 返回阶段执行前是否拉取 Git。
@@ -45,7 +44,7 @@ func (s *Service) ResolveStages(stages []string) []string {
 	return s.DefaultStages()
 }
 
-// StagesForRun returns ordered stage kinds for a pipeline run.
+// StagesForRun 返回流水线 Run 的有序阶段种类列表。
 func (s *Service) StagesForRun(_ context.Context, _ uuid.UUID, requested []string) []string {
 	return s.ResolveStages(requested)
 }

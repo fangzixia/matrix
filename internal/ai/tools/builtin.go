@@ -60,7 +60,6 @@ var WriteFile = &Tool{
 		if resolveErr != nil {
 			return "", fmt.Errorf("write_file: %w", resolveErr)
 		}
-
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 			return "", fmt.Errorf("write_file: 创建目录失败: %w", err)
 		}

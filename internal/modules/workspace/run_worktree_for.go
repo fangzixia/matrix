@@ -34,6 +34,7 @@ func (s *Service) MergeRunWorktreeFor(ctx context.Context, projectID uuid.UUID, 
 	return s.MergeRunWorktree(ctx, projectID, repoName, runID, branch, sandboxPath)
 }
 
+// repoNameFor 根据仓库 ID 解析仓库名称。
 func (s *Service) repoNameFor(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID) (string, error) {
 	if repositoryID != nil && s.repos != nil {
 		r, err := s.repos.Get(ctx, *repositoryID)

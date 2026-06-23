@@ -29,6 +29,7 @@ func NewEngine(log *slog.Logger, dev bool) *gin.Engine {
 	return r
 }
 
+// requestIDMiddleware 为每个 HTTP 请求注入唯一 request ID。
 func requestIDMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.GetHeader("X-Request-ID")
@@ -41,6 +42,7 @@ func requestIDMiddleware() gin.HandlerFunc {
 	}
 }
 
+// slogMiddleware 记录 HTTP 请求的结构化访问日志。
 func slogMiddleware(log *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()

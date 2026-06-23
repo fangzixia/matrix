@@ -43,9 +43,9 @@ Git 工作区克隆到 `{workspaces_dir}/{project_id}/`；每次 Run 默认在 `
 
 ## Run 并发与沙箱
 
-- 配置 `run.sandbox_mode`：`worktree`（默认，项目内多 Run 并行）| `shared`（legacy，项目级互斥锁串行）
+- Run 沙箱模式为代码内置默认 `worktree`（项目内多 Run 并行）；legacy `shared` 为项目级互斥锁串行
 - 每个 Run 在独立 worktree 分支（`matrix/run-{id}`）上执行；成功后 `merge_status=pending`，用户在 Run 详情页 **合并到主仓库** 或 **放弃**
-- 全局并发由 `worker.concurrency` 控制（系统配置 → 并发控制）
+- 全局并发由 **系统配置 → 并发控制** 中的 Worker 并发数控制
 - 流水线 worktree 模式下仅在创建沙箱前 pull 主仓库一次，阶段间不再 `pullAll`
 
 ## 认证与授权
@@ -61,9 +61,9 @@ Run/Chat 执行时，`modules/run` 通过 `platform/events.Hub` 发布 SSE 事�
 
 ## 安全策略
 
-YAML `ai.security`：
+系统配置（Web 管理端 `/admin/system`）中的 AI 安全策略：
 
-- `allow_shell: false`（默认）— 使用 `tools.RegistryWithoutShell`
-- `allow_command_mcp: false` — 限制 command 型 MCP
+- **允许 Shell** 默认关闭 — 使用 `tools.RegistryWithoutShell`
+- **允许命令型 MCP** 默认关闭 — 限制 command 型 MCP
 
 详见 `internal/modules/run/runtime.go`。

@@ -25,6 +25,7 @@ func With(ctx context.Context, f Fields) context.Context {
 	return context.WithValue(ctx, ctxKey{}, f)
 }
 
+// fieldsFrom 将键值对切片转换为 slog 属性列表。
 func fieldsFrom(ctx context.Context) []any {
 	v := ctx.Value(ctxKey{})
 	if v == nil {

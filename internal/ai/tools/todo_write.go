@@ -67,6 +67,7 @@ status 取值：pending、in_progress、completed、cancelled`,
 	}
 }
 
+// todoWriteFilePath 返回 todo 持久化文件路径。
 func todoWriteFilePath(ctx context.Context) (string, error) {
 	root := SandboxFrom(ctx)
 	if root == "" {
@@ -75,6 +76,7 @@ func todoWriteFilePath(ctx context.Context) (string, error) {
 	return filepath.Join(root, ".matrix", "todos.json"), nil
 }
 
+// decodeTodos 从 JSON 解码 todo 列表。
 func decodeTodos(raw any) ([]TodoItem, error) {
 	if raw == nil {
 		return nil, fmt.Errorf("缺少 todos")
@@ -113,6 +115,7 @@ func decodeTodos(raw any) ([]TodoItem, error) {
 	}
 }
 
+// execTodoWrite 执行 todo_write 工具逻辑。
 func execTodoWrite(ctx context.Context, args map[string]any) (string, error) {
 	raw, ok := args["todos"]
 	if !ok {
@@ -123,7 +126,6 @@ func execTodoWrite(ctx context.Context, args map[string]any) (string, error) {
 		return "", fmt.Errorf("todo_write: 解析 todos 失败: %w", err)
 	}
 	merge := getBoolArg(args, "merge")
-
 	validStatuses := map[string]bool{
 		"pending": true, "in_progress": true,
 		"completed": true, "cancelled": true,
@@ -136,7 +138,6 @@ func execTodoWrite(ctx context.Context, args map[string]any) (string, error) {
 			return "", fmt.Errorf("todo_write: 无效 status %q", item.Status)
 		}
 	}
-
 	var finalItems []TodoItem
 	if merge {
 		existing := todoWriteLoad(ctx)
@@ -155,7 +156,6 @@ func execTodoWrite(ctx context.Context, args map[string]any) (string, error) {
 	} else {
 		finalItems = newItems
 	}
-
 	todoPath, err := todoWriteFilePath(ctx)
 	if err != nil {
 		return "", fmt.Errorf("todo_write: %w", err)
@@ -169,6 +169,7 @@ func execTodoWrite(ctx context.Context, args map[string]any) (string, error) {
 	return todoWriteFormat(finalItems), nil
 }
 
+// todoWriteLoad 从文件加载 todo 列表。
 func todoWriteLoad(ctx context.Context) []TodoItem {
 	path, err := todoWriteFilePath(ctx)
 	if err != nil {
@@ -185,6 +186,7 @@ func todoWriteLoad(ctx context.Context) []TodoItem {
 	return items
 }
 
+// todoWriteSave 将 todo 列表保存到文件。
 func todoWriteSave(ctx context.Context, items []TodoItem) error {
 	path, err := todoWriteFilePath(ctx)
 	if err != nil {
@@ -197,6 +199,7 @@ func todoWriteSave(ctx context.Context, items []TodoItem) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
+// todoWriteFormat 格式化 todo 列表为可读文本。
 func todoWriteFormat(items []TodoItem) string {
 	if len(items) == 0 {
 		return "TODO 列表为空"

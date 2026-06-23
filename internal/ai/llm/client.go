@@ -83,7 +83,6 @@ func (c *Client) stream(ctx context.Context, req ChatRequest, ch chan<- StreamEv
 	if err != nil {
 		return fmt.Errorf("llm: 序列化请求失败: %w", err)
 	}
-
 	httpReq, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
@@ -98,18 +97,15 @@ func (c *Client) stream(ctx context.Context, req ChatRequest, ch chan<- StreamEv
 	if c.APIKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
 	}
-
 	resp, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
 		return fmt.Errorf("llm: HTTP 请求失败: %w", err)
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("llm: 服务端返回 %d: %s", resp.StatusCode, raw)
 	}
-
 	return c.parseSSE(ctx, resp.Body, ch)
 }
 
@@ -137,40 +133,32 @@ func (c *Client) parseSSE(ctx context.Context, r io.Reader, ch chan<- StreamEven
 			return false
 		}
 	}
-
 	scanner := bufio.NewScanner(r)
 	// 增大扫描缓冲区，以应对包含大型 tool_call JSON 的行。
 	scanner.Buffer(make([]byte, 1<<20), 1<<20)
-
 	for scanner.Scan() {
 		line := scanner.Text()
-
 		if line == "" {
 			continue // SSE 事件分隔空行
 		}
 		if !strings.HasPrefix(line, "data: ") {
 			continue // 跳过 "event:"、"id:"、"retry:" 等控制行
 		}
-
 		payload := strings.TrimPrefix(line, "data: ")
-
 		if payload == "[DONE]" {
 			turn := c.assembleTurn(&contentBuf, &thinkingBuf, tcMap, finishReason)
 			emit(StreamEvent{Turn: turn})
 			return nil
 		}
-
 		var chunk StreamChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			continue // 格式异常的块跳过，不中断整个流
 		}
-
 		for _, choice := range chunk.Choices {
 			if choice.FinishReason != "" {
 				finishReason = choice.FinishReason
 			}
 			d := choice.Delta
-
 			if d.Content != "" {
 				contentBuf.WriteString(d.Content)
 				if !emit(StreamEvent{TextDelta: d.Content}) {
@@ -209,7 +197,6 @@ func (c *Client) parseSSE(ctx context.Context, r io.Reader, ch chan<- StreamEven
 			}
 		}
 	}
-
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("llm: 读取响应流失败: %w", err)
 	}

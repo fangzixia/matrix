@@ -1,9 +1,8 @@
 package coordinator
 
 import (
-	"strings"
-
 	"matrix/internal/ai/tools"
+	"strings"
 )
 
 // ParentToolNames 为 Coordinator 父会话可见的内置工具名。

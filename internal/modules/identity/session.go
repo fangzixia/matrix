@@ -6,13 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"matrix/internal/platform/config"
+	"matrix/internal/platform/db/models"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-
-	"matrix/internal/platform/config"
-	"matrix/internal/platform/db/models"
 )
 
 // SessionService 管理 Session Cookie 的创建与校验。
@@ -79,6 +78,7 @@ func (s *SessionService) Revoke(ctx context.Context, token string) error {
 	return s.db.WithContext(ctx).Where("token_hash = ?", hash).Delete(&models.Session{}).Error
 }
 
+// hashToken 对 Session token 做单向哈希。
 func hashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])

@@ -1,11 +1,18 @@
-import { Link } from 'react-router-dom'
+import { useNavigate } from "react-router-dom";
+import { Button, Result } from "antd";
 
 export default function NotFoundPage() {
+  const navigate = useNavigate();
   return (
-    <div className="panel not-found" style={{ maxWidth: 480, margin: '48px auto', textAlign: 'center' }}>
-      <h1 className="page-title">404</h1>
-      <p className="muted">页面不存在。</p>
-      <Link to="/projects">返回项目列表</Link>
-    </div>
-  )
+    <Result
+      status="404"
+      title="404"
+      subTitle="页面不存在。"
+      extra={
+        <Button type="primary" onClick={() => navigate("/projects")}>
+          返回项目列表
+        </Button>
+      }
+    />
+  );
 }

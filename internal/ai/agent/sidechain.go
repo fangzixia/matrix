@@ -23,6 +23,7 @@ func NewSidechainWriter(subagentsDir string) *SidechainWriter {
 	return &SidechainWriter{dir: subagentsDir}
 }
 
+// path 返回 sidechain 文件路径。
 func (w *SidechainWriter) path(id ID) string {
 	if w == nil || w.dir == "" {
 		return ""
@@ -75,6 +76,7 @@ func (w *SidechainWriter) ReadTail(id ID, maxLines int) (string, error) {
 	return joinLines(lines[len(lines)-maxLines:]), nil
 }
 
+// splitLines 按行拆分文本。
 func splitLines(s string) []string {
 	var out []string
 	start := 0
@@ -90,6 +92,7 @@ func splitLines(s string) []string {
 	return out
 }
 
+// joinLines 将行列表合并为文本。
 func joinLines(lines []string) string {
 	if len(lines) == 0 {
 		return ""

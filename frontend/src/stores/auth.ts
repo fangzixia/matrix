@@ -1,18 +1,18 @@
-import { create } from 'zustand'
-import * as authApi from '@/api/auth'
-import type { User } from '@/api/auth'
+import { create } from "zustand";
+import * as authApi from "@/api/auth";
+import type { User } from "@/api/auth";
 
 interface AuthState {
-  user: User | null
-  loading: boolean
-  initialized: boolean
-  isLoggedIn: () => boolean
-  isAdmin: () => boolean
-  isRoot: () => boolean
-  fetchMe: () => Promise<void>
-  login: (username: string, password: string) => Promise<void>
-  logout: () => Promise<void>
-  setUser: (user: User | null) => void
+  user: User | null;
+  loading: boolean;
+  initialized: boolean;
+  isLoggedIn: () => boolean;
+  isAdmin: () => boolean;
+  isRoot: () => boolean;
+  fetchMe: () => Promise<void>;
+  login: (username: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
+  setUser: (user: User | null) => void;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -24,22 +24,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isRoot: () => !!get().user?.is_root,
   setUser: (user) => set({ user }),
   fetchMe: async () => {
-    set({ loading: true })
+    set({ loading: true });
     try {
-      const user = await authApi.me()
-      set({ user })
+      const user = await authApi.me();
+      set({ user });
     } catch {
-      set({ user: null })
+      set({ user: null });
     } finally {
-      set({ loading: false, initialized: true })
+      set({ loading: false, initialized: true });
     }
   },
   login: async (username, password) => {
-    const user = await authApi.login(username, password)
-    set({ user })
+    const user = await authApi.login(username, password);
+    set({ user });
   },
   logout: async () => {
-    await authApi.logout()
-    set({ user: null })
+    await authApi.logout();
+    set({ user: null });
   },
-}))
+}));

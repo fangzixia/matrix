@@ -3,14 +3,13 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"matrix/internal/platform/storage"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/google/uuid"
-
-	"matrix/internal/platform/storage"
 )
 
 // MergeResult 是 worktree 合并结果。
@@ -23,8 +22,15 @@ func (s *Service) CreateRunWorktree(ctx context.Context, projectID uuid.UUID, re
 	if repoName == "" {
 		repoName = "default"
 	}
-	mainRoot := s.namedRepoRoot(projectID, repoName)
-	wtPath := storage.RunWorktreeDir(s.paths, projectID.String(), runID.String())
+	key, err := s.ProjectWorkspaceKey(ctx, projectID)
+	if err != nil {
+		return "", "", err
+	}
+	mainRoot, err := s.namedRepoRoot(ctx, projectID, repoName)
+	if err != nil {
+		return "", "", err
+	}
+	wtPath := storage.RunWorktreeDir(s.paths, key, runID.String())
 	if err := os.MkdirAll(filepath.Dir(wtPath), 0o755); err != nil {
 		return "", "", err
 	}
@@ -61,10 +67,17 @@ func (s *Service) RemoveRunWorktree(ctx context.Context, projectID uuid.UUID, re
 	if repoName == "" {
 		repoName = "default"
 	}
-	if wtPath == "" {
-		wtPath = storage.RunWorktreeDir(s.paths, projectID.String(), runID.String())
+	key, err := s.ProjectWorkspaceKey(ctx, projectID)
+	if err != nil {
+		return err
 	}
-	mainRoot := s.namedRepoRoot(projectID, repoName)
+	if wtPath == "" {
+		wtPath = storage.RunWorktreeDir(s.paths, key, runID.String())
+	}
+	mainRoot, err := s.namedRepoRoot(ctx, projectID, repoName)
+	if err != nil {
+		return err
+	}
 	if _, err := os.Stat(filepath.Join(mainRoot, ".git")); err != nil {
 		return os.RemoveAll(wtPath)
 	}
@@ -89,9 +102,16 @@ func (s *Service) MergeRunWorktree(ctx context.Context, projectID uuid.UUID, rep
 	if repoName == "" {
 		repoName = "default"
 	}
-	mainRoot := s.namedRepoRoot(projectID, repoName)
+	key, err := s.ProjectWorkspaceKey(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	mainRoot, err := s.namedRepoRoot(ctx, projectID, repoName)
+	if err != nil {
+		return nil, err
+	}
 	if wtPath == "" {
-		wtPath = storage.RunWorktreeDir(s.paths, projectID.String(), runID.String())
+		wtPath = storage.RunWorktreeDir(s.paths, key, runID.String())
 	}
 	if branch == "" {
 		branch = runBranchName(runID)
@@ -126,6 +146,7 @@ func (s *Service) MergeRunWorktree(ctx context.Context, projectID uuid.UUID, rep
 	return &MergeResult{}, nil
 }
 
+// runBranchName 生成 Run 专用 Git 分支名。
 func runBranchName(runID uuid.UUID) string {
 	id := strings.ReplaceAll(runID.String(), "-", "")
 	if len(id) > 8 {
@@ -134,6 +155,7 @@ func runBranchName(runID uuid.UUID) string {
 	return "matrix/run-" + id
 }
 
+// parseConflictFiles 从 git 输出解析冲突文件列表。
 func parseConflictFiles(output, mainRoot string) []string {
 	var conflicts []string
 	for _, line := range strings.Split(output, "\n") {
@@ -150,6 +172,7 @@ func parseConflictFiles(output, mainRoot string) []string {
 	return conflicts
 }
 
+// listUnmerged 列出 worktree 中未合并的文件。
 func listUnmerged(mainRoot string) []string {
 	cmd := execCommand(context.Background(), mainRoot, "diff", "--name-only", "--diff-filter=U")
 	out, err := cmd.Output()
@@ -166,6 +189,7 @@ func listUnmerged(mainRoot string) []string {
 	return files
 }
 
+// execCommand 在指定目录执行 shell 命令。
 func execCommand(ctx context.Context, dir string, args ...string) *exec.Cmd {
 	return exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 }

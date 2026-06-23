@@ -3,7 +3,6 @@ package ports
 
 import (
 	"context"
-
 	"matrix/internal/ai/query"
 	"matrix/internal/ai/stream"
 )
@@ -35,14 +34,15 @@ type RuntimePolicy struct {
 
 // RunRequest 是 AgentRuntime.Run 的输入参数。
 type RunRequest struct {
-	RunID       string
-	Kind        string
-	Messages    []query.Message
-	SandboxDir  string
-	SessionsDir string
-	Model       ModelConfig
-	MCP         []MCPServerConfig
-	Policy      RuntimePolicy
+	RunID            string
+	Kind             string
+	Messages         []query.Message
+	SandboxDir       string
+	ExtraSandboxDirs []string
+	SessionsDir      string
+	Model            ModelConfig
+	MCP              []MCPServerConfig
+	Policy           RuntimePolicy
 }
 
 // RunResult 是 AgentRuntime.Run 的执行结果。

@@ -16,16 +16,15 @@ package coordinator
 import (
 	"context"
 	"fmt"
-	"matrix/internal/platform/logging"
-	"sync/atomic"
-	"time"
-
 	"matrix/internal/ai/agent"
 	"matrix/internal/ai/audit"
 	"matrix/internal/ai/llm"
 	"matrix/internal/ai/query"
 	"matrix/internal/ai/stream"
 	"matrix/internal/ai/tools"
+	"matrix/internal/platform/logging"
+	"sync/atomic"
+	"time"
 )
 
 // ── AsyncSupport：异步子 Agent 的通道 + 计数器 ───────────────────────────
@@ -89,11 +88,9 @@ type Config struct {
 	MaxTurns int
 	// MaxTokens 为每次 LLM 请求的 token 上限。
 	MaxTokens int
-	// ContextPolicy is inherited by worker query loops so coordinator, workers,
-	// and resumed workers share the same context-management pipeline.
+	// ContextPolicy 由 Worker 的 query 循环继承，使 Coordinator、Worker 与恢复的 Worker 共用同一套上下文管理流水线。
 	ContextPolicy query.ContextPolicy
-	// MaxToolResultRunes limits each worker tool result before it enters worker
-	// history.
+	// MaxToolResultRunes 限制每条 Worker 工具结果在进入 Worker 历史前的长度。
 	MaxToolResultRunes int
 	// Async 为异步子 Agent 支持；nil 时 [NewAgentTool] 在同步路径阻塞直至 Worker 结束。
 	// 应由 main.go 通过 NewAsyncSupport() 创建并同时传给 query.Config。
@@ -115,7 +112,7 @@ type Config struct {
 	SandboxDir string
 }
 
-// ── System Prompts ────────────────────────────────────────────────────────
+// ── 系统提示词 ────────────────────────────────────────────────────────────
 
 // WorkerSystemPrompt 是默认的 Worker 系统提示词。
 // Worker 无需了解 Coordinator 的存在，只需专注完成被委派的任务。
@@ -316,6 +313,7 @@ func NewAgentTool(cfg Config) *tools.Tool {
 	}
 }
 
+// makeAgentExecute 构造 agent 工具的 Execute 闭包。
 func makeAgentExecute(cfg Config) func(context.Context, map[string]any) (string, error) {
 	return func(ctx context.Context, args map[string]any) (string, error) {
 		description, _ := tools.GetString(args, "description")
@@ -324,16 +322,13 @@ func makeAgentExecute(cfg Config) func(context.Context, map[string]any) (string,
 		if sysPrompt == "" {
 			sysPrompt = WorkerSystemPrompt
 		}
-
 		maxTurns := cfg.MaxTurns
 		if mt, ok := args["max_turns"].(float64); ok && mt > 0 {
 			maxTurns = int(mt)
 		}
-
 		parentAgentID := cfg.SpawnerAgentID
 		parentToolUseID := tools.ToolCallIDFromContext(ctx)
 		id := agent.NewID()
-
 		rec := &agent.Record{
 			ID:              id,
 			Description:     description,
@@ -348,20 +343,17 @@ func makeAgentExecute(cfg Config) func(context.Context, map[string]any) (string,
 		if cfg.StreamHub != nil {
 			cfg.StreamHub.NotifySpawn(rec)
 		}
-
 		workerReg := BuildWorkerRegistry(cfg.ToolRegistry, cfg, id)
 		var workerSink query.StreamSink = stream.NopSink{}
 		if cfg.StreamHub != nil {
 			workerSink = cfg.StreamHub.WorkerSink(string(id), string(parentAgentID), parentToolUseID)
 		}
 		subCfg := buildWorkerConfig(cfg, workerReg, sysPrompt, maxTurns, prompt, string(id), workerSink)
-
 		runWorker := func() query.Result {
 			workerCtx, end := cfg.RunControl.Begin(id)
 			defer end()
 			return query.RunSession(workerCtx, subCfg, workerSink)
 		}
-
 		finish := func(result query.Result) {
 			updateRegistry(cfg.AgentRegistry, id, result)
 			if cfg.StreamHub != nil {
@@ -389,7 +381,6 @@ func makeAgentExecute(cfg Config) func(context.Context, map[string]any) (string,
 				id, description,
 			), nil
 		}
-
 		logging.Info("coordinator: sync sub-agent start", "agent_id", id, "description", description)
 		result := runWorker()
 		finish(result)
@@ -421,7 +412,7 @@ func buildWorkerConfig(
 		SessionID:          cfg.SessionID,
 		Audit:              cfg.Audit,
 		InitialMessages: []query.Message{
-			{Role: query.RoleUser, Content: tools.FormatWorkerUserMessage(cfg.SandboxDir, prompt)},
+			{Role: query.RoleUser, Content: tools.FormatHarnessUserMessage(cfg.SandboxDir, "", prompt)},
 		},
 	}
 	if cfg.EnableNestedAgents && cfg.StreamHub != nil {
@@ -476,24 +467,21 @@ func NewSendMessageTool(cfg Config) *tools.Tool {
 	}
 }
 
+// makeSendMessageExecute 构造 send_message 工具的 Execute 闭包。
 func makeSendMessageExecute(cfg Config) func(context.Context, map[string]any) (string, error) {
 	return func(ctx context.Context, args map[string]any) (string, error) {
 		to, _ := tools.GetString(args, "to")
 		message, _ := tools.GetString(args, "message")
-
 		agentID := agent.ID(to)
 		rec := cfg.AgentRegistry.Get(agentID)
 		if rec == nil {
 			return "", fmt.Errorf("send_message: 未找到 Agent %q", to)
 		}
-
 		logging.Info("coordinator: 续接子 Agent",
 			"id", agentID, "transcript_len", len(rec.Transcript))
-
 		history := make([]query.Message, len(rec.Transcript))
 		copy(history, rec.Transcript)
 		history = append(history, query.Message{Role: query.RoleUser, Content: message})
-
 		workerReg := BuildWorkerRegistry(cfg.ToolRegistry, cfg, agentID)
 		var workerSink query.StreamSink = stream.NopSink{}
 		if cfg.StreamHub != nil {
@@ -501,7 +489,6 @@ func makeSendMessageExecute(cfg Config) func(context.Context, map[string]any) (s
 		}
 		subCfg := buildWorkerConfig(cfg, workerReg, rec.SystemPrompt, cfg.MaxTurns, message, string(agentID), workerSink)
 		subCfg.InitialMessages = history
-
 		workerCtx, end := cfg.RunControl.Begin(agentID)
 		defer end()
 		result := query.RunSession(workerCtx, subCfg, workerSink)
@@ -509,7 +496,6 @@ func makeSendMessageExecute(cfg Config) func(context.Context, map[string]any) (s
 		if cfg.StreamHub != nil {
 			cfg.StreamHub.NotifyDone(agentID)
 		}
-
 		logging.Info("coordinator: 续接完成", "id", agentID, "turns", result.TurnCount, "stop", result.StopReason)
 		return agent.FormatResult(agentID, rec.Description+"（续接）", result), nil
 	}

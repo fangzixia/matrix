@@ -5,13 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"matrix/internal/platform/db/models"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-
-	"matrix/internal/platform/db/models"
 )
 
 // DTO 是 Git 仓库 API 返回的数据传输对象。
@@ -184,12 +183,14 @@ func (s *Service) MigrateLegacyProjects(ctx context.Context) error {
 	return nil
 }
 
+// clearOtherDefaults 清除同项目下其他仓库的默认标记。
 func (s *Service) clearOtherDefaults(ctx context.Context, projectID, keepID uuid.UUID) error {
 	return s.db.WithContext(ctx).Model(&models.ProjectRepository{}).
 		Where("project_id = ? AND id <> ?", projectID, keepID).
 		Update("is_default", false).Error
 }
 
+// toDTO 将数据库模型转换为 API DTO。
 func toDTO(m *models.ProjectRepository) DTO {
 	return DTO{
 		ID: m.ID, ProjectID: m.ProjectID, Name: m.Name, GitURL: m.GitURL, GitBranch: m.GitBranch,

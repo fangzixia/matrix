@@ -8,10 +8,9 @@ package agent
 import (
 	"crypto/rand"
 	"fmt"
+	"matrix/internal/ai/query"
 	"sync"
 	"time"
-
-	"matrix/internal/ai/query"
 )
 
 // ID 是子 Agent 的全局唯一标识符，格式为 "agent-{8位十六进制}"。
@@ -125,6 +124,7 @@ func ToSnapshot(rec *Record) Snapshot {
 	return s
 }
 
+// truncateRunes 按 Unicode rune 截断字符串。
 func truncateRunes(s string, max int) string {
 	if len(s) <= max {
 		return s
@@ -157,7 +157,6 @@ func FormatResult(id ID, description string, result query.Result) string {
 		status = fmt.Sprintf("failed: %v", result.Err)
 	}
 	summary := fmt.Sprintf(`Agent "%s" %s（共 %d 轮）`, description, status, result.TurnCount)
-
 	return fmt.Sprintf(`<result>
   <agent_id>%s</agent_id>
   <status>%s</status>

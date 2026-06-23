@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"matrix/internal/platform/pathutil"
 	"path/filepath"
 	"strings"
 )
@@ -43,17 +44,24 @@ func ResolveAndValidateToolPath(ctx context.Context, path string) (string, error
 	return resolved, nil
 }
 
-// FormatWorkerUserMessage 为 Worker 首条 user 消息附加沙箱路径前缀。
-func FormatWorkerUserMessage(sandboxRoot, msg string) string {
+// FormatHarnessUserMessage 附加源代码沙箱与文档目录前缀。
+func FormatHarnessUserMessage(codeSandbox, docsRoot, msg string) string {
 	msg = strings.TrimSpace(msg)
-	root := normalizeSandboxRoot(sandboxRoot)
-	if root == "" {
+	var lines []string
+	if root := normalizeSandboxRoot(codeSandbox); root != "" {
+		lines = append(lines, fmt.Sprintf("沙箱目录（源代码）: %s", root))
+	}
+	if root := normalizeSandboxRoot(docsRoot); root != "" {
+		lines = append(lines, fmt.Sprintf("文档目录（计划/评测，非源码）: %s", root))
+	}
+	if len(lines) == 0 {
 		return msg
 	}
+	prefix := strings.Join(lines, "\n")
 	if msg == "" {
-		return fmt.Sprintf("沙箱目录: %s", root)
+		return prefix
 	}
-	return fmt.Sprintf("沙箱目录: %s\n\n%s", root, msg)
+	return prefix + "\n\n" + msg
 }
 
 // ResolveWorkspacePath 仅接受绝对路径，返回规范化后的绝对路径。
@@ -90,31 +98,23 @@ func ToAbsolutePath(path, base string) string {
 // RequirePathInSandbox 校验目标路径必须位于 context 绑定的沙箱目录内。
 func RequirePathInSandbox(ctx context.Context, absPath string) error {
 	root := SandboxFrom(ctx)
-	if root == "" {
+	if root == "" && len(ExtraSandboxRootsFrom(ctx)) == 0 {
 		return fmt.Errorf("沙箱未配置，拒绝文件访问")
 	}
 	abs, err := filepath.Abs(absPath)
 	if err != nil {
 		return fmt.Errorf("无效路径: %w", err)
 	}
-	if !pathWithinRoot(abs, root) {
+	if root != "" && pathutil.WithinRoot(abs, root) {
+		return nil
+	}
+	for _, extra := range ExtraSandboxRootsFrom(ctx) {
+		if pathutil.WithinRoot(abs, extra) {
+			return nil
+		}
+	}
+	if root != "" {
 		return fmt.Errorf("文件操作必须位于沙箱内 (%s)，拒绝访问: %s", root, abs)
 	}
-	return nil
-}
-
-func pathWithinRoot(absPath, root string) bool {
-	absPath = filepath.Clean(absPath)
-	root = filepath.Clean(root)
-	if absPath == root {
-		return true
-	}
-	rel, err := filepath.Rel(root, absPath)
-	if err != nil {
-		return false
-	}
-	if rel == ".." {
-		return false
-	}
-	return !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	return fmt.Errorf("文件操作必须位于文档沙箱内，拒绝访问: %s", abs)
 }

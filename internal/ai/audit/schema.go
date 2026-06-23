@@ -4,7 +4,7 @@ package audit
 // SchemaVersion 是当前审计 JSONL  schema 版本号。
 const SchemaVersion = 1
 
-// Event is a single JSONL audit record (LLM-friendly, English snake_case keys).
+// Event 是单条 JSONL 审计记录（面向 LLM，字段为英文 snake_case）。
 type Event struct {
 	V             int            `json:"v"`
 	Ts            string         `json:"ts"`
@@ -19,7 +19,7 @@ type Event struct {
 	Data          map[string]any `json:"data,omitempty"`
 }
 
-// SessionMeta is persisted as {sessionID}.meta.json and updated on session end.
+// SessionMeta 持久化为 {sessionID}.meta.json，会话结束时更新。
 type SessionMeta struct {
 	SessionID   string `json:"session_id"`
 	StartedAt   string `json:"started_at"`
@@ -33,7 +33,7 @@ type SessionMeta struct {
 	Error       string `json:"error,omitempty"`
 }
 
-// SessionIndex is a list entry for Bridge / ListSessions.
+// SessionIndex 是 Bridge / ListSessions 的列表项。
 type SessionIndex struct {
 	SessionID  string `json:"session_id"`
 	StartedAt  string `json:"started_at"`
@@ -43,12 +43,12 @@ type SessionIndex struct {
 	Path       string `json:"path"`
 }
 
-// ExportOptions controls ReadSession behavior.
+// ExportOptions 控制 ReadSession 的行为。
 type ExportOptions struct {
-	MaxEvents int // 0 = all events
+	MaxEvents int // 0 表示读取全部事件
 }
 
-// ExportBundle is returned by ReadSession for Bridge export.
+// ExportBundle 是 ReadSession 为 Bridge 导出返回的数据包。
 type ExportBundle struct {
 	Meta      SessionMeta `json:"meta"`
 	Events    []Event     `json:"events"`
@@ -57,7 +57,7 @@ type ExportBundle struct {
 	Subagents string      `json:"subagents_dir,omitempty"`
 }
 
-// DiagnosticDTO is the Wails-facing export payload.
+// DiagnosticDTO 是面向 Wails 的导出载荷。
 type DiagnosticDTO struct {
 	SessionID   string      `json:"session_id"`
 	Meta        SessionMeta `json:"meta"`

@@ -1,129 +1,270 @@
-import { useEffect, useState } from 'react'
-import { Alert, Button, Checkbox, Form, Input, InputNumber, Radio, Space, Spin } from 'antd'
+import { useEffect, useState } from "react";
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  Form,
+  Input,
+  InputNumber,
+  Radio,
+  Space,
+  Spin,
+  Typography,
+} from "antd";
 import {
   getAISettings,
   saveAISettings,
   type AISettings,
   type ModelProfile,
-} from '@/api/system'
+} from "@/api/system";
 
 export default function SystemAITab() {
-  const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [form, setForm] = useState<AISettings>({
     models: [],
     context: { auto_compact_threshold: 100000, keep_recent_messages: 8 },
-    security: { allow_shell: false, allow_command_mcp: false, shell_timeout: '60s' },
-  })
-
+    security: {
+      allow_shell: false,
+      allow_command_mcp: false,
+      shell_timeout: "60s",
+    },
+  });
   async function load() {
-    setError('')
-    const s = await getAISettings()
-    setForm({ ...s, models: s.models?.length ? s.models : [] })
-    setLoaded(true)
+    setError("");
+    const s = await getAISettings();
+    setForm({ ...s, models: s.models?.length ? s.models : [] });
+    setLoaded(true);
   }
-
-  useEffect(() => { load() }, [])
-
+  useEffect(() => {
+    load();
+  }, []);
   function newModel(): ModelProfile {
-    const isFirst = form.models.length === 0
+    const isFirst = form.models.length === 0;
     return {
       id: crypto.randomUUID(),
-      name: '',
-      base_url: 'https://api.deepseek.com',
-      model: '',
+      name: "",
+      base_url: "",
+      model: "",
       max_tokens: 8192,
       enabled: true,
       default: isFirst,
-    }
+    };
   }
-
   function setDefaultModel(id: string) {
     setForm((f) => ({
       ...f,
-      models: f.models.map((m) => ({ ...m, default: m.id === id, enabled: m.id === id ? true : m.enabled })),
-    }))
+      models: f.models.map((m) => ({
+        ...m,
+        default: m.id === id,
+        enabled: m.id === id ? true : m.enabled,
+      })),
+    }));
   }
-
   async function save() {
-    setError('')
-    setMessage('')
-    setSaving(true)
+    setError("");
+    setMessage("");
+    setSaving(true);
     try {
-      const saved = await saveAISettings(form)
-      setForm({ ...saved, models: saved.models?.length ? saved.models : [] })
-      setMessage('模型配置已保存')
+      const saved = await saveAISettings(form);
+      setForm({ ...saved, models: saved.models?.length ? saved.models : [] });
+      setMessage("模型配置已保存");
     } catch (e) {
-      setError(e instanceof Error ? e.message : '保存失败')
+      setError(e instanceof Error ? e.message : "保存失败");
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
   }
-
-  if (!loaded) return <Spin style={{ display: 'block', margin: '24px auto' }} />
-
+  if (!loaded)
+    return <Spin style={{ display: "block", margin: "24px auto" }} />;
   return (
-    <section className="stack">
+    <Space direction="vertical" size="middle" style={{ width: "100%" }}>
       {error && <Alert type="error" message={error} />}
       {message && <Alert type="success" message={message} />}
-      <h2>模型配置</h2>
-      <p className="muted">可配置多个模型并选择启用；标记为「默认」的已启用模型将用于系统 Run。</p>
+      <Typography.Title level={4}>模型配置</Typography.Title>
+      <Typography.Text type="secondary">
+        可配置多个模型并选择启用；标记为「默认」的已启用模型将用于系统 Run。
+      </Typography.Text>
       {form.models.map((row, index) => (
-        <div key={row.id} className="panel panel--flat stack">
-          <Space wrap>
-            <Checkbox checked={row.enabled} onChange={(e) => {
-              const models = [...form.models]
-              models[index] = { ...row, enabled: e.target.checked }
-              setForm({ ...form, models })
-            }}>启用</Checkbox>
-            <Radio checked={row.default} onChange={() => setDefaultModel(row.id)}>默认</Radio>
-            <Button danger onClick={() => {
-              const models = form.models.filter((_, i) => i !== index)
-              if (row.default && models.length > 0) {
-                const first = models.find((m) => m.enabled) || models[0]
-                models.forEach((m) => { m.default = m.id === first.id })
-              }
-              setForm({ ...form, models })
-            }}>删除</Button>
+        <Card key={row.id} size="small">
+          <Space direction="vertical" style={{ width: "100%" }} size="middle">
+            <Space wrap>
+              <Checkbox
+                checked={row.enabled}
+                onChange={(e) => {
+                  const models = [...form.models];
+                  models[index] = { ...row, enabled: e.target.checked };
+                  setForm({ ...form, models });
+                }}
+              >
+                启用
+              </Checkbox>
+              <Radio
+                checked={row.default}
+                onChange={() => setDefaultModel(row.id)}
+              >
+                默认
+              </Radio>
+              <Button
+                danger
+                onClick={() => {
+                  const models = form.models.filter((_, i) => i !== index);
+                  if (row.default && models.length > 0) {
+                    const first = models.find((m) => m.enabled) || models[0];
+                    models.forEach((m) => {
+                      m.default = m.id === first.id;
+                    });
+                  }
+                  setForm({ ...form, models });
+                }}
+              >
+                删除
+              </Button>
+            </Space>
+            <Form layout="vertical">
+              <Form.Item label="显示名称">
+                <Input
+                  value={row.name}
+                  onChange={(e) => {
+                    const models = [...form.models];
+                    models[index] = { ...row, name: e.target.value };
+                    setForm({ ...form, models });
+                  }}
+                  placeholder="DeepSeek V4"
+                />
+              </Form.Item>
+              <Form.Item label="API 地址">
+                <Input
+                  value={row.base_url}
+                  onChange={(e) => {
+                    const models = [...form.models];
+                    models[index] = { ...row, base_url: e.target.value };
+                    setForm({ ...form, models });
+                  }}
+                />
+              </Form.Item>
+              <Form.Item label="API Key">
+                <Input
+                  value={row.api_key}
+                  onChange={(e) => {
+                    const models = [...form.models];
+                    models[index] = { ...row, api_key: e.target.value };
+                    setForm({ ...form, models });
+                  }}
+                  placeholder={
+                    row.api_key_set ? "已配置，留空则不修改" : "未配置"
+                  }
+                />
+              </Form.Item>
+              <Form.Item label="模型名称">
+                <Input
+                  value={row.model}
+                  onChange={(e) => {
+                    const models = [...form.models];
+                    models[index] = { ...row, model: e.target.value };
+                    setForm({ ...form, models });
+                  }}
+                />
+              </Form.Item>
+              <Form.Item label="最大 Token">
+                <InputNumber
+                  min={1}
+                  value={row.max_tokens}
+                  onChange={(v) => {
+                    const models = [...form.models];
+                    models[index] = { ...row, max_tokens: v ?? 8192 };
+                    setForm({ ...form, models });
+                  }}
+                  style={{ width: "100%" }}
+                />
+              </Form.Item>
+            </Form>
           </Space>
-          <Form layout="vertical">
-            <Form.Item label="显示名称"><Input value={row.name} onChange={(e) => {
-              const models = [...form.models]; models[index] = { ...row, name: e.target.value }; setForm({ ...form, models })
-            }} placeholder="DeepSeek V4" /></Form.Item>
-            <Form.Item label="API 地址"><Input value={row.base_url} onChange={(e) => {
-              const models = [...form.models]; models[index] = { ...row, base_url: e.target.value }; setForm({ ...form, models })
-            }} /></Form.Item>
-            <Form.Item label="API Key"><Input.Password value={row.api_key} onChange={(e) => {
-              const models = [...form.models]; models[index] = { ...row, api_key: e.target.value }; setForm({ ...form, models })
-            }} placeholder={row.api_key_set ? '已配置，留空则不修改' : '未配置'} /></Form.Item>
-            <Form.Item label="模型名称"><Input value={row.model} onChange={(e) => {
-              const models = [...form.models]; models[index] = { ...row, model: e.target.value }; setForm({ ...form, models })
-            }} /></Form.Item>
-            <Form.Item label="最大 Token"><InputNumber min={1} value={row.max_tokens} onChange={(v) => {
-              const models = [...form.models]; models[index] = { ...row, max_tokens: v ?? 8192 }; setForm({ ...form, models })
-            }} style={{ width: '100%' }} /></Form.Item>
-          </Form>
-        </div>
+        </Card>
       ))}
-      <Button onClick={() => setForm({ ...form, models: [...form.models, newModel()] })}>添加模型</Button>
+      <Button
+        onClick={() =>
+          setForm({ ...form, models: [...form.models, newModel()] })
+        }
+      >
+        添加模型
+      </Button>
       <h3>上下文</h3>
       <Form layout="vertical">
         <Form.Item label="自动压缩阈值">
-          <InputNumber value={form.context.auto_compact_threshold} onChange={(v) => setForm({ ...form, context: { ...form.context, auto_compact_threshold: v ?? 100000 } })} style={{ width: '100%' }} />
+          <InputNumber
+            value={form.context.auto_compact_threshold}
+            onChange={(v) =>
+              setForm({
+                ...form,
+                context: {
+                  ...form.context,
+                  auto_compact_threshold: v ?? 100000,
+                },
+              })
+            }
+            style={{ width: "100%" }}
+          />
         </Form.Item>
         <Form.Item label="保留最近消息数">
-          <InputNumber value={form.context.keep_recent_messages} onChange={(v) => setForm({ ...form, context: { ...form.context, keep_recent_messages: v ?? 8 } })} style={{ width: '100%' }} />
+          <InputNumber
+            value={form.context.keep_recent_messages}
+            onChange={(v) =>
+              setForm({
+                ...form,
+                context: { ...form.context, keep_recent_messages: v ?? 8 },
+              })
+            }
+            style={{ width: "100%" }}
+          />
         </Form.Item>
       </Form>
       <h3>安全</h3>
       <Space direction="vertical">
-        <Checkbox checked={form.security.allow_shell} onChange={(e) => setForm({ ...form, security: { ...form.security, allow_shell: e.target.checked } })}>允许 Shell</Checkbox>
-        <Checkbox checked={form.security.allow_command_mcp} onChange={(e) => setForm({ ...form, security: { ...form.security, allow_command_mcp: e.target.checked } })}>允许命令型 MCP</Checkbox>
-        <Form.Item label="Shell 超时"><Input value={form.security.shell_timeout} onChange={(e) => setForm({ ...form, security: { ...form.security, shell_timeout: e.target.value } })} placeholder="60s" /></Form.Item>
+        <Checkbox
+          checked={form.security.allow_shell}
+          onChange={(e) =>
+            setForm({
+              ...form,
+              security: { ...form.security, allow_shell: e.target.checked },
+            })
+          }
+        >
+          允许 Shell
+        </Checkbox>
+        <Checkbox
+          checked={form.security.allow_command_mcp}
+          onChange={(e) =>
+            setForm({
+              ...form,
+              security: {
+                ...form.security,
+                allow_command_mcp: e.target.checked,
+              },
+            })
+          }
+        >
+          允许命令型 MCP
+        </Checkbox>
+        <Form.Item label="Shell 超时">
+          <Input
+            value={form.security.shell_timeout}
+            onChange={(e) =>
+              setForm({
+                ...form,
+                security: { ...form.security, shell_timeout: e.target.value },
+              })
+            }
+            placeholder="60s"
+          />
+        </Form.Item>
       </Space>
-      <Button type="primary" loading={saving} onClick={save}>保存模型配置</Button>
-    </section>
-  )
+      <Button type="primary" loading={saving} onClick={save}>
+        保存模型配置
+      </Button>
+    </Space>
+  );
 }

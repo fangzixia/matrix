@@ -2,11 +2,10 @@ package workspace
 
 import (
 	"context"
-
-	"github.com/google/uuid"
-
 	"matrix/internal/modules/project"
 	"matrix/internal/modules/repository"
+
+	"github.com/google/uuid"
 )
 
 // ProjectRepoResolver 根据项目与仓库 ID 解析沙箱根目录并确保仓库已克隆。
@@ -52,7 +51,12 @@ func (r *ProjectRepoResolver) RepoRootFor(ctx context.Context, projectID uuid.UU
 	if err := r.WS.EnsureRepo(ctx, projectID, name, gitURL, branch); err != nil {
 		return "", err
 	}
-	return r.WS.NamedRepoRoot(projectID, name), nil
+	return r.WS.NamedRepoRoot(projectID, name)
+}
+
+// ProjectWorkspaceKey 返回项目工作区目录键（项目编码）。
+func (r *ProjectRepoResolver) ProjectWorkspaceKey(ctx context.Context, projectID uuid.UUID) (string, error) {
+	return r.WS.ProjectWorkspaceKey(ctx, projectID)
 }
 
 // CreateRunWorktree 创建 Run 专用 worktree 沙箱。
@@ -79,4 +83,28 @@ func (r *ProjectRepoResolver) MergeRunWorktree(ctx context.Context, projectID uu
 		return nil, err
 	}
 	return nil, nil
+}
+
+// DocsRoot 返回项目文档根目录并确保目录存在。
+func (r *ProjectRepoResolver) DocsRoot(ctx context.Context, projectID uuid.UUID) (string, error) {
+	if err := r.WS.EnsureDocsLayout(projectID); err != nil {
+		return "", err
+	}
+	return r.WS.DocsRoot(projectID)
+}
+
+// ResolveDocPath 解析文档逻辑路径为绝对路径。
+func (r *ProjectRepoResolver) ResolveDocPath(projectID uuid.UUID, logicalPath string) (string, error) {
+	return r.WS.ResolveDocPath(projectID, logicalPath)
+}
+
+// SanitizeDocLogicalPath 校验文档逻辑路径。
+func (r *ProjectRepoResolver) SanitizeDocLogicalPath(logicalPath string) (string, error) {
+	return SanitizeDocLogicalPath(logicalPath)
+}
+
+// DocSandboxDir 返回 AI 可访问的文档沙箱根目录。
+func (r *ProjectRepoResolver) DocSandboxDir(ctx context.Context, projectID uuid.UUID) (string, error) {
+	_ = ctx
+	return r.WS.DocSandboxDir(projectID)
 }

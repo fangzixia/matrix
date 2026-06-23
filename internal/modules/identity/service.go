@@ -5,15 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"matrix/internal/platform/config"
+	"matrix/internal/platform/db/models"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
-
-	"matrix/internal/platform/config"
-	"matrix/internal/platform/db/models"
 )
 
 // ErrInvalidCredentials 表示用户名或密码错误。
@@ -214,6 +213,7 @@ func (r *UserRepo) Count(ctx context.Context) (int64, error) {
 	return n, err
 }
 
+// toUser 转换为User。
 func toUser(m *models.User) *User {
 	return &User{
 		ID: m.ID, Username: m.Username, Email: m.Email, Name: m.Name,

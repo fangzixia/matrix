@@ -1,4 +1,4 @@
-// Package harness 定义 Plan/Implement/Verify/Build/UI Scan 任务流与 Prompt 模板。
+// Package harness 定义 Plan/Implement/Verify/Build 任务流与 Prompt 模板。
 package harness
 
 import "strings"
@@ -15,8 +15,6 @@ const (
 	KindVerify Kind = "verify"
 	// KindBuild 是构建阶段。
 	KindBuild Kind = "build"
-	// KindUIScan 是 UI 扫描阶段。
-	KindUIScan Kind = "ui-scan"
 )
 
 // State 是任务流执行状态。
@@ -40,17 +38,20 @@ const CoordinatorExecutionNote = `
 
 // Workflow 描述任务流的显式状态、预期产物与恢复指引，独立于 Prompt 文本。
 type Workflow struct {
-	Kind              Kind
-	State             State
-	Preset            string
-	UserInput         string
-	FilePath          string
-	FileLabel         string
-	FileFallback      string
-	DefaultTask       string
-	ExpectedArtifacts []string
-	Acceptance        []string
-	Recovery          []string
+	Kind                  Kind
+	State                 State
+	Preset                string
+	UserInput             string
+	FilePath              string
+	FileLabel             string
+	FileFallback          string
+	SecondaryFilePath     string
+	SecondaryFileLabel    string
+	SecondaryFileFallback string
+	DefaultTask           string
+	ExpectedArtifacts     []string
+	Acceptance            []string
+	Recovery              []string
 }
 
 // Prompt 根据任务流状态、产物与验收标准生成完整 Prompt 文本。
@@ -71,6 +72,10 @@ func (w Workflow) Prompt() string {
 		b.WriteString("\n\n")
 		b.WriteString(filePart(w.FileLabel, w.FilePath, w.FileFallback))
 	}
+	if w.SecondaryFileLabel != "" {
+		b.WriteString("\n\n")
+		b.WriteString(filePart(w.SecondaryFileLabel, w.SecondaryFilePath, w.SecondaryFileFallback))
+	}
 	b.WriteString("\n\n任务描述: ")
 	b.WriteString(userPart(w.UserInput, w.DefaultTask))
 	b.WriteString(CoordinatorExecutionNote)
@@ -83,6 +88,7 @@ func (w Workflow) WithState(state State) Workflow {
 	return w
 }
 
+// writeList 将列表项写入 Harness 工作流输出。
 func writeList(b *strings.Builder, label string, values []string) {
 	if len(values) == 0 {
 		return

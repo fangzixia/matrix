@@ -14,7 +14,7 @@ var (
 
 const redactedPlaceholder = "[REDACTED]"
 
-// RedactString masks common secret patterns in a single string.
+// RedactString 在单个字符串中屏蔽常见密钥/敏感信息模式。
 func RedactString(s string) string {
 	if s == "" {
 		return s
@@ -27,7 +27,7 @@ func RedactString(s string) string {
 	return out
 }
 
-// RedactData recursively redacts string values in a map/slice tree.
+// RedactData 递归脱敏 map/slice 树中的字符串值。
 func RedactData(v any) any {
 	switch x := v.(type) {
 	case string:
@@ -49,7 +49,7 @@ func RedactData(v any) any {
 	}
 }
 
-// Preview truncates s to maxRunes Unicode runes for audit/log previews.
+// Preview 将 s 截断至 maxRunes 个 Unicode 字符，用于审计/日志预览。
 func Preview(s string, maxRunes int) string {
 	if maxRunes <= 0 || s == "" {
 		return ""
@@ -61,7 +61,7 @@ func Preview(s string, maxRunes int) string {
 	return RedactString(string(runes[:maxRunes]) + "…")
 }
 
-// PreviewKeys redacts known sensitive map keys entirely.
+// PreviewKeys 对已知敏感 map 键整体脱敏。
 func PreviewKeys(data map[string]any) map[string]any {
 	if data == nil {
 		return nil

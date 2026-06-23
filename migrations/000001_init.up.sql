@@ -2,4 +2,4 @@
 -- Version: 000001
 
 -- users, sessions, projects, project_members, runs, chat_sessions,
--- project_settings, plans, artifacts
+-- plans, artifacts

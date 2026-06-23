@@ -4,11 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"matrix/internal/ai/llm"
 	"matrix/internal/platform/logging"
 	"strings"
 	"unicode/utf8"
-
-	"matrix/internal/ai/llm"
 )
 
 const (
@@ -24,17 +23,16 @@ type contextPipelineStats struct {
 	LLMCompacted  bool
 }
 
+// prepareHistoryForRequest 在 LLM 请求前对历史消息执行上下文治理流水线。
 func prepareHistoryForRequest(ctx context.Context, cfg Config, msgs *[]Message) contextPipelineStats {
 	stats := contextPipelineStats{}
 	if msgs == nil {
 		return stats
 	}
-
 	stats.BeforeTokens = estimateRequestTokens(cfg, *msgs)
 	if applyMicroCompact(msgs, cfg.ContextPolicy, false) {
 		stats.Compacted = true
 	}
-
 	if shouldProactiveAutoCompact(cfg, *msgs) {
 		if compacted, ok := llmCompactHistory(ctx, cfg, *msgs, 0, "auto"); ok {
 			*msgs = compacted
@@ -42,13 +40,11 @@ func prepareHistoryForRequest(ctx context.Context, cfg Config, msgs *[]Message) 
 			stats.LLMCompacted = true
 		}
 	}
-
 	if enforceHardContextBudget(ctx, cfg, msgs) {
 		stats.HardCompacted = true
 		stats.Compacted = true
 	}
 	stats.AfterTokens = estimateRequestTokens(cfg, *msgs)
-
 	if stats.Compacted {
 		data := map[string]any{
 			"before_tokens_est": stats.BeforeTokens,
@@ -71,6 +67,7 @@ func prepareHistoryForRequest(ctx context.Context, cfg Config, msgs *[]Message) 
 	return stats
 }
 
+// applyMicroCompact 清理较早工具结果以释放上下文空间。
 func applyMicroCompact(msgs *[]Message, p ContextPolicy, force bool) bool {
 	if msgs == nil || len(*msgs) == 0 {
 		return false
@@ -83,12 +80,10 @@ func applyMicroCompact(msgs *[]Message, p ContextPolicy, force bool) bool {
 			return false
 		}
 	}
-
 	keep := p.KeepRecentToolResults
 	if keep < 1 {
 		keep = 1
 	}
-
 	var idxs []int
 	for i := range *msgs {
 		if (*msgs)[i].Role == RoleTool {
@@ -98,7 +93,6 @@ func applyMicroCompact(msgs *[]Message, p ContextPolicy, force bool) bool {
 	if len(idxs) <= keep {
 		return false
 	}
-
 	placeholder := p.ClearedPlaceholder
 	if placeholder == "" {
 		placeholder = defaultToolResultPlaceholder
@@ -114,6 +108,7 @@ func applyMicroCompact(msgs *[]Message, p ContextPolicy, force bool) bool {
 	return changed
 }
 
+// enforceHardContextBudget 在超出硬预算时强制截断历史。
 func enforceHardContextBudget(ctx context.Context, cfg Config, msgs *[]Message) bool {
 	limit := cfg.ContextPolicy.ContextLimitTokens
 	if limit <= 0 || msgs == nil {
@@ -127,7 +122,6 @@ func enforceHardContextBudget(ctx context.Context, cfg Config, msgs *[]Message) 
 	if budget <= 0 {
 		return false
 	}
-
 	if estimateRequestTokens(cfg, *msgs) <= budget {
 		return false
 	}
@@ -135,18 +129,17 @@ func enforceHardContextBudget(ctx context.Context, cfg Config, msgs *[]Message) 
 	if estimateRequestTokens(cfg, *msgs) <= budget {
 		return true
 	}
-
 	if compacted, ok := llmCompactHistory(ctx, cfg, *msgs, budget, "hard_budget"); ok {
 		*msgs = compacted
 		if estimateRequestTokens(cfg, *msgs) <= budget {
 			return true
 		}
 	}
-
 	*msgs = deterministicCompactToBudget(cfg, *msgs, budget)
 	return true
 }
 
+// deterministicCompactToBudget 按预算确定性压缩历史消息。
 func deterministicCompactToBudget(cfg Config, msgs []Message, budget int) []Message {
 	summary := Message{
 		Role:    RoleSystem,
@@ -155,7 +148,6 @@ func deterministicCompactToBudget(cfg Config, msgs []Message, budget int) []Mess
 	if estimateRequestTokens(cfg, []Message{summary}) > budget {
 		summary.Content = truncateRunes(summary.Content, max(200, budget*2))
 	}
-
 	kept := make([]Message, 0, min(len(msgs), 16))
 	for i := len(msgs) - 1; i >= 0; i-- {
 		normalized := normalizeForCompactTail(msgs[i])
@@ -165,7 +157,6 @@ func deterministicCompactToBudget(cfg Config, msgs []Message, budget int) []Mess
 		}
 		kept = append([]Message{normalized}, kept...)
 	}
-
 	if len(kept) == 0 && len(msgs) > 0 {
 		last := normalizeForCompactTail(msgs[len(msgs)-1])
 		last.Content = truncateRunes(messageText(last), max(200, budget*2))
@@ -174,6 +165,7 @@ func deterministicCompactToBudget(cfg Config, msgs []Message, budget int) []Mess
 	return append([]Message{summary}, kept...)
 }
 
+// buildDeterministicSummary 构建确定性摘要文本。
 func buildDeterministicSummary(msgs []Message) string {
 	var toolCount, userCount, assistantCount int
 	var recent []string
@@ -198,6 +190,7 @@ Recent pre-compact messages:
 %s`, len(msgs), userCount, assistantCount, toolCount, strings.Join(recent, "\n"))
 }
 
+// normalizeForCompactTail 规范化保留尾部消息用于压缩。
 func normalizeForCompactTail(m Message) Message {
 	switch m.Role {
 	case RoleAssistant:
@@ -219,6 +212,7 @@ func normalizeForCompactTail(m Message) Message {
 	}
 }
 
+// toolCallNames 提取消息中的工具调用名称列表。
 func toolCallNames(calls []llm.ToolCall) string {
 	names := make([]string, 0, len(calls))
 	for _, tc := range calls {
@@ -232,6 +226,7 @@ func toolCallNames(calls []llm.ToolCall) string {
 	return strings.Join(names, ", ")
 }
 
+// estimateRequestTokens 估算单次 LLM 请求的 token 数。
 func estimateRequestTokens(cfg Config, history []Message) int {
 	req := llm.ChatRequest{
 		Model:     cfg.Model,
@@ -245,6 +240,7 @@ func estimateRequestTokens(cfg Config, history []Message) int {
 	return estimateCharsTokens(len(b))
 }
 
+// estimateMessagesTokens 估算消息列表总 token 数。
 func estimateMessagesTokens(msgs []Message) int {
 	var chars int
 	for _, m := range msgs {
@@ -256,15 +252,16 @@ func estimateMessagesTokens(msgs []Message) int {
 	return estimateCharsTokens(chars)
 }
 
+// estimateCharsTokens 按字符数保守估算 token 数。
 func estimateCharsTokens(chars int) int {
 	if chars <= 0 {
 		return 0
 	}
-	// Deliberately more conservative than chars/4 to leave room for mixed
-	// Chinese, code, JSON escaping, message wrappers, and provider templates.
+	// 有意比 chars/4 更保守，为中文、代码、JSON 转义、消息包装及提供方模板预留余量。
 	return (chars + 2) / 3
 }
 
+// messageText 提取单条消息用于估算的文本内容。
 func messageText(m Message) string {
 	var b strings.Builder
 	if m.Content != "" {
@@ -279,6 +276,7 @@ func messageText(m Message) string {
 	return b.String()
 }
 
+// truncateAsyncMessage 按策略截断异步 Worker 结果消息。
 func truncateAsyncMessage(m Message, maxRunes int) Message {
 	if maxRunes <= 0 || utf8.RuneCountInString(m.Content) <= maxRunes {
 		return m
@@ -287,6 +285,7 @@ func truncateAsyncMessage(m Message, maxRunes int) Message {
 	return m
 }
 
+// min 返回两个整数中的较小值。
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -294,6 +293,7 @@ func min(a, b int) int {
 	return b
 }
 
+// max 返回两个整数中的较大值。
 func max(a, b int) int {
 	if a > b {
 		return a

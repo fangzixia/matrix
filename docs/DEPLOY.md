@@ -129,7 +129,7 @@ cd frontend && npm run dev
 1. 使用 **systemd**（Linux）或 **Windows 服务 / 任务计划程序** 托管 `matrix` 进程，设置开机自启。
 2. 前置 **Nginx / Caddy** 反向代理，启用 HTTPS；将 `auth.session.secure` 设为 `true`。
 3. 修改 bootstrap 密码，创建普通用户后禁用或删除默认 admin。
-4. 保持 `ai.security.allow_shell: false`（默认）。
+4. 在管理区域 → 系统配置中保持 **允许 Shell** 关闭（默认）。
 5. 定期备份 PostgreSQL 与 `storage.data_dir` 目录。
 
 ### Linux systemd 示例

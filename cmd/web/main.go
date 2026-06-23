@@ -4,14 +4,14 @@ package main
 import (
 	"context"
 	"log"
+	"matrix/frontend"
+	"matrix/internal/app/bootstrap"
 	"os"
 	"os/signal"
 	"syscall"
-
-	"matrix/frontend"
-	"matrix/internal/app/bootstrap"
 )
 
+// main 程序入口。
 func main() {
 	path := bootstrap.ConfigPathFromFlags()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -4,9 +4,8 @@ package events
 import (
 	"context"
 	"encoding/json"
-	"sync"
-
 	"matrix/internal/ai/stream"
+	"sync"
 )
 
 const (

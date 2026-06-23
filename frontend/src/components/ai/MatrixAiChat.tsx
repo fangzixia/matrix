@@ -1,33 +1,34 @@
-import { RobotOutlined } from '@ant-design/icons'
-import { Bubble, Sender, Welcome } from '@ant-design/x'
-import type { BubbleItemType } from '@ant-design/x'
+import { Flex } from "antd";
+import { RobotOutlined } from "@ant-design/icons";
+import { Bubble, Sender, Welcome } from "@ant-design/x";
+import type { BubbleItemType } from "@ant-design/x";
 
-export type AiMessageRole = 'user' | 'ai' | 'system'
+export type AiMessageRole = "user" | "ai" | "system";
 
 export interface AiMessage {
-  key: string | number
-  role: AiMessageRole
-  content: string
-  loading?: boolean
+  key: string | number;
+  role: AiMessageRole;
+  content: string;
+  loading?: boolean;
 }
 
 export interface MatrixAiChatProps {
-  items?: AiMessage[]
-  loading?: boolean
-  placeholder?: string
-  welcomeTitle?: string
-  welcomeDescription?: string
-  onSubmit: (message: string) => void | Promise<void>
-  onCancel?: () => void
-  className?: string
+  items?: AiMessage[];
+  loading?: boolean;
+  placeholder?: string;
+  welcomeTitle?: string;
+  welcomeDescription?: string;
+  onSubmit: (message: string) => void | Promise<void>;
+  onCancel?: () => void;
+  className?: string;
 }
 
 export default function MatrixAiChat({
   items = [],
   loading = false,
-  placeholder = '输入消息…',
-  welcomeTitle = 'AI 对话',
-  welcomeDescription = '描述你的任务，Matrix 将创建一次运行并执行。',
+  placeholder = "输入消息…",
+  welcomeTitle = "AI 对话",
+  welcomeDescription = "描述你的任务，Matrix 将创建一次运行并执行。",
   onSubmit,
   onCancel,
   className,
@@ -37,11 +38,10 @@ export default function MatrixAiChat({
     role: item.role,
     content: item.content,
     loading: item.loading,
-  }))
-
+  }));
   return (
-    <div className={['matrix-ai-chat', className].filter(Boolean).join(' ')}>
-      <div className="matrix-ai-chat__body">
+    <Flex vertical gap={12} className={className} style={{ minHeight: 360 }}>
+      <Flex flex={1} vertical justify="center" style={{ minHeight: 240 }}>
         {items.length === 0 ? (
           <Welcome
             icon={<RobotOutlined />}
@@ -51,13 +51,13 @@ export default function MatrixAiChat({
         ) : (
           <Bubble.List items={bubbleItems} autoScroll />
         )}
-      </div>
+      </Flex>
       <Sender
         loading={loading}
         placeholder={placeholder}
         onSubmit={onSubmit}
         onCancel={onCancel}
       />
-    </div>
-  )
+    </Flex>
+  );
 }

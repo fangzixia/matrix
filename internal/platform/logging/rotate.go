@@ -17,6 +17,7 @@ type rotateWriter struct {
 	size       int64
 }
 
+// newRotateWriter 创建按大小轮转的日志写入器。
 func newRotateWriter(path string, maxSizeMB, maxBackups int) (*rotateWriter, error) {
 	if maxSizeMB <= 0 {
 		maxSizeMB = 100
@@ -35,6 +36,7 @@ func newRotateWriter(path string, maxSizeMB, maxBackups int) (*rotateWriter, err
 	return w, nil
 }
 
+// open 打开或创建当前日志文件句柄。
 func (w *rotateWriter) open() error {
 	if err := os.MkdirAll(filepath.Dir(w.path), 0o755); err != nil {
 		return err
@@ -72,6 +74,7 @@ func (w *rotateWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
+// rotate 将当前日志文件轮转归档。
 func (w *rotateWriter) rotate() error {
 	if w.file != nil {
 		_ = w.file.Close()
@@ -92,6 +95,7 @@ func (w *rotateWriter) rotate() error {
 	return w.open()
 }
 
+// backupPath 生成轮转备份文件路径。
 func (w *rotateWriter) backupPath(n int) string {
 	return fmt.Sprintf("%s.%d", w.path, n)
 }
@@ -108,6 +112,7 @@ func (w *rotateWriter) Close() error {
 	return err
 }
 
+// openLogWriter 根据配置打开日志输出 Writer。
 func openLogWriter(path string, maxSizeMB, maxBackups int) (io.WriteCloser, error) {
 	if maxSizeMB <= 0 && maxBackups <= 0 {
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)

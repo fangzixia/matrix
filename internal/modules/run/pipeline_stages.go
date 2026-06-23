@@ -1,11 +1,8 @@
 package run
 
-import (
-	"encoding/json"
+import "encoding/json"
 
-	"github.com/google/uuid"
-)
-
+// encodePipelineStages 将流水线阶段列表序列化为 JSON。
 func encodePipelineStages(stages []string) string {
 	if len(stages) == 0 {
 		return "[]"
@@ -14,6 +11,7 @@ func encodePipelineStages(stages []string) string {
 	return string(b)
 }
 
+// decodePipelineStages 从 JSON 反序列化流水线阶段列表。
 func decodePipelineStages(raw string) []string {
 	if raw == "" || raw == "null" {
 		return nil
@@ -23,11 +21,4 @@ func decodePipelineStages(raw string) []string {
 		return nil
 	}
 	return stages
-}
-
-func sandboxLockKey(projectID uuid.UUID, repositoryID *uuid.UUID) string {
-	if repositoryID == nil || *repositoryID == uuid.Nil {
-		return projectID.String()
-	}
-	return projectID.String() + "/" + repositoryID.String()
 }

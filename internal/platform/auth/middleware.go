@@ -2,10 +2,10 @@
 package auth
 
 import (
-	"github.com/gin-gonic/gin"
-
 	"matrix/internal/modules/identity"
 	platformhttp "matrix/internal/platform/http"
+
+	"github.com/gin-gonic/gin"
 )
 
 const ctxUserKey = "auth_user"

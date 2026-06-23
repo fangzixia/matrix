@@ -4,13 +4,12 @@ package notification
 import (
 	"context"
 	"fmt"
+	"matrix/internal/platform/db/models"
+	"matrix/internal/platform/events"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-
-	"matrix/internal/platform/db/models"
-	"matrix/internal/platform/events"
 )
 
 // DTO 是通知 API 返回的数据传输对象。
@@ -99,6 +98,7 @@ func (s *Service) NotifyRunStatus(ctx context.Context, userID uuid.UUID, project
 	_, _ = s.Create(ctx, userID, "task:"+status, title, body, link)
 }
 
+// toDTO 将数据库模型转换为 API DTO。
 func toDTO(m *models.Notification) DTO {
 	return DTO{
 		ID: m.ID, UserID: m.UserID, Kind: m.Kind, Title: m.Title, Body: m.Body,

@@ -2,13 +2,12 @@ package coordinator
 
 import (
 	"context"
-	"sync"
-	"time"
-
 	"matrix/internal/ai/agent"
 	"matrix/internal/ai/audit"
 	"matrix/internal/ai/query"
 	"matrix/internal/ai/stream"
+	"sync"
+	"time"
 )
 
 // SubAgentStreamHub 将 Worker 流式消息、进度与嵌套 Async 通道接到上层（如 desktop Bridge）。
@@ -26,14 +25,12 @@ type StreamHub struct {
 	EmitUI    func(stream.Message)
 	OnUpdate  func(agent.Snapshot)
 	OnDone    func(agent.Snapshot)
-
 	Registry  *agent.Registry
 	Sidechain *agent.SidechainWriter
 	Audit     *audit.Writer
-
-	mu     sync.Mutex
-	nested map[agent.ID]*AsyncSupport
-	inner  query.StreamSink
+	mu        sync.Mutex
+	nested    map[agent.ID]*AsyncSupport
+	inner     query.StreamSink
 }
 
 // NewStreamHub 创建 Hub；publish/onUpdate/onDone 可为 nil（仅更新 Registry）。
@@ -86,6 +83,7 @@ func (h *StreamHub) Publish(_ context.Context, msg stream.Message) error {
 	return nil
 }
 
+// recordSidechain 将 Worker 旁路 transcript 写入 sidechain 文件。
 func (h *StreamHub) recordSidechain(msg stream.Message) {
 	if h.Sidechain == nil || msg.AgentID == "" {
 		return
@@ -97,6 +95,7 @@ func (h *StreamHub) recordSidechain(msg stream.Message) {
 	})
 }
 
+// applyProgress 根据流式消息更新 Agent 进度快照。
 func (h *StreamHub) applyProgress(msg stream.Message) {
 	if h.Registry == nil || msg.AgentID == "" {
 		return

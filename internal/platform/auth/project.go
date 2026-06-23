@@ -1,11 +1,11 @@
 package auth
 
 import (
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
-
 	"matrix/internal/modules/iam"
 	platformhttp "matrix/internal/platform/http"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // RequireProject 校验用户对路径参数 :id 所指项目的最低角色权限。

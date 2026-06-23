@@ -1,5 +1,4 @@
-// Package config 负责从 YAML 加载应用配置、环境变量展开与默认值填充。
-// AI/MCP/Git/Worker/Pipeline 等运行参数可由 Web 系统配置覆盖并写入数据库。
+// Package config 负责从 YAML 加载应用配置与环境变量展开。
 package config
 
 import (
@@ -12,7 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config 根配置结构，对应 config/config.yml 各段。
+// Config 对应 config/config.yml，仅含文件级配置。
 type Config struct {
 	System   SystemConfig   `yaml:"system"`
 	Storage  StorageConfig  `yaml:"storage"`
@@ -20,12 +19,6 @@ type Config struct {
 	Server   ServerConfig   `yaml:"server"`
 	Database DatabaseConfig `yaml:"database"`
 	Auth     AuthConfig     `yaml:"auth"`
-	AI       AIConfig       `yaml:"ai"`
-	MCP      MCPConfig      `yaml:"mcp"`
-	Git      GitConfig      `yaml:"git"`
-	Worker   WorkerConfig   `yaml:"worker"`
-	Pipeline PipelineConfig `yaml:"pipeline"`
-	Run      RunConfig      `yaml:"run"`
 }
 
 // SystemConfig 是运行环境标识。
@@ -87,185 +80,87 @@ type BootstrapConfig struct {
 	AdminPassword string `yaml:"admin_password"`
 }
 
-// AIConfig 是 LLM 模型、上下文与安全策略。
-type AIConfig struct {
-	DefaultModel ModelYAML      `yaml:"default_model"`
-	Models       []ModelProfile `yaml:"-"`
-	Context      ContextYAML    `yaml:"context"`
-	Security     SecurityYAML   `yaml:"security"`
-}
+var envPattern = regexp.MustCompile(`\$\{([^}:]+)(?::-([^}]*))?}`)
 
-// ModelYAML 是 YAML 中的默认模型配置段。
-type ModelYAML struct {
-	BaseURL   string `yaml:"base_url"`
-	APIKey    string `yaml:"api_key"`
-	Model     string `yaml:"model"`
-	MaxTokens int    `yaml:"max_tokens"`
-}
-
-// ContextYAML 是对话上下文压缩阈值。
-type ContextYAML struct {
-	AutoCompactThreshold int `yaml:"auto_compact_threshold"`
-	KeepRecentMessages   int `yaml:"keep_recent_messages"`
-}
-
-// SecurityYAML 是 Agent 沙箱安全策略。
-type SecurityYAML struct {
-	AllowShell      bool          `yaml:"allow_shell"`
-	AllowCommandMCP bool          `yaml:"allow_command_mcp"`
-	ShellTimeout    time.Duration `yaml:"shell_timeout"`
-}
-
-// MCPConfig 是 MCP 服务器映射。
-type MCPConfig struct {
-	Servers map[string]MCPServerYAML `yaml:"servers"`
-}
-
-// MCPServerYAML 是单个 MCP 服务器的 YAML 定义。
-type MCPServerYAML struct {
-	Command  string            `yaml:"command"`
-	Args     []string          `yaml:"args"`
-	URL      string            `yaml:"url"`
-	Disabled bool              `yaml:"disabled"`
-	Headers  map[string]string `yaml:"headers"`
-	Env      map[string]string `yaml:"env"`
-}
-
-// GitConfig 是 Git 克隆与 SSH 访问配置。
-type GitConfig struct {
-	SSHKeyPath   string            `yaml:"ssh_key_path"`
-	CloneTimeout time.Duration     `yaml:"clone_timeout"`
-	Accesses     []GitAccessConfig `yaml:"accesses"`
-}
-
-// GitAccessConfig 是按主机匹配的 SSH 密钥规则。
-type GitAccessConfig struct {
-	ID         string `json:"id" yaml:"id"`
-	Name       string `json:"name" yaml:"name"`
-	Host       string `json:"host" yaml:"host"`
-	SSHKeyPath string `json:"ssh_key_path" yaml:"ssh_key_path"`
-}
-
-// WorkerConfig 是嵌入式任务队列 Worker 参数。
-type WorkerConfig struct {
-	Enabled      bool          `yaml:"enabled"`
-	PollInterval time.Duration `yaml:"poll_interval"`
-	MaxAttempts  int           `yaml:"max_attempts"`
-	Concurrency  int           `yaml:"concurrency"`
-}
-
-// PipelineConfig 是 Harness 默认流水线阶段。
-type PipelineConfig struct {
-	DefaultStages   []string `yaml:"default_stages"`
-	PullBeforeStage bool     `yaml:"pull_before_stage"`
-}
-
-// RunConfig 是 Run 沙箱与并发相关配置。
-type RunConfig struct {
-	SandboxMode      string `yaml:"sandbox_mode"`       // worktree（默认）| shared
-	CleanupOnFailure bool   `yaml:"cleanup_on_failure"` // failed/cancelled 时删除 worktree
-}
-
-// SandboxModeWorktree 为每 Run 独立 worktree 沙箱（可并行）。
-const SandboxModeWorktree = "worktree"
-
-// SandboxModeShared 为共享主仓库沙箱（legacy，项目内串行）。
-const SandboxModeShared = "shared"
-
-var envPattern = regexp.MustCompile(`\$\{([^}:]+)(?::-([^}]*))?\}`)
-
-// Load 读取 YAML 配置文件，展开 ${ENV} 占位符并与 Default 合并。
+// Load 读取 YAML 配置文件，展开 ${ENV} 占位符；所有字段须在 config.yml 中显式配置。
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 	expanded := expandEnv(string(data))
-	cfg := Default()
-	if err := yaml.Unmarshal([]byte(expanded), cfg); err != nil {
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
 		return nil, err
 	}
+	if err := validate(&cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+func validate(cfg *Config) error {
+	if cfg == nil {
+		return fmt.Errorf("config is nil")
+	}
+	if strings.TrimSpace(cfg.System.Env) == "" {
+		return fmt.Errorf("system.env is required")
+	}
+	if strings.TrimSpace(cfg.Storage.BaseDir) == "" {
+		return fmt.Errorf("storage.base_dir is required")
+	}
+	if strings.TrimSpace(cfg.Storage.DataDir) == "" {
+		return fmt.Errorf("storage.data_dir is required")
+	}
+	if strings.TrimSpace(cfg.Storage.WorkspacesDir) == "" {
+		return fmt.Errorf("storage.workspaces_dir is required")
+	}
+	if strings.TrimSpace(cfg.Storage.AuditDir) == "" {
+		return fmt.Errorf("storage.audit_dir is required")
+	}
+	if strings.TrimSpace(cfg.Storage.ExportsDir) == "" {
+		return fmt.Errorf("storage.exports_dir is required")
+	}
+	if strings.TrimSpace(cfg.Logging.Dir) == "" {
+		return fmt.Errorf("logging.dir is required")
+	}
+	if strings.TrimSpace(cfg.Logging.File) == "" {
+		return fmt.Errorf("logging.file is required")
+	}
+	if strings.TrimSpace(cfg.Logging.Level) == "" {
+		return fmt.Errorf("logging.level is required")
+	}
+	if strings.TrimSpace(cfg.Logging.Format) == "" {
+		return fmt.Errorf("logging.format is required")
+	}
+	if strings.TrimSpace(cfg.Server.Addr) == "" {
+		return fmt.Errorf("server.addr is required")
+	}
+	if cfg.Server.ReadTimeout <= 0 {
+		return fmt.Errorf("server.read_timeout is required")
+	}
 	if strings.TrimSpace(cfg.Database.DSN) == "" {
-		return nil, fmt.Errorf("database.dsn is required")
+		return fmt.Errorf("database.dsn is required")
 	}
-	return cfg, nil
+	if cfg.Database.MaxOpenConns <= 0 {
+		return fmt.Errorf("database.max_open_conns is required")
+	}
+	if strings.TrimSpace(cfg.Auth.Session.CookieName) == "" {
+		return fmt.Errorf("auth.session.cookie_name is required")
+	}
+	if cfg.Auth.Session.TTL <= 0 {
+		return fmt.Errorf("auth.session.ttl is required")
+	}
+	if strings.TrimSpace(cfg.Auth.Bootstrap.AdminUsername) == "" {
+		return fmt.Errorf("auth.bootstrap.admin_username is required")
+	}
+	if strings.TrimSpace(cfg.Auth.Bootstrap.AdminPassword) == "" {
+		return fmt.Errorf("auth.bootstrap.admin_password is required")
+	}
+	return nil
 }
 
-// Default 返回内置默认值；未在 YAML 中填写的字段会使用此处定义。
-func Default() *Config {
-	return &Config{
-		System: SystemConfig{Env: "development"},
-		Storage: StorageConfig{
-			BaseDir:       "./data",
-			DataDir:       "./data",
-			WorkspacesDir: "workspaces",
-			AuditDir:      "audit",
-			ExportsDir:    "exports",
-		},
-		Logging: LoggingConfig{
-			Dir:    "./logs",
-			File:   "matrix.log",
-			Level:  "info",
-			Format: "json",
-		},
-		Server: ServerConfig{
-			Addr:         ":8080",
-			ReadTimeout:  30 * time.Second,
-			WriteTimeout: 0,
-		},
-		Database: DatabaseConfig{
-			MaxOpenConns: 25,
-			AutoMigrate:  true,
-			SQLMigrate:   true,
-		},
-		Auth: AuthConfig{
-			Session: SessionConfig{
-				CookieName: "_matrix_session",
-				TTL:        720 * time.Hour,
-			},
-			Bootstrap: BootstrapConfig{AdminUsername: "root"},
-		},
-		AI: AIConfig{
-			DefaultModel: ModelYAML{
-				BaseURL:   "https://api.deepseek.com",
-				Model:     "deepseek-chat",
-				MaxTokens: 8192,
-			},
-			Context: ContextYAML{
-				AutoCompactThreshold: 100000,
-				KeepRecentMessages:   8,
-			},
-			Security: SecurityYAML{
-				ShellTimeout: 60 * time.Second,
-			},
-		},
-		MCP: MCPConfig{Servers: map[string]MCPServerYAML{}},
-		Git: GitConfig{CloneTimeout: 300 * time.Second},
-		Worker: WorkerConfig{
-			Enabled:      true,
-			PollInterval: 2 * time.Second,
-			MaxAttempts:  3,
-			Concurrency:  2,
-		},
-		Pipeline: PipelineConfig{
-			DefaultStages:   []string{"plan", "implement", "verify", "build"},
-			PullBeforeStage: true,
-		},
-		Run: RunConfig{
-			SandboxMode:      SandboxModeWorktree,
-			CleanupOnFailure: true,
-		},
-	}
-}
-
-// ActiveSandboxMode 返回当前 Run 沙箱模式（默认 worktree）。
-func (c *Config) ActiveSandboxMode() string {
-	if c == nil || strings.TrimSpace(c.Run.SandboxMode) == "" {
-		return SandboxModeWorktree
-	}
-	return strings.TrimSpace(c.Run.SandboxMode)
-}
-
+// expandEnv 展开配置字符串中的 ${ENV} 环境变量占位符。
 func expandEnv(s string) string {
 	return envPattern.ReplaceAllStringFunc(s, func(m string) string {
 		sub := envPattern.FindStringSubmatch(m)
@@ -294,6 +189,7 @@ func ResolvePath(base, p string) string {
 	return cleanPath(joinPath(base, p))
 }
 
+// filepathIsAbs 跨平台判断路径是否为绝对路径。
 func filepathIsAbs(path string) bool {
 	if len(path) >= 3 && path[1] == ':' {
 		return true
@@ -301,6 +197,7 @@ func filepathIsAbs(path string) bool {
 	return strings.HasPrefix(path, "/") || strings.HasPrefix(path, "\\")
 }
 
+// joinPath 跨平台拼接路径片段。
 func joinPath(elem ...string) string {
 	if len(elem) == 0 {
 		return ""
@@ -319,6 +216,7 @@ func joinPath(elem ...string) string {
 	return out
 }
 
+// cleanPath 跨平台规范化路径。
 func cleanPath(p string) string {
 	return strings.ReplaceAll(strings.TrimRight(p, "/\\"), "/", string(os.PathSeparator))
 }

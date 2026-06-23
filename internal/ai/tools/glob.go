@@ -43,24 +43,21 @@ func NewGlobTool() *Tool {
 
 const globMaxResults = 100
 
+// execGlob 在沙箱内执行 glob 文件匹配。
 func execGlob(ctx context.Context, args map[string]any) (string, error) {
 	pattern, _ := getString(args, "pattern")
 	searchPath, _ := getString(args, "path")
-
 	searchRoot, err := ResolveAndValidateToolPath(ctx, searchPath)
 	if err != nil {
 		return "", fmt.Errorf("glob: %w", err)
 	}
-
 	matches, truncated, err := globSearch(pattern, searchRoot, globMaxResults)
 	if err != nil {
 		return "", fmt.Errorf("glob: %w", err)
 	}
-
 	if len(matches) == 0 {
 		return "未找到匹配文件", nil
 	}
-
 	var sb strings.Builder
 	for _, f := range matches {
 		f = ToAbsolutePath(f, searchRoot)
@@ -89,13 +86,11 @@ func globSearch(pattern, root string, limit int) (matches []string, truncated bo
 		}
 		return files, false, nil
 	}
-
 	suffixPattern := strings.TrimPrefix(pattern, "**/")
 	if suffixPattern == pattern {
 		idx := strings.Index(pattern, "**")
 		suffixPattern = pattern[idx+3:]
 	}
-
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, werr error) error {
 		if werr != nil {
 			return nil
@@ -120,7 +115,6 @@ func globSearch(pattern, root string, limit int) (matches []string, truncated bo
 		}
 		return nil
 	})
-
 	if err == errStopGlobWalk {
 		return matches[:limit], true, nil
 	}

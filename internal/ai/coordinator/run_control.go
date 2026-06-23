@@ -2,9 +2,8 @@ package coordinator
 
 import (
 	"context"
-	"sync"
-
 	"matrix/internal/ai/agent"
+	"sync"
 )
 
 // RunControl 跟踪运行中 Worker 的 context.CancelFunc，供 task_stop 与父会话取消使用。

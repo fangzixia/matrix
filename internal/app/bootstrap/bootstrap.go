@@ -6,19 +6,19 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
-	"os"
-
-	"github.com/gin-gonic/gin"
-
 	"matrix/internal/app"
 	"matrix/internal/modules/identity"
+	"matrix/internal/modules/settings"
 	"matrix/internal/platform/config"
 	platformdb "matrix/internal/platform/db"
 	platformhttp "matrix/internal/platform/http"
 	"matrix/internal/platform/logging"
 	"matrix/internal/platform/migrate"
 	"matrix/internal/platform/storage"
-	"matrix/internal/webapp"
+	"matrix/internal/routers"
+	"os"
+
+	"github.com/gin-gonic/gin"
 )
 
 // Options 是 Web 服务启动时的配置选项。
@@ -46,7 +46,6 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	log.Info("storage resolved", "data_dir", paths.DataDir, "log_dir", paths.LogDir)
-
 	db, err := platformdb.Open(cfg.Database)
 	if err != nil {
 		return err
@@ -57,22 +56,20 @@ func Run(ctx context.Context, opts Options) error {
 	if err := identity.BootstrapAdmin(ctx, db, cfg.Auth); err != nil {
 		return err
 	}
-
-	deps := app.NewDeps(cfg, paths, db, log)
-	if err := deps.SystemSettings.Bootstrap(ctx); err != nil {
+	runtime := config.DefaultRuntime()
+	sysSettings := settings.NewService(db, runtime)
+	if err := sysSettings.Bootstrap(ctx); err != nil {
 		return fmt.Errorf("system settings: %w", err)
 	}
+	deps := app.NewDeps(cfg, runtime, paths, db, log, sysSettings)
 	if err := deps.Repositories.MigrateLegacyProjects(ctx); err != nil {
 		log.Warn("migrate legacy repositories", "err", err)
 	}
 	deps.Runs.SetLifecycle(ctx) // 进程退出时取消进行中的 Run
 	defer deps.Close()
-
 	deps.StartJobWorker(ctx) // 嵌入式任务队列消费者
-
 	engine := platformhttp.NewEngine(log, dev)
-	webapp.Register(engine, deps, opts.StaticFS)
-
+	routers.Register(engine, deps, opts.StaticFS)
 	log.Info("listening", "addr", cfg.Server.Addr)
 	srv := &httpServer{engine: engine, addr: cfg.Server.Addr}
 	return srv.ListenAndServe()
@@ -95,6 +92,7 @@ func ConfigPathFromFlags() string {
 	return *path
 }
 
+// envOr 读取环境变量，为空时返回默认值。
 func envOr(k, def string) string {
 	if v := os.Getenv(k); v != "" {
 		return v

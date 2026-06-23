@@ -58,33 +58,27 @@ type Client struct {
 // NewClient 创建 MCP 客户端
 func NewClient(command string, args []string, env []string) (*Client, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Env = append(cmd.Env, env...)
-
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("create stdin pipe: %w", err)
 	}
-
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("create stdout pipe: %w", err)
 	}
-
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("create stderr pipe: %w", err)
 	}
-
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start command: %w", err)
 	}
-
 	client := &Client{
 		cmd:           cmd,
 		stdin:         stdin,
@@ -101,7 +95,6 @@ func NewClient(command string, args []string, env []string) (*Client, error) {
 
 	// 启动 stderr 日志协程
 	go client.logStderr()
-
 	return client, nil
 }
 
@@ -113,7 +106,6 @@ func (c *Client) Initialize() error {
 		return nil
 	}
 	c.mu.Unlock()
-
 	req := InitializeRequest{
 		ProtocolVersion: "2024-11-05",
 		Capabilities: Capabilities{
@@ -127,24 +119,19 @@ func (c *Client) Initialize() error {
 			Version: "1.0.0",
 		},
 	}
-
 	var result InitializeResult
 	if err := c.call("initialize", req, &result); err != nil {
 		return fmt.Errorf("initialize: %w", err)
 	}
-
 	if err := c.notify("notifications/initialized", nil); err != nil {
 		return fmt.Errorf("send initialized notification: %w", err)
 	}
-
 	c.mu.Lock()
 	c.serverInfo = &result.ServerInfo
 	c.capabilities = &result.Capabilities
 	c.initialized = true
 	c.mu.Unlock()
-
 	logging.Infof("MCP client initialized: server=%s version=%s", result.ServerInfo.Name, result.ServerInfo.Version)
-
 	return nil
 }
 
@@ -155,12 +142,10 @@ func (c *Client) ListTools() ([]Tool, error) {
 			return nil, err
 		}
 	}
-
 	var result ListToolsResult
 	if err := c.call("tools/list", nil, &result); err != nil {
 		return nil, fmt.Errorf("list tools: %w", err)
 	}
-
 	return result.Tools, nil
 }
 
@@ -171,17 +156,14 @@ func (c *Client) CallTool(name string, arguments map[string]interface{}) (*CallT
 			return nil, err
 		}
 	}
-
 	req := CallToolRequest{
 		Name:      name,
 		Arguments: arguments,
 	}
-
 	var result CallToolResult
 	if err := c.call("tools/call", req, &result); err != nil {
 		return nil, fmt.Errorf("call tool: %w", err)
 	}
-
 	return &result, nil
 }
 
@@ -192,12 +174,10 @@ func (c *Client) ListResources() ([]Resource, error) {
 			return nil, err
 		}
 	}
-
 	var result ListResourcesResult
 	if err := c.call("resources/list", nil, &result); err != nil {
 		return nil, fmt.Errorf("list resources: %w", err)
 	}
-
 	return result.Resources, nil
 }
 
@@ -208,14 +188,11 @@ func (c *Client) ReadResource(uri string) (*ReadResourceResult, error) {
 			return nil, err
 		}
 	}
-
 	req := ReadResourceRequest{URI: uri}
-
 	var result ReadResourceResult
 	if err := c.call("resources/read", req, &result); err != nil {
 		return nil, fmt.Errorf("read resource: %w", err)
 	}
-
 	return &result, nil
 }
 
@@ -226,12 +203,10 @@ func (c *Client) ListPrompts() ([]Prompt, error) {
 			return nil, err
 		}
 	}
-
 	var result ListPromptsResult
 	if err := c.call("prompts/list", nil, &result); err != nil {
 		return nil, fmt.Errorf("list prompts: %w", err)
 	}
-
 	return result.Prompts, nil
 }
 
@@ -272,7 +247,6 @@ func (c *Client) Close() error {
 	go func() {
 		done <- c.cmd.Wait()
 	}()
-
 	select {
 	case <-time.After(5 * time.Second):
 		// 超时，强制杀死进程
@@ -293,7 +267,6 @@ func (c *Client) call(method string, params interface{}, result interface{}) err
 		return fmt.Errorf("client is closed")
 	}
 	c.mu.RUnlock()
-
 	id := c.requestID.Add(1)
 	idKey := normalizeRPCID(id)
 	req := JSONRPCRequest{
@@ -313,7 +286,6 @@ func (c *Client) call(method string, params interface{}, result interface{}) err
 	if err != nil {
 		return fmt.Errorf("marshal request: %w", err)
 	}
-
 	if _, err := c.stdin.Write(append(data, '\n')); err != nil {
 		return fmt.Errorf("write request: %w", err)
 	}
@@ -324,7 +296,6 @@ func (c *Client) call(method string, params interface{}, result interface{}) err
 		if resp.Error != nil {
 			return fmt.Errorf("rpc error %d: %s", resp.Error.Code, resp.Error.Message)
 		}
-
 		if result != nil && resp.Result != nil {
 			// 将 result 重新编码为 JSON，然后解码到目标类型
 			resultData, err := json.Marshal(resp.Result)
@@ -335,7 +306,6 @@ func (c *Client) call(method string, params interface{}, result interface{}) err
 				return fmt.Errorf("unmarshal result: %w", err)
 			}
 		}
-
 		return nil
 	case <-time.After(30 * time.Second):
 		return fmt.Errorf("request timeout")
@@ -352,22 +322,18 @@ func (c *Client) notify(method string, params interface{}) error {
 		return fmt.Errorf("client is closed")
 	}
 	c.mu.RUnlock()
-
 	notif := JSONRPCNotification{
 		JSONRPC: "2.0",
 		Method:  method,
 		Params:  params,
 	}
-
 	data, err := json.Marshal(notif)
 	if err != nil {
 		return fmt.Errorf("marshal notification: %w", err)
 	}
-
 	if _, err := c.stdin.Write(append(data, '\n')); err != nil {
 		return fmt.Errorf("write notification: %w", err)
 	}
-
 	return nil
 }
 
@@ -406,10 +372,8 @@ func (c *Client) readLoop() {
 			}
 			continue
 		}
-
 		logging.Warnf("Warning: received unknown message: %s", string(line))
 	}
-
 	if err := c.scanner.Err(); err != nil {
 		logging.Errorf("Error reading from stdout: %v", err)
 	}

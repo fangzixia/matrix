@@ -12,12 +12,22 @@ type sandboxLocks struct {
 	locks map[string]*sync.Mutex
 }
 
+// newSandboxLocks 创建沙箱互斥锁管理器。
 func newSandboxLocks() *sandboxLocks {
 	return &sandboxLocks{locks: make(map[string]*sync.Mutex)}
 }
 
-func (p *sandboxLocks) acquire(projectID uuid.UUID, repositoryID *uuid.UUID) func() {
-	key := sandboxLockKey(projectID, repositoryID)
+// sandboxLockKey 生成项目/仓库沙箱互斥锁键（项目编码 + 可选仓库 ID）。
+func sandboxLockKey(projectCode string, repositoryID *uuid.UUID) string {
+	if repositoryID == nil || *repositoryID == uuid.Nil {
+		return projectCode
+	}
+	return projectCode + "/" + repositoryID.String()
+}
+
+// acquire 获取沙箱锁并返回解锁函数。
+func (p *sandboxLocks) acquire(projectCode string, repositoryID *uuid.UUID) func() {
+	key := sandboxLockKey(projectCode, repositoryID)
 	p.mu.Lock()
 	m, ok := p.locks[key]
 	if !ok {
@@ -25,7 +35,6 @@ func (p *sandboxLocks) acquire(projectID uuid.UUID, repositoryID *uuid.UUID) fun
 		p.locks[key] = m
 	}
 	p.mu.Unlock()
-
 	m.Lock()
 	return m.Unlock
 }

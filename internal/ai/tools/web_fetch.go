@@ -55,40 +55,33 @@ const (
 // execWebFetch 是 web_fetch 工具的执行逻辑。
 func execWebFetch(ctx context.Context, args map[string]any) (string, error) {
 	rawURL, _ := getString(args, "url")
-
 	if _, err := url.ParseRequestURI(rawURL); err != nil {
 		return "", fmt.Errorf("web_fetch: 无效的 URL %q: %w", rawURL, err)
 	}
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("web_fetch: 创建请求失败: %w", err)
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; matrix-agent/1.0)")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/plain;q=0.9")
-
 	client := &http.Client{Timeout: webFetchTimeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("web_fetch: 请求失败: %w", err)
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("web_fetch: 服务器返回 %d %s", resp.StatusCode, resp.Status)
 	}
-
 	limited := io.LimitReader(resp.Body, webFetchMaxBodyBytes+1)
 	body, err := io.ReadAll(limited)
 	if err != nil {
 		return "", fmt.Errorf("web_fetch: 读取响应失败: %w", err)
 	}
-
 	truncated := len(body) > webFetchMaxBodyBytes
 	if truncated {
 		body = body[:webFetchMaxBodyBytes]
 	}
-
 	contentType := resp.Header.Get("Content-Type")
 	var text string
 	if strings.Contains(contentType, "text/html") {
@@ -96,11 +89,9 @@ func execWebFetch(ctx context.Context, args map[string]any) (string, error) {
 	} else {
 		text = string(body)
 	}
-
 	if truncated {
 		text += "\n\n[内容已截断，仅显示前 200KB]"
 	}
-
 	return fmt.Sprintf("[%d %s] %s\n\n%s", resp.StatusCode, resp.Status, rawURL, text), nil
 }
 

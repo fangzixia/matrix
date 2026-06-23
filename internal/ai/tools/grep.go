@@ -79,6 +79,7 @@ var grepHasRipgrep = func() bool {
 	return err == nil
 }()
 
+// execGrep 在沙箱内执行内容搜索（优先 rg）。
 func execGrep(ctx context.Context, args map[string]any) (string, error) {
 	pattern, _ := getString(args, "pattern")
 	path, _ := getString(args, "path")
@@ -101,13 +102,11 @@ func execGrep(ctx context.Context, args map[string]any) (string, error) {
 	if outputMode == "" {
 		outputMode = "files_with_matches"
 	}
-
 	var err error
 	searchRoot, err := ResolveAndValidateToolPath(ctx, path)
 	if err != nil {
 		return "", fmt.Errorf("grep: %w", err)
 	}
-
 	if grepHasRipgrep {
 		return execGrepRg(ctx, pattern, searchRoot, globFilter, outputMode,
 			caseInsensitive, int(contextLines), showLineNumbers, headLimit)
@@ -116,6 +115,7 @@ func execGrep(ctx context.Context, args map[string]any) (string, error) {
 		caseInsensitive, int(contextLines), showLineNumbers, headLimit)
 }
 
+// execGrepRg 使用 ripgrep 执行搜索。
 func execGrepRg(
 	ctx context.Context,
 	pattern, path, globFilter, outputMode string,
@@ -150,7 +150,6 @@ func execGrepRg(
 		rgArgs = append(rgArgs, pattern)
 	}
 	rgArgs = append(rgArgs, path)
-
 	cmd := exec.CommandContext(ctx, "rg", rgArgs...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -160,13 +159,13 @@ func execGrepRg(
 		}
 		return "", fmt.Errorf("grep(rg): %w", err)
 	}
-
 	lines := grepSplitLines(out.String())
 	lines = grepApplyHeadLimit(lines, headLimit)
 	lines = grepAbsolutizePaths(lines, path, outputMode)
 	return formatGrepResult(outputMode, lines, len(lines)), nil
 }
 
+// execGrepGo 使用 Go 原生实现执行搜索。
 func execGrepGo(
 	ctx context.Context,
 	pattern, rootPath, globFilter, outputMode string,
@@ -180,14 +179,12 @@ func execGrepGo(
 	if err != nil {
 		return "", fmt.Errorf("grep: 正则编译失败: %w", err)
 	}
-
 	var (
 		matchFiles   []string
 		contentLines []string
 		countLines   []string
 		totalFiles   int
 	)
-
 	err = filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, werr error) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -231,7 +228,6 @@ func execGrepGo(
 	if err != nil && err != context.Canceled {
 		return "", fmt.Errorf("grep: %w", err)
 	}
-
 	switch outputMode {
 	case "files_with_matches":
 		lines := grepApplyHeadLimit(matchFiles, headLimit)
@@ -247,6 +243,7 @@ func execGrepGo(
 	}
 }
 
+// grepSearchFile 在单个文件中搜索匹配行。
 func grepSearchFile(
 	path string, re *regexp.Regexp, outputMode string,
 	contextLines int, showLineNumbers bool,
@@ -256,7 +253,6 @@ func grepSearchFile(
 		return nil, err
 	}
 	defer f.Close()
-
 	var fileLines []string
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -265,7 +261,6 @@ func grepSearchFile(
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-
 	var results []string
 	for i, line := range fileLines {
 		if !re.MatchString(line) {
@@ -291,6 +286,7 @@ func grepSearchFile(
 	return results, nil
 }
 
+// grepSplitLines 拆分 grep 结果行。
 func grepSplitLines(s string) []string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.TrimRight(s, "\n\r")
@@ -300,6 +296,7 @@ func grepSplitLines(s string) []string {
 	return strings.Split(s, "\n")
 }
 
+// grepApplyHeadLimit 对 grep 结果应用 head 限制。
 func grepApplyHeadLimit(lines []string, limit int) []string {
 	if limit == 0 || len(lines) <= limit {
 		return lines
@@ -307,6 +304,7 @@ func grepApplyHeadLimit(lines []string, limit int) []string {
 	return lines[:limit]
 }
 
+// grepAbsolutizePaths 将 grep 结果路径转为绝对路径。
 func grepAbsolutizePaths(lines []string, searchRoot, outputMode string) []string {
 	out := make([]string, len(lines))
 	for i, line := range lines {
@@ -325,6 +323,7 @@ func grepAbsolutizePaths(lines []string, searchRoot, outputMode string) []string
 	return out
 }
 
+// formatGrepResult 格式化 grep 搜索结果文本。
 func formatGrepResult(outputMode string, lines []string, count int) string {
 	if len(lines) == 0 {
 		return "未找到匹配"
@@ -347,6 +346,7 @@ func maxInt(a, b int) int {
 	return b
 }
 
+// minInt 返回两个整数中的较小值。
 func minInt(a, b int) int {
 	if a < b {
 		return a
