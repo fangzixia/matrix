@@ -9,17 +9,17 @@ import (
 	"strings"
 )
 
-// TodoItem 表示单条 TODO 项。
+// TodoItem 表示单条任务项。
 type TodoItem struct {
-	// ID 为 TODO 唯一标识；merge=true 时用于匹配更新。
+	// ID 为 任务项唯一标识；merge=true 时用于匹配更新。
 	ID string `json:"id"`
-	// Content 为 TODO 描述内容。
+	// Content 为任务项描述内容。
 	Content string `json:"content"`
 	// Status 任务状态：pending / in_progress / completed / cancelled。
 	Status string `json:"status"`
 }
 
-// NewTodoWriteTool 创建 TODO 写入工具。
+// NewTodoWriteTool 创建任务项写入工具。
 //
 // 职责边界：管理结构化任务列表，与 [NewSleepTool] 等工具互补。
 //
@@ -67,7 +67,7 @@ status 取值：pending、in_progress、completed、cancelled`,
 	}
 }
 
-// todoWriteFilePath 返回 todo 持久化文件路径。
+// todoWriteFilePath 返回任务项持久化文件路径。
 func todoWriteFilePath(ctx context.Context) (string, error) {
 	root := SandboxFrom(ctx)
 	if root == "" {
@@ -76,7 +76,7 @@ func todoWriteFilePath(ctx context.Context) (string, error) {
 	return filepath.Join(root, ".matrix", "todos.json"), nil
 }
 
-// decodeTodos 从 JSON 解码 todo 列表。
+// decodeTodos 从 JSON 解码任务项列表。
 func decodeTodos(raw any) ([]TodoItem, error) {
 	if raw == nil {
 		return nil, fmt.Errorf("缺少 todos")
@@ -169,7 +169,7 @@ func execTodoWrite(ctx context.Context, args map[string]any) (string, error) {
 	return todoWriteFormat(finalItems), nil
 }
 
-// todoWriteLoad 从文件加载 todo 列表。
+// todoWriteLoad 从文件加载任务项列表。
 func todoWriteLoad(ctx context.Context) []TodoItem {
 	path, err := todoWriteFilePath(ctx)
 	if err != nil {
@@ -186,7 +186,7 @@ func todoWriteLoad(ctx context.Context) []TodoItem {
 	return items
 }
 
-// todoWriteSave 将 todo 列表保存到文件。
+// todoWriteSave 将任务项列表保存到文件。
 func todoWriteSave(ctx context.Context, items []TodoItem) error {
 	path, err := todoWriteFilePath(ctx)
 	if err != nil {
@@ -199,7 +199,7 @@ func todoWriteSave(ctx context.Context, items []TodoItem) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
-// todoWriteFormat 格式化 todo 列表为可读文本。
+// todoWriteFormat 格式化任务项列表为可读文本。
 func todoWriteFormat(items []TodoItem) string {
 	if len(items) == 0 {
 		return "TODO 列表为空"
