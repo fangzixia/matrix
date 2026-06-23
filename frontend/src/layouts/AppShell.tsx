@@ -157,6 +157,8 @@ export function AppShell() {
   const selectedNavKey = projectId
     ? resolveProjectNavKey(location.pathname, projectId)
     : "";
+  const isChatPage = /\/projects\/[^/]+\/chat$/.test(location.pathname);
+  const headerHeight = token.Layout?.headerHeight ?? 48;
   const userMenuItems: MenuProps["items"] = [
     {
       key: "header",
@@ -288,7 +290,13 @@ export function AppShell() {
     if (item) navigate(item.to);
   }
   return (
-    <Layout style={{ minHeight: "100vh" }}>
+    <Layout
+      style={
+        isChatPage
+          ? { height: "100vh", overflow: "hidden" }
+          : { minHeight: "100vh" }
+      }
+    >
       <Header
         style={{
           display: "flex",
@@ -450,7 +458,13 @@ export function AppShell() {
           </Dropdown>
         </Space>
       </Header>
-      <Layout>
+      <Layout
+        style={
+          isChatPage
+            ? { height: `calc(100vh - ${headerHeight}px)`, minHeight: 0 }
+            : undefined
+        }
+      >
         {projectId && currentProject && (
           <Sider
             width={220}
@@ -479,10 +493,31 @@ export function AppShell() {
             />
           </Sider>
         )}
-        <Content style={{ padding: 24, background: token.colorBgLayout }}>
-          <div style={{ maxWidth: 1280, margin: "0 auto" }}>
-            <Outlet />
-          </div>
+        <Content
+          style={
+            isChatPage
+              ? {
+                  padding: 0,
+                  flex: 1,
+                  height: "100%",
+                  minHeight: 0,
+                  overflow: "hidden",
+                  display: "flex",
+                  flexDirection: "column",
+                  background: token.colorBgContainer,
+                }
+              : { padding: 24, background: token.colorBgLayout }
+          }
+        >
+          {isChatPage ? (
+            <Flex vertical style={{ height: "100%", flex: 1, minHeight: 0 }}>
+              <Outlet />
+            </Flex>
+          ) : (
+            <div style={{ maxWidth: 1280, margin: "0 auto" }}>
+              <Outlet />
+            </div>
+          )}
         </Content>
       </Layout>
     </Layout>

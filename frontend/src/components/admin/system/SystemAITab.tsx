@@ -52,6 +52,8 @@ export default function SystemAITab() {
       max_tokens: 8192,
       enabled: true,
       default: isFirst,
+      multimodal: false,
+      attachment_types: [],
     };
   }
   function setDefaultModel(id: string) {
@@ -67,6 +69,12 @@ export default function SystemAITab() {
   async function save() {
     setError("");
     setMessage("");
+    for (const m of form.models) {
+      if (m.multimodal && (!m.attachment_types || m.attachment_types.length === 0)) {
+        setError(`模型「${m.name || m.model || "未命名"}」已启用多模态，请至少选择一种附件类型`);
+        return;
+      }
+    }
     setSaving(true);
     try {
       const saved = await saveAISettings(form);
@@ -180,6 +188,45 @@ export default function SystemAITab() {
                   }}
                   style={{ width: "100%" }}
                 />
+              </Form.Item>
+              <Form.Item label="多模态">
+                <Space direction="vertical">
+                  <Checkbox
+                    checked={row.multimodal ?? false}
+                    onChange={(e) => {
+                      const models = [...form.models];
+                      models[index] = {
+                        ...row,
+                        multimodal: e.target.checked,
+                        attachment_types: e.target.checked
+                          ? row.attachment_types?.length
+                            ? row.attachment_types
+                            : ["image"]
+                          : [],
+                      };
+                      setForm({ ...form, models });
+                    }}
+                  >
+                    支持多模态
+                  </Checkbox>
+                  {row.multimodal && (
+                    <Checkbox.Group
+                      value={row.attachment_types ?? []}
+                      options={[
+                        { label: "图片", value: "image" },
+                        { label: "文档（txt / md）", value: "document" },
+                      ]}
+                      onChange={(values) => {
+                        const models = [...form.models];
+                        models[index] = {
+                          ...row,
+                          attachment_types: values as string[],
+                        };
+                        setForm({ ...form, models });
+                      }}
+                    />
+                  )}
+                </Space>
               </Form.Item>
             </Form>
           </Space>

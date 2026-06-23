@@ -251,6 +251,41 @@ export function parseRunActivity(messages: StreamMessage[]): RunActivityState {
   return state;
 }
 
+function lastTurnText(
+  turns: RunActivityTurn[],
+  kind: "message" | "thinking",
+): string {
+  const collected: string[] = [];
+  function walk(list: RunActivityTurn[]) {
+    for (const turn of list) {
+      const text =
+        kind === "message" ? turn.message?.trim() : turn.thinking?.trim();
+      if (text) collected.push(text);
+      for (const tool of turn.tools) {
+        walk(tool.workerTurns ?? []);
+      }
+    }
+  }
+  walk(turns);
+  return collected.at(-1) ?? "";
+}
+
+/** 从活动状态中提取面向用户的最终回复文本。 */
+export function extractReplyText(state: RunActivityState): string {
+  const resultOut = state.result?.output?.trim();
+  if (resultOut && !state.result?.isError) {
+    return resultOut;
+  }
+  const message = lastTurnText(state.turns, "message");
+  if (message) return message;
+  const thinking = lastTurnText(state.turns, "thinking");
+  if (thinking) return thinking;
+  if (state.result?.isError && state.result.error?.trim()) {
+    return state.result.error.trim();
+  }
+  return "";
+}
+
 /** 从 RunEvent 与实时消息构建活动状态。 */
 export function buildRunActivityState(
   events: RunEvent[],

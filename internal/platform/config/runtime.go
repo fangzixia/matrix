@@ -22,16 +22,24 @@ type AIConfig struct {
 	Security SecurityConfig
 }
 
+// 附件类型常量（与前端共用）。
+const (
+	AttachmentTypeImage    = "image"
+	AttachmentTypeDocument = "document"
+)
+
 // ModelProfile 系统级可配置的模型条目（支持多条启用/默认）。
 type ModelProfile struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	BaseURL   string `json:"base_url"`
-	APIKey    string `json:"api_key"`
-	Model     string `json:"model"`
-	MaxTokens int    `json:"max_tokens"`
-	Enabled   bool   `json:"enabled"`
-	Default   bool   `json:"default"`
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	BaseURL         string   `json:"base_url"`
+	APIKey          string   `json:"api_key"`
+	Model           string   `json:"model"`
+	MaxTokens       int      `json:"max_tokens"`
+	Enabled         bool     `json:"enabled"`
+	Default         bool     `json:"default"`
+	Multimodal      bool     `json:"multimodal"`
+	AttachmentTypes []string `json:"attachment_types"`
 }
 
 // ModelSpec 是单个生效模型的连接参数。
@@ -140,22 +148,44 @@ func (p ModelProfile) ToSpec() ModelSpec {
 	}
 }
 
-// ActiveModel 返回用户在系统配置中启用的默认模型；未配置时 ok 为 false。
-func (a AIConfig) ActiveModel() (ModelSpec, bool) {
+// AllowsAttachmentType 判断模型是否允许指定类型的附件。
+func (p ModelProfile) AllowsAttachmentType(t string) bool {
+	if !p.Multimodal {
+		return false
+	}
+	for _, at := range p.AttachmentTypes {
+		if at == t {
+			return true
+		}
+	}
+	return false
+}
+
+// ActiveModelProfile 返回用户在系统配置中启用的默认模型完整配置。
+func (a AIConfig) ActiveModelProfile() (ModelProfile, bool) {
 	if len(a.Models) == 0 {
-		return ModelSpec{}, false
+		return ModelProfile{}, false
 	}
 	for _, m := range a.Models {
 		if m.Enabled && m.Default {
-			return m.ToSpec(), true
+			return m, true
 		}
 	}
 	for _, m := range a.Models {
 		if m.Enabled {
-			return m.ToSpec(), true
+			return m, true
 		}
 	}
-	return ModelSpec{}, false
+	return ModelProfile{}, false
+}
+
+// ActiveModel 返回用户在系统配置中启用的默认模型；未配置时 ok 为 false。
+func (a AIConfig) ActiveModel() (ModelSpec, bool) {
+	p, ok := a.ActiveModelProfile()
+	if !ok {
+		return ModelSpec{}, false
+	}
+	return p.ToSpec(), true
 }
 
 // ModelConfigured 判断模型配置是否完整，可用于 Run 启动前校验。

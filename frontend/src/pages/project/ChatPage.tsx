@@ -1,85 +1,160 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Alert, Card, Flex, Typography } from "antd";
-import { RobotOutlined } from "@ant-design/icons";
-import { Bubble, Sender, Welcome } from "@ant-design/x";
-import type { BubbleItemType } from "@ant-design/x";
+import { Alert, Flex, Spin, theme } from "antd";
+import { MessageOutlined } from "@ant-design/icons";
+import { Conversations } from "@ant-design/x";
+import MatrixAiChat, {
+  type AiMessage,
+  type ChatAttachment,
+  type ChatCapabilities,
+} from "@/components/ai/MatrixAiChat";
 import * as chatApi from "@/api/chat";
 import { useTaskStream } from "@/hooks/useTaskStream";
 
-interface ChatItem {
-  key: string;
-  role: "user" | "ai";
-  content: string;
-  loading?: boolean;
+interface SessionState {
+  id: string;
+  title: string;
+  messages: chatApi.ChatMessage[];
+  updatedAt?: string;
+  isLocal?: boolean;
 }
 
-function toBubbleItems(items: ChatItem[]): BubbleItemType[] {
-  return items.map((item) => ({
-    key: item.key,
-    role: item.role,
-    content: item.content,
-    loading: item.loading,
-  }));
-}
-
-function messagesToItems(messages: chatApi.ChatMessage[]): ChatItem[] {
+function messagesToItems(messages: chatApi.ChatMessage[]): AiMessage[] {
   return messages.map((m, i) => ({
     key: `hist-${i}`,
     role: m.role === "user" ? "user" : "ai",
     content: m.content,
+    attachments: m.attachments,
   }));
+}
+
+function itemsToMessages(items: AiMessage[]): chatApi.ChatMessage[] {
+  return items
+    .filter((item) => (item.content || item.attachments?.length) && !item.loading)
+    .map((item) => ({
+      role: item.role === "user" ? ("user" as const) : ("assistant" as const),
+      content: item.content,
+      attachments: item.attachments,
+    }));
+}
+
+function sessionTitle(messages: chatApi.ChatMessage[]): string {
+  const first = messages.find((m) => m.role === "user" && m.content.trim());
+  if (first?.content) return first.content.trim().slice(0, 80);
+  return "新对话";
+}
+
+function hasMessages(messages: chatApi.ChatMessage[]): boolean {
+  return messages.some((m) => m.content.trim() || (m.attachments?.length ?? 0) > 0);
+}
+
+function fromApiSession(session: chatApi.ChatSession): SessionState {
+  return {
+    id: session.id,
+    title: session.title || "对话",
+    messages: chatApi.parseChatMessages(session.messages),
+    updatedAt: session.updated_at,
+  };
 }
 
 export default function ChatPage() {
   const { id: projectId = "" } = useParams();
+  const { token } = theme.useToken();
+  const headerHeight = token.Layout?.headerHeight ?? 48;
   const { streamTask } = useTaskStream();
-  const [sessionId, setSessionId] = useState("");
-  const [items, setItems] = useState<ChatItem[]>([]);
+  const [sessions, setSessions] = useState<SessionState[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState("");
+  const [items, setItems] = useState<AiMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [booting, setBooting] = useState(true);
+  const [capabilities, setCapabilities] = useState<ChatCapabilities>({
+    multimodal: false,
+    attachment_types: [],
+  });
+
+  const mergeSessionMessages = useCallback(
+    (sid: string, nextItems: AiMessage[]) => {
+      const messages = itemsToMessages(nextItems);
+      setSessions((prev) => {
+        const exists = prev.some((s) => s.id === sid);
+        const title = sessionTitle(messages);
+        const updatedAt = new Date().toISOString();
+        if (!exists) {
+          return [
+            {
+              id: sid,
+              title,
+              messages,
+              updatedAt,
+              isLocal: false,
+            },
+            ...prev,
+          ];
+        }
+        return prev.map((s) =>
+          s.id === sid
+            ? { ...s, title, messages, updatedAt, isLocal: false }
+            : s,
+        );
+      });
+      return messages;
+    },
+    [],
+  );
+
   const persistSession = useCallback(
-    async (nextItems: ChatItem[], sid: string) => {
-      const messages = nextItems
-        .filter((item) => item.content && !item.loading)
-        .map((item) => ({
-          role:
-            item.role === "user" ? ("user" as const) : ("assistant" as const),
-          content: item.content,
-        }));
+    async (nextItems: AiMessage[], sid: string) => {
+      const messages = mergeSessionMessages(sid, nextItems);
       await chatApi.saveChatSessions(projectId, [
         {
           id: sid,
-          title: messages[0]?.content?.slice(0, 80) || "对话",
+          title: sessionTitle(messages),
           messages,
         },
       ]);
     },
-    [projectId],
+    [mergeSessionMessages, projectId],
   );
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
       setBooting(true);
       try {
-        const res = await chatApi.listChatSessions(projectId);
-        const sessions = res.sessions ?? [];
+        const [sessionsRes, caps] = await Promise.all([
+          chatApi.listChatSessions(projectId),
+          chatApi.getChatCapabilities(projectId),
+        ]);
         if (cancelled) return;
-        if (sessions.length) {
-          const session = sessions[0];
-          setSessionId(session.id);
-          setItems(
-            messagesToItems(chatApi.parseChatMessages(session.messages)),
-          );
+        setCapabilities({
+          multimodal: caps.multimodal,
+          attachment_types: caps.attachment_types ?? [],
+        });
+        const loaded = (sessionsRes.sessions ?? []).map(fromApiSession);
+        if (loaded.length) {
+          setSessions(loaded);
+          setActiveSessionId(loaded[0].id);
+          setItems(messagesToItems(loaded[0].messages));
         } else {
           const newId = crypto.randomUUID();
-          setSessionId(newId);
+          const empty: SessionState = {
+            id: newId,
+            title: "新对话",
+            messages: [],
+            isLocal: true,
+          };
+          setSessions([empty]);
+          setActiveSessionId(newId);
           setItems([]);
         }
       } catch {
         if (!cancelled) {
-          setSessionId(crypto.randomUUID());
+          const newId = crypto.randomUUID();
+          setSessions([
+            { id: newId, title: "新对话", messages: [], isLocal: true },
+          ]);
+          setActiveSessionId(newId);
           setItems([]);
         }
       } finally {
@@ -91,37 +166,111 @@ export default function ChatPage() {
       cancelled = true;
     };
   }, [projectId]);
-  async function send(message: string) {
+
+  const syncCurrentSession = useCallback(
+    (nextItems: AiMessage[]) => {
+      if (!activeSessionId) return;
+      const messages = itemsToMessages(nextItems);
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === activeSessionId
+            ? {
+                ...s,
+                messages,
+                title: hasMessages(messages) ? sessionTitle(messages) : s.title,
+              }
+            : s,
+        ),
+      );
+    },
+    [activeSessionId],
+  );
+
+  const switchSession = useCallback(
+    (sid: string) => {
+      if (loading || sid === activeSessionId) return;
+      syncCurrentSession(items);
+      const target = sessions.find((s) => s.id === sid);
+      if (!target) return;
+      setActiveSessionId(sid);
+      setItems(messagesToItems(target.messages));
+      setError("");
+    },
+    [activeSessionId, items, loading, sessions, syncCurrentSession],
+  );
+
+  const createNewChat = useCallback(() => {
+    if (loading) return;
+    syncCurrentSession(items);
+    const newId = crypto.randomUUID();
+    setSessions((prev) => {
+      const kept = prev.filter(
+        (s) => !(s.isLocal && !hasMessages(s.messages)),
+      );
+      return [
+        { id: newId, title: "新对话", messages: [], isLocal: true },
+        ...kept,
+      ];
+    });
+    setActiveSessionId(newId);
+    setItems([]);
+    setError("");
+  }, [items, loading, syncCurrentSession]);
+
+  const conversationItems = useMemo(
+    () =>
+      sessions.map((s) => ({
+        key: s.id,
+        label: s.title || "新对话",
+        icon: <MessageOutlined />,
+      })),
+    [sessions],
+  );
+
+  async function send(message: string, attachments?: ChatAttachment[]) {
     const text = message.trim();
-    if (!text || !sessionId || loading) return;
+    if ((!text && !attachments?.length) || !activeSessionId || loading) return;
     setError("");
     setLoading(true);
+    const sid = activeSessionId;
     const userKey = `user-${Date.now()}`;
     const aiKey = `ai-${Date.now()}`;
-    const withUser: ChatItem[] = [
+    const withUser: AiMessage[] = [
       ...items,
-      { key: userKey, role: "user", content: text },
+      {
+        key: userKey,
+        role: "user",
+        content: text,
+        attachments,
+      },
       { key: aiKey, role: "ai", content: "", loading: true },
     ];
     setItems(withUser);
     try {
-      const run = await chatApi.sendChatMessage(projectId, sessionId, text);
+      const run = await chatApi.sendChatMessage(
+        projectId,
+        sid,
+        text,
+        attachments,
+      );
       const reply = await streamTask(projectId, run.id, (_delta, full) => {
-        setItems((prev) =>
-          prev.map((item) =>
+        setItems((prev) => {
+          const next = prev.map((item) =>
             item.key === aiKey
               ? { ...item, content: full, loading: true }
               : item,
-          ),
-        );
+          );
+          syncCurrentSession(next);
+          return next;
+        });
       });
-      const finalItems: ChatItem[] = withUser.map((item) =>
+      const finalItems: AiMessage[] = withUser.map((item) =>
         item.key === aiKey
           ? { ...item, content: reply || "（无回复）", loading: false }
           : item,
       );
       setItems(finalItems);
-      await persistSession(finalItems, sessionId);
+      await persistSession(finalItems, sid);
     } catch (e) {
       setItems((prev) => prev.filter((item) => item.key !== aiKey));
       setError(e instanceof Error ? e.message : "发送失败");
@@ -129,31 +278,64 @@ export default function ChatPage() {
       setLoading(false);
     }
   }
+
   if (booting) {
-    return null;
+    return (
+      <Flex
+        align="center"
+        justify="center"
+        style={{ height: `calc(100vh - ${headerHeight}px)` }}
+      >
+        <Spin />
+      </Flex>
+    );
   }
+
   return (
-    <Flex vertical gap={16} style={{ minHeight: 420 }}>
-      <Typography.Title level={2} style={{ margin: 0 }}>
-        AI 对话
-      </Typography.Title>
-      {error && <Alert type="error" message={error} />}
-      <Card style={{ flex: 1 }}>
-        <Flex vertical gap={12} style={{ minHeight: 360 }}>
-          <Flex flex={1} vertical justify="center" style={{ minHeight: 240 }}>
-            {items.length === 0 ? (
-              <Welcome
-                icon={<RobotOutlined />}
-                title="AI 对话"
-                description="与 Matrix AI 对话，获取项目相关帮助。"
-              />
-            ) : (
-              <Bubble.List items={toBubbleItems(items)} autoScroll />
-            )}
-          </Flex>
-          <Sender loading={loading} placeholder="输入消息…" onSubmit={send} />
-        </Flex>
-      </Card>
+    <Flex
+      style={{
+        height: `calc(100vh - ${headerHeight}px)`,
+        minHeight: 0,
+        overflow: "hidden",
+        background: token.colorBgContainer,
+      }}
+    >
+      <Conversations
+        activeKey={activeSessionId}
+        onActiveChange={(key) => switchSession(String(key))}
+        items={conversationItems}
+        creation={{
+          onClick: createNewChat,
+          disabled: loading,
+        }}
+        style={{
+          width: 260,
+          flexShrink: 0,
+          height: "100%",
+          borderRight: `1px solid ${token.colorBorderSecondary}`,
+          background: token.colorBgContainer,
+          padding: "12px 8px",
+        }}
+      />
+      <Flex
+        vertical
+        style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }}
+      >
+        {error && (
+          <Alert
+            type="error"
+            message={error}
+            style={{ margin: "8px 24px 0", flexShrink: 0 }}
+          />
+        )}
+        <MatrixAiChat
+          items={items}
+          loading={loading}
+          capabilities={capabilities}
+          onSubmit={send}
+          style={{ flex: 1, minHeight: 0, height: "100%" }}
+        />
+      </Flex>
     </Flex>
   );
 }

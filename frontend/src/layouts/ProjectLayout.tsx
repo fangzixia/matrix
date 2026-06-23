@@ -9,7 +9,15 @@ export function ProjectLayout() {
     if (id) fetchProject(id);
   }, [id, fetchProject]);
   return (
-    <div className="project-layout">
+    <div
+      style={{
+        height: "100%",
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0,
+      }}
+    >
       <Outlet />
     </div>
   );

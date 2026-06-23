@@ -15,6 +15,8 @@ export interface ModelProfile {
   max_tokens: number;
   enabled: boolean;
   default: boolean;
+  multimodal?: boolean;
+  attachment_types?: string[];
 }
 
 /** 对话上下文压缩参数 */

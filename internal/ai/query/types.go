@@ -31,11 +31,20 @@ const (
 	RoleTool Role = "tool"
 )
 
+// MessageAttachment 是对话消息中的附件（图片或文档）。
+type MessageAttachment struct {
+	Type     string `json:"type"`
+	MimeType string `json:"mime_type"`
+	Name     string `json:"name"`
+	Data     string `json:"data"`
+}
+
 // Message 是对话历史中的单轮消息。
 // Content 存储纯文本内容；工具调用与结果信息存放在专用字段中。
 type Message struct {
-	Role    Role
-	Content string
+	Role        Role                `json:"role"`
+	Content     string              `json:"content"`
+	Attachments []MessageAttachment `json:"attachments,omitempty"`
 	// Thinking 为助手消息中的完整思考内容，对应 AssistantTurn.Thinking。
 	// [compat:deepseek] DeepSeek Reasoner 要求在后续请求中将 reasoning_content 原样回传，
 	// 否则 API 返回 400；此字段用于跨轮次保存该内容。

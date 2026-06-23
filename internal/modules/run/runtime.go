@@ -114,8 +114,19 @@ func (r *Runtime) Run(ctx context.Context, req ports.RunRequest, sink stream.Sin
 	if result.Err != nil {
 		return out, result.Err
 	}
-	if len(result.Messages) > 0 {
-		out.Output = result.Messages[len(result.Messages)-1].Content
+	for i := len(result.Messages) - 1; i >= 0; i-- {
+		msg := result.Messages[i]
+		if msg.Role != query.RoleAssistant {
+			continue
+		}
+		text := msg.Content
+		if text == "" {
+			text = msg.Thinking
+		}
+		if text != "" {
+			out.Output = text
+			break
+		}
 	}
 	return out, nil
 }

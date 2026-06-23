@@ -25,6 +25,9 @@ func normalizeModelProfiles(models *[]ModelProfileSettings) {
 		if (*models)[i].Name == "" {
 			(*models)[i].Name = "未命名模型"
 		}
+		if !(*models)[i].Multimodal {
+			(*models)[i].AttachmentTypes = nil
+		}
 	}
 	profiles := toConfigModels(*models)
 	profiles = config.NormalizeModelProfiles(profiles)
@@ -73,6 +76,7 @@ func toConfigModels(in []ModelProfileSettings) []config.ModelProfile {
 		out = append(out, config.ModelProfile{
 			ID: m.ID, Name: m.Name, BaseURL: m.BaseURL, APIKey: m.APIKey,
 			Model: m.Model, MaxTokens: m.MaxTokens, Enabled: m.Enabled, Default: m.Default,
+			Multimodal: m.Multimodal, AttachmentTypes: append([]string(nil), m.AttachmentTypes...),
 		})
 	}
 	return out
@@ -89,6 +93,7 @@ func fromConfigModels(in []config.ModelProfile) []ModelProfileSettings {
 			ID: m.ID, Name: m.Name, BaseURL: m.BaseURL, APIKey: m.APIKey,
 			APIKeySet: m.APIKey != "", Model: m.Model, MaxTokens: m.MaxTokens,
 			Enabled: m.Enabled, Default: m.Default,
+			Multimodal: m.Multimodal, AttachmentTypes: append([]string(nil), m.AttachmentTypes...),
 		})
 	}
 	return out

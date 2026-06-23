@@ -23,6 +23,7 @@ type Run struct {
 	RunBranch      string     `gorm:"size:128"`
 	MergeStatus    string     `gorm:"size:32"`
 	PipelineStages string     `gorm:"type:jsonb"`
+	InputMessages  string     `gorm:"type:jsonb"`
 	ErrorMessage   string     `gorm:"type:text"`
 	StartedAt      *time.Time
 	FinishedAt     *time.Time

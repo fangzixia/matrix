@@ -17,15 +17,17 @@ import (
 
 // ModelProfileSettings 单个 LLM 模型配置（含 API Key 脱敏字段）。
 type ModelProfileSettings struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	BaseURL   string `json:"base_url"`
-	APIKey    string `json:"api_key,omitempty"`
-	APIKeySet bool   `json:"api_key_set,omitempty"`
-	Model     string `json:"model"`
-	MaxTokens int    `json:"max_tokens"`
-	Enabled   bool   `json:"enabled"`
-	Default   bool   `json:"default"`
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	BaseURL         string   `json:"base_url"`
+	APIKey          string   `json:"api_key,omitempty"`
+	APIKeySet       bool     `json:"api_key_set,omitempty"`
+	Model           string   `json:"model"`
+	MaxTokens       int      `json:"max_tokens"`
+	Enabled         bool     `json:"enabled"`
+	Default         bool     `json:"default"`
+	Multimodal      bool     `json:"multimodal"`
+	AttachmentTypes []string `json:"attachment_types"`
 }
 
 // ContextSettings 对话上下文压缩策略。

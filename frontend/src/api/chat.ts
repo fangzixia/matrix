@@ -4,15 +4,30 @@
 import { api } from "./client";
 import type { Run } from "./runs";
 
+export interface ChatAttachment {
+  type: string;
+  mime_type: string;
+  name: string;
+  data: string;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
+  attachments?: ChatAttachment[];
 }
 
 export interface ChatSession {
   id: string;
   title: string;
   messages?: string | ChatMessage[];
+  updated_at?: string;
+}
+
+export interface ChatCapabilities {
+  model_name: string;
+  multimodal: boolean;
+  attachment_types: string[];
 }
 
 export function parseChatMessages(
@@ -30,6 +45,12 @@ export function parseChatMessages(
   } catch {
     return [];
   }
+}
+
+export function getChatCapabilities(projectId: string) {
+  return api<ChatCapabilities>(
+    `/api/projects/${projectId}/chat/capabilities`,
+  );
 }
 
 export function listChatSessions(projectId: string) {
@@ -58,9 +79,13 @@ export function sendChatMessage(
   projectId: string,
   sessionId: string,
   message: string,
+  attachments?: ChatAttachment[],
 ) {
   return api<Run>(`/api/projects/${projectId}/chat/sessions/${sessionId}/run`, {
     method: "POST",
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({
+      message,
+      attachments: attachments?.length ? attachments : undefined,
+    }),
   });
 }

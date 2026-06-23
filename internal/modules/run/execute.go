@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"matrix/internal/ai/harness"
 	"matrix/internal/ai/ports"
+	"matrix/internal/ai/query"
 	"matrix/internal/ai/stream"
 	"matrix/internal/modules/eval"
 	"matrix/internal/platform/config"
@@ -170,7 +171,6 @@ func (s *Service) ExecuteRun(ctx context.Context, runID uuid.UUID) error {
 	if s.notifier != nil && shouldNotifyRun(m.Kind) {
 		s.notifier.NotifyRunStatus(ctx, m.CreatedBy, m.ProjectID, runID, m.Kind, status, m.Title)
 	}
-	s.hub.Publish(runID.String(), stream.ResultSuccessMsg(runID.String(), "", "", 0, time.Since(now)))
 	return runErr
 }
 
@@ -361,7 +361,12 @@ func (s *Service) runHarnessStage(ctx context.Context, m *models.Run, kind strin
 	}
 	planFilePath := s.harnessPlanFilePath(m.ProjectID, m.FilePath, kind)
 	evalFilePath := s.resolveHarnessEvalPath(m.ProjectID, m.EvalFilePath)
-	messages := BuildHarnessMessages(kind, msg, planFilePath, evalFilePath, sandboxDir, docsRoot)
+	var messages []query.Message
+	if kind == "chat" && m.InputMessages != "" {
+		messages = MessagesFromJSON(m.InputMessages)
+	} else {
+		messages = BuildHarnessMessages(kind, msg, planFilePath, evalFilePath, sandboxDir, docsRoot)
+	}
 	sessionsDir := storageProjectSessions(s.paths, projectCode)
 	docSandbox, err := s.workspace.DocSandboxDir(ctx, m.ProjectID)
 	if err != nil {

@@ -28,11 +28,19 @@ type ChatMessage struct {
 	Name             string     `json:"name,omitempty"`
 }
 
-// ContentPart 表示结构化内容块（目前仅支持 type="text"）。
+// ContentPart 表示结构化内容块（text 或 image_url）。
 type ContentPart struct {
-	// Type 为内容块类型，当前固定为 "text"。
+	// Type 为内容块类型："text" 或 "image_url"。
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"`
+	// ImageURL 在 type="image_url" 时设置。
+	ImageURL *ImageURL `json:"image_url,omitempty"`
+}
+
+// ImageURL 是 OpenAI 兼容的多模态图像引用。
+type ImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // Tool 描述模型可以调用的一个函数。

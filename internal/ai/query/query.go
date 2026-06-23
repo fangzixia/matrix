@@ -181,10 +181,14 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 					continue
 				}
 			}
+			answer := turn.Content
+			if answer == "" {
+				answer = turn.Thinking
+			}
 			return Result{
 				StopReason: StopCompleted,
 				TurnCount:  s.turnCount,
-				Answer:     turn.Content,
+				Answer:     answer,
 				Messages:   s.messages,
 			}
 		}
@@ -406,10 +410,17 @@ func buildChatMessages(systemPrompt string, history []Message) []llm.ChatMessage
 	for _, m := range history {
 		switch m.Role {
 		case RoleUser:
-			msgs = append(msgs, llm.ChatMessage{
-				Role:    "user",
-				Content: m.Content,
-			})
+			if len(m.Attachments) == 0 {
+				msgs = append(msgs, llm.ChatMessage{
+					Role:    "user",
+					Content: m.Content,
+				})
+			} else {
+				msgs = append(msgs, llm.ChatMessage{
+					Role:    "user",
+					Content: buildUserContentParts(m),
+				})
+			}
 		case RoleAssistant:
 			msg := llm.ChatMessage{
 				Role:             "assistant",
@@ -436,6 +447,42 @@ func buildChatMessages(systemPrompt string, history []Message) []llm.ChatMessage
 		}
 	}
 	return msgs
+}
+
+// buildUserContentParts 将含附件的用户消息转换为 LLM 多模态内容块。
+func buildUserContentParts(m Message) []llm.ContentPart {
+	text := m.Content
+	for _, att := range m.Attachments {
+		if att.Type == "document" {
+			if text != "" {
+				text += "\n\n"
+			}
+			text += fmt.Sprintf("[附件: %s]\n%s", att.Name, att.Data)
+		}
+	}
+	var parts []llm.ContentPart
+	if text != "" {
+		parts = append(parts, llm.ContentPart{Type: "text", Text: text})
+	}
+	for _, att := range m.Attachments {
+		if att.Type != "image" {
+			continue
+		}
+		mime := att.MimeType
+		if mime == "" {
+			mime = "image/png"
+		}
+		parts = append(parts, llm.ContentPart{
+			Type: "image_url",
+			ImageURL: &llm.ImageURL{
+				URL: fmt.Sprintf("data:%s;base64,%s", mime, att.Data),
+			},
+		})
+	}
+	if len(parts) == 0 {
+		return []llm.ContentPart{{Type: "text", Text: m.Content}}
+	}
+	return parts
 }
 
 // transitionStr 将跃迁原因枚举格式化为字符串。

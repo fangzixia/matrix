@@ -246,6 +246,11 @@ func (s *Service) Start(ctx context.Context, projectID, userID uuid.UUID, in Sta
 		StartedAt: startedAt,
 		AuditPath: storage.RunAuditFile(s.paths, projectCode, runID.String()),
 	}
+	if kind == "chat" && len(in.Messages) > 0 {
+		if b, err := json.Marshal(in.Messages); err == nil {
+			m.InputMessages = string(b)
+		}
+	}
 	q := s.db.WithContext(ctx)
 	if kind == "pipeline" && s.pipeline != nil {
 		m.PipelineStages = encodePipelineStages(s.pipeline.ResolveStages(in.Stages))
@@ -339,8 +344,9 @@ func (s *Service) SaveChatSessions(ctx context.Context, projectID uuid.UUID, use
 }
 
 // RunChat 启动或续接 Chat Run。
-func (s *Service) RunChat(ctx context.Context, projectID, userID, sessionID uuid.UUID, userMessage string, history []query.Message) (*RunDTO, error) {
-	msgs := append(history, query.Message{Role: "user", Content: userMessage})
+func (s *Service) RunChat(ctx context.Context, projectID, userID, sessionID uuid.UUID, userMessage string, attachments []query.MessageAttachment, history []query.Message) (*RunDTO, error) {
+	userMsg := query.Message{Role: query.RoleUser, Content: userMessage, Attachments: attachments}
+	msgs := append(history, userMsg)
 	return s.Start(ctx, projectID, userID, StartInput{Kind: "chat", Title: userMessage, Message: userMessage, Messages: msgs})
 }
 
