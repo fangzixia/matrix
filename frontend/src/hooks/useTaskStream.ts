@@ -105,26 +105,25 @@ export function useTaskStream() {
             events = events.concat(tail.events);
             sync();
           }
-          stop();
-          let full = lastFull.trim();
-          if (!full) {
-            full = extractAssistantFromEvents(events).trim();
-          }
-          if (!full) {
-            try {
-              const audit = await runsApi.getRunAudit(projectId, taskId);
-              if (audit.content?.trim()) full = audit.content.trim();
-            } catch {
-              /* ignore */
-            }
-          }
-          if (!full && run.status === "failed" && run.error_message?.trim()) {
-            return run.error_message.trim();
-          }
-          return full;
+          break;
         }
         await new Promise((r) => setTimeout(r, 300));
       }
+
+      stop();
+      let full = lastFull.trim();
+      if (!full) {
+        full = extractAssistantFromEvents(events).trim();
+      }
+      if (!full) {
+        try {
+          const audit = await runsApi.getRunAudit(projectId, taskId);
+          if (audit.content?.trim()) full = audit.content.trim();
+        } catch {
+          /* ignore */
+        }
+      }
+      return full;
     },
     [stop],
   );

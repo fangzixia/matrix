@@ -1,4 +1,3 @@
-// Command buildfrontend 构建 frontend/dist，供 go:generate 与 CI 使用。
 package main
 
 import (
@@ -8,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-// main 程序入口。
+// 构建 frontend/dist，供 go:generate 与 CI 使用。
 func main() {
 	if os.Getenv("SKIP_FRONTEND") != "" {
 		return

@@ -181,14 +181,10 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 					continue
 				}
 			}
-			answer := turn.Content
-			if answer == "" {
-				answer = turn.Thinking
-			}
 			return Result{
 				StopReason: StopCompleted,
 				TurnCount:  s.turnCount,
-				Answer:     answer,
+				Answer:     turn.Content,
 				Messages:   s.messages,
 			}
 		}

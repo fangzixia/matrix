@@ -1,4 +1,3 @@
-// Command web 启动 Matrix HTTP 服务与嵌入式任务 Worker。
 package main
 
 import (
