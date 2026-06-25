@@ -58,6 +58,7 @@ func execWebFetch(ctx context.Context, args map[string]any) (string, error) {
 	if _, err := url.ParseRequestURI(rawURL); err != nil {
 		return "", fmt.Errorf("web_fetch: 无效的 URL %q: %w", rawURL, err)
 	}
+	EmitStatus(ctx, fmt.Sprintf("获取 %s …", rawURL))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("web_fetch: 创建请求失败: %w", err)
@@ -74,12 +75,25 @@ func execWebFetch(ctx context.Context, args map[string]any) (string, error) {
 		return "", fmt.Errorf("web_fetch: 服务器返回 %d %s", resp.StatusCode, resp.Status)
 	}
 	limited := io.LimitReader(resp.Body, webFetchMaxBodyBytes+1)
-	body, err := io.ReadAll(limited)
-	if err != nil {
-		return "", fmt.Errorf("web_fetch: 读取响应失败: %w", err)
+	var sb strings.Builder
+	buf := make([]byte, readFileChunkSize)
+	truncated := false
+	for {
+		n, readErr := limited.Read(buf)
+		if n > 0 {
+			sb.WriteString(string(buf[:n]))
+			EmitOutput(ctx, string(buf[:n]))
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return "", fmt.Errorf("web_fetch: 读取响应失败: %w", readErr)
+		}
 	}
-	truncated := len(body) > webFetchMaxBodyBytes
-	if truncated {
+	body := []byte(sb.String())
+	if len(body) > webFetchMaxBodyBytes {
+		truncated = true
 		body = body[:webFetchMaxBodyBytes]
 	}
 	contentType := resp.Header.Get("Content-Type")

@@ -107,12 +107,19 @@ func execGrep(ctx context.Context, args map[string]any) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("grep: %w", err)
 	}
+	EmitStatus(ctx, fmt.Sprintf("grep %q @ %s …", pattern, searchRoot))
+	var out string
 	if grepHasRipgrep {
-		return execGrepRg(ctx, pattern, searchRoot, globFilter, outputMode,
+		out, err = execGrepRg(ctx, pattern, searchRoot, globFilter, outputMode,
+			caseInsensitive, int(contextLines), showLineNumbers, headLimit)
+	} else {
+		out, err = execGrepGo(ctx, pattern, searchRoot, globFilter, outputMode,
 			caseInsensitive, int(contextLines), showLineNumbers, headLimit)
 	}
-	return execGrepGo(ctx, pattern, searchRoot, globFilter, outputMode,
-		caseInsensitive, int(contextLines), showLineNumbers, headLimit)
+	if err == nil && out != "" {
+		EmitChunks(ctx, out, defaultEmitChunkSize)
+	}
+	return out, err
 }
 
 // execGrepRg 使用 ripgrep 执行搜索。

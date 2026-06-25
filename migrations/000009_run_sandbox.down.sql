@@ -1,3 +1,0 @@
-ALTER TABLE runs DROP COLUMN IF EXISTS merge_status;
-ALTER TABLE runs DROP COLUMN IF EXISTS run_branch;
-ALTER TABLE runs DROP COLUMN IF EXISTS sandbox_path;

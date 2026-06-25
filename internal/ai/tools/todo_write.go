@@ -166,7 +166,9 @@ func execTodoWrite(ctx context.Context, args map[string]any) (string, error) {
 	if err := todoWriteSave(ctx, finalItems); err != nil {
 		return "", fmt.Errorf("todo_write: 保存失败: %w", err)
 	}
-	return todoWriteFormat(finalItems), nil
+	text := todoWriteFormat(finalItems)
+	EmitOutput(ctx, text+"\n")
+	return text, nil
 }
 
 // todoWriteLoad 从文件加载任务项列表。

@@ -1,4 +1,5 @@
--- Project management enhancement (embed fallback)
+-- Project management enhancement: groups, multi-repo, run observability, job queue, notifications
+
 CREATE TABLE IF NOT EXISTS groups (
     id UUID PRIMARY KEY,
     name VARCHAR(255) NOT NULL,

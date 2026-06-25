@@ -36,6 +36,7 @@ func NewSleepTool() *Tool {
 				ms = 60000
 			}
 			d := time.Duration(ms) * time.Millisecond
+			EmitStatus(ctx, fmt.Sprintf("等待 %.0fms …", ms))
 			select {
 			case <-time.After(d):
 				return fmt.Sprintf("已等待 %.0fms", ms), nil

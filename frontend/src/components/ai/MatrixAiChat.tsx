@@ -51,6 +51,8 @@ export interface MatrixAiChatProps {
   onCancel?: () => void;
   className?: string;
   style?: React.CSSProperties;
+  /** 流式运行时在消息列表下方展示的附加区域（如工具链进度）。 */
+  activitySlot?: ReactNode;
 }
 
 type AttachmentItem = NonNullable<AttachmentsProps["items"]>[number];
@@ -153,6 +155,7 @@ export default function MatrixAiChat({
   onCancel,
   className,
   style,
+  activitySlot,
 }: MatrixAiChatProps) {
   const { token } = theme.useToken();
   const [inputValue, setInputValue] = useState("");
@@ -290,6 +293,7 @@ export default function MatrixAiChat({
             role={bubbleRole}
           />
         )}
+        {activitySlot}
       </div>
       <div
         style={{

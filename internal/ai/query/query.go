@@ -272,6 +272,7 @@ func think(
 	publish(ctx, sink, stream.MessageStart(sid))
 	var finalTurn *llm.AssistantTurn
 	blockIndex := 0
+	pendingToolIDs := make(map[int]string)
 	for ev := range cfg.LLM.Stream(ctx, req) {
 		if ev.Err != nil {
 			return nil, fmt.Errorf("loop: 模型错误: %w", ev.Err)
@@ -281,6 +282,23 @@ func think(
 		}
 		if ev.ThinkingDelta != "" {
 			publish(ctx, sink, stream.ThinkingDelta(sid, ev.ThinkingDelta, blockIndex))
+		}
+		if ev.ToolCallDelta != nil {
+			d := ev.ToolCallDelta
+			toolUseID := d.ID
+			if toolUseID == "" {
+				if existing, ok := pendingToolIDs[d.Index]; ok {
+					toolUseID = existing
+				} else {
+					toolUseID = fmt.Sprintf("pending-%d", d.Index)
+					pendingToolIDs[d.Index] = toolUseID
+				}
+			} else {
+				pendingToolIDs[d.Index] = toolUseID
+			}
+			if d.Name != "" || d.ArgumentsDelta != "" {
+				publish(ctx, sink, stream.ToolInputStreaming(sid, toolUseID, d.Name, d.ArgumentsDelta))
+			}
 		}
 		if ev.Turn != nil {
 			finalTurn = ev.Turn

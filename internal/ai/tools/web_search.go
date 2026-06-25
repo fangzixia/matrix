@@ -66,6 +66,7 @@ func execWebSearch(ctx context.Context, args map[string]any) (string, error) {
 				"申请地址：https://api.search.brave.com/register")
 	}
 	query, _ := getString(args, "query")
+	EmitStatus(ctx, fmt.Sprintf("搜索: %s …", query))
 	count := 10
 	if v, ok := args["count"].(float64); ok && v > 0 {
 		count = minInt(int(v), 20)
@@ -106,5 +107,7 @@ func execWebSearch(ctx context.Context, args map[string]any) (string, error) {
 		}
 		sb.WriteByte('\n')
 	}
-	return sb.String(), nil
+	text := sb.String()
+	EmitChunks(ctx, text, defaultEmitChunkSize)
+	return text, nil
 }

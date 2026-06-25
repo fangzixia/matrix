@@ -80,7 +80,9 @@ func (r *Runtime) Run(ctx context.Context, req ports.RunRequest, sink stream.Sin
 		r.mu.Unlock()
 		cancel()
 	}()
-	coalesced := stream.NewCoalesceSink(sink, runID, 100*time.Millisecond)
+	coalescedText := stream.NewCoalesceSink(sink, runID, 100*time.Millisecond)
+	defer coalescedText.Close()
+	coalesced := stream.NewOutputCoalesceSink(coalescedText, runID, 200*time.Millisecond)
 	defer coalesced.Close()
 	mcpMgr := r.newMCPManager(req.MCP)
 	registry := coordinator.NewRegistry()
@@ -89,7 +91,17 @@ func (r *Runtime) Run(ctx context.Context, req ports.RunRequest, sink stream.Sin
 	subagentsDir := filepath.Join(filepath.Dir(req.SessionsDir), "subagents")
 	sidechain := agent.NewSidechainWriter(subagentsDir)
 	auditWriter := audit.NewWriter(req.SessionsDir, req.SandboxDir, runID)
-	hub := coordinator.NewStreamHub(runID, registry, sidechain, coalesced, nil, nil, nil)
+	publishSnap := func(msg stream.Message) {
+		_ = coalesced.Publish(runCtx, msg)
+	}
+	hub := coordinator.NewStreamHub(runID, registry, sidechain, coalesced, nil,
+		func(snap agent.Snapshot) {
+			publishSnap(stream.SubAgentUpdate(runID, snap))
+		},
+		func(snap agent.Snapshot) {
+			publishSnap(stream.SubAgentDone(runID, snap))
+		},
+	)
 	hub.Audit = auditWriter
 	client := llm.NewClient(req.Model.BaseURL, req.Model.APIKey)
 	cfg, err := r.buildQueryConfig(client, req, mcpMgr, registry, coordAsync, workerRun, hub, auditWriter, runID)

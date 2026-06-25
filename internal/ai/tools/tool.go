@@ -243,7 +243,7 @@ func execOne(
 	args, err := parseArgs(call.Function.Arguments)
 	if err != nil {
 		out := fmt.Sprintf("参数解析失败: %v", err)
-		emitToolDone(onProgress, call, "failed", 0, out)
+		emitToolDone(onProgress, call, "failed", 0, out, nil)
 		return Result{
 			ToolCallID: call.ID,
 			ToolName:   call.Function.Name,
@@ -253,7 +253,7 @@ func execOne(
 	}
 	if canUse != nil && !canUse(call.Function.Name, args) {
 		out := fmt.Sprintf("permission denied: %s", call.Function.Name)
-		emitToolDone(onProgress, call, "failed", 0, out)
+		emitToolDone(onProgress, call, "failed", 0, out, nil)
 		return Result{
 			ToolCallID: call.ID,
 			ToolName:   call.Function.Name,
@@ -272,7 +272,7 @@ func execOne(
 		} else {
 			out = fmt.Sprintf("unknown tool: %s", call.Function.Name)
 		}
-		emitToolDone(onProgress, call, "failed", 0, out)
+		emitToolDone(onProgress, call, "failed", 0, out, nil)
 		return Result{
 			ToolCallID: call.ID,
 			ToolName:   call.Function.Name,
@@ -295,15 +295,24 @@ func execOne(
 			ToolName:   tool,
 		})
 	}
+	spill, _ := NewOutputSpillWriter(ctx, call.ID)
+	execCtx := ContextWithToolCallID(ctx, call.ID)
+	execCtx = ContextWithReporter(execCtx, &OutputReporter{
+		SessionID: sessionIDFromProgress(onProgress),
+		ToolUseID: call.ID,
+		ToolName:  call.Function.Name,
+		Emit:      onProgress,
+		Spill:     spill,
+	})
 	start := time.Now()
-	output, execErr := t.Execute(ContextWithToolCallID(ctx, call.ID), args)
+	output, execErr := t.Execute(execCtx, args)
 	elapsed := time.Since(start).Milliseconds()
 	if execErr != nil {
 		out := execErr.Error()
 		if output != "" {
 			out = output + "\n\n[执行错误] " + execErr.Error()
 		}
-		emitToolDone(onProgress, call, "failed", elapsed, out)
+		emitToolDone(onProgress, call, "failed", elapsed, out, spill)
 		return Result{
 			ToolCallID: call.ID,
 			ToolName:   call.Function.Name,
@@ -311,7 +320,7 @@ func execOne(
 			IsError:    true,
 		}
 	}
-	emitToolDone(onProgress, call, "completed", elapsed, output)
+	emitToolDone(onProgress, call, "completed", elapsed, output, spill)
 	return Result{
 		ToolCallID: call.ID,
 		ToolName:   call.Function.Name,
@@ -342,11 +351,14 @@ func previewToolOutput(s string) string {
 }
 
 // emitToolDone 推送工具执行完成事件。
-func emitToolDone(fn ProgressFn, call llm.ToolCall, status string, elapsedMs int64, output string) {
+func emitToolDone(fn ProgressFn, call llm.ToolCall, status string, elapsedMs int64, output string, spill *OutputSpillWriter) {
 	if fn == nil {
 		return
 	}
 	preview := previewToolOutput(output)
+	if spill != nil && spill.Path() != "" {
+		preview = appendSpillHint(preview, spill.Path())
+	}
 	emitProgress(fn, call.ID, stream.ToolProgressData{
 		Type:          stream.DataToolProgress,
 		Status:        status,
@@ -378,4 +390,16 @@ func parseMCPToolName(name string) (server, tool string) {
 		return parts[0], parts[1]
 	}
 	return rest, ""
+}
+
+func appendSpillHint(preview, spillPath string) string {
+	hint := "\n[full log: " + spillPath + "]"
+	if preview == "" {
+		return hint
+	}
+	return preview + hint
+}
+
+func sessionIDFromProgress(_ ProgressFn) string {
+	return ""
 }

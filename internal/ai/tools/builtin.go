@@ -1,15 +1,17 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 )
+
+const readFileChunkSize = 8 * 1024
 
 // ReadFile 读取沙箱内指定文件的文本内容。
 var ReadFile = &Tool{
@@ -32,11 +34,29 @@ var ReadFile = &Tool{
 		if resolveErr != nil {
 			return "", fmt.Errorf("read_file: %w", resolveErr)
 		}
-		data, err := os.ReadFile(targetPath)
+		EmitStatus(ctx, fmt.Sprintf("读取 %s …", targetPath))
+		f, err := os.Open(targetPath)
 		if err != nil {
 			return "", fmt.Errorf("read_file: %w", err)
 		}
-		return string(data), nil
+		defer f.Close()
+		var sb strings.Builder
+		buf := make([]byte, readFileChunkSize)
+		for {
+			n, readErr := f.Read(buf)
+			if n > 0 {
+				chunk := string(buf[:n])
+				sb.WriteString(chunk)
+				EmitOutput(ctx, chunk)
+			}
+			if readErr == io.EOF {
+				break
+			}
+			if readErr != nil {
+				return sb.String(), fmt.Errorf("read_file: %w", readErr)
+			}
+		}
+		return sb.String(), nil
 	},
 }
 
@@ -60,13 +80,16 @@ var WriteFile = &Tool{
 		if resolveErr != nil {
 			return "", fmt.Errorf("write_file: %w", resolveErr)
 		}
+		EmitStatus(ctx, fmt.Sprintf("写入 %s …", targetPath))
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 			return "", fmt.Errorf("write_file: 创建目录失败: %w", err)
 		}
 		if err := os.WriteFile(targetPath, []byte(content), 0o644); err != nil {
 			return "", fmt.Errorf("write_file: %w", err)
 		}
-		return fmt.Sprintf("已写入 %d 字节到 %s", len(content), targetPath), nil
+		msg := fmt.Sprintf("已写入 %d 字节到 %s", len(content), targetPath)
+		EmitOutput(ctx, msg+"\n")
+		return msg, nil
 	},
 }
 
@@ -88,22 +111,28 @@ var ListDir = &Tool{
 		if resolveErr != nil {
 			return "", fmt.Errorf("list_dir: %w", resolveErr)
 		}
+		EmitStatus(ctx, fmt.Sprintf("列出 %s …", targetPath))
 		entries, err := os.ReadDir(targetPath)
 		if err != nil {
 			return "", fmt.Errorf("list_dir: %w", err)
 		}
 		var sb strings.Builder
-		for _, e := range entries {
+		for i, e := range entries {
 			info, _ := e.Info()
 			size := int64(0)
 			if info != nil {
 				size = info.Size()
 			}
 			entryPath := filepath.Join(targetPath, e.Name())
+			var line string
 			if e.IsDir() {
-				sb.WriteString(fmt.Sprintf("[目录] %s/\n", entryPath))
+				line = fmt.Sprintf("[目录] %s/\n", entryPath)
 			} else {
-				sb.WriteString(fmt.Sprintf("[文件] %s  (%d B)\n", entryPath, size))
+				line = fmt.Sprintf("[文件] %s  (%d B)\n", entryPath, size)
+			}
+			sb.WriteString(line)
+			if i%20 == 0 || i == len(entries)-1 {
+				EmitOutput(ctx, line)
 			}
 		}
 		return sb.String(), nil
@@ -111,7 +140,6 @@ var ListDir = &Tool{
 }
 
 // Bash 在非 Windows 上通过 `sh -c` 执行；在 Windows 上通过 **CMD**（cmd.exe /C）执行。
-// Windows 环境通常没有 bash，请使用 cmd 语法而非 bash 语法。
 var Bash = &Tool{
 	Name: "bash",
 	Description: `执行 shell 命令。非 Windows 使用 /bin/sh -c；Windows 使用 **cmd.exe /C**（CMD 语法，非 Linux bash）。
@@ -130,6 +158,7 @@ Windows 上请用 where、more、type、dir 等命令，勿用 which、tail、ca
 		if !ok || command == "" {
 			return "", fmt.Errorf("bash: 缺少参数 'command'")
 		}
+		EmitStatus(ctx, fmt.Sprintf("$ %s", command))
 		var cmd *exec.Cmd
 		if runtime.GOOS == "windows" {
 			shell := os.Getenv("COMSPEC")
@@ -143,20 +172,11 @@ Windows 上请用 where、more、type、dir 等命令，勿用 which、tail、ca
 		if dir := SandboxFrom(ctx); dir != "" {
 			cmd.Dir = dir
 		}
-		var out bytes.Buffer
-		cmd.Stdout = &out
-		cmd.Stderr = &out
-		err := cmd.Run()
-		result := out.String()
-		if err != nil {
-			return result, fmt.Errorf("命令失败: %w", err)
-		}
-		return result, nil
+		return runShellStreamed(ctx, cmd)
 	},
 }
 
 // PowerShell 在 Windows 上通过 powershell -NoProfile -Command 执行。
-// 适用于需要 PowerShell  cmdlet 的场景，与 bash（CMD）工具互补。
 var PowerShell = &Tool{
 	Name:        "powershell",
 	Description: "在 Windows 上执行 PowerShell 命令（-NoProfile -Command）；仅 Windows 可用。",
@@ -176,37 +196,16 @@ var PowerShell = &Tool{
 		if !ok || command == "" {
 			return "", fmt.Errorf("powershell: 缺少参数 'command'")
 		}
+		EmitStatus(ctx, fmt.Sprintf("PS> %s", command))
 		cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command", command)
 		if dir := SandboxFrom(ctx); dir != "" {
 			cmd.Dir = dir
 		}
-		var out bytes.Buffer
-		cmd.Stdout = &out
-		cmd.Stderr = &out
-		err := cmd.Run()
-		result := out.String()
-		if err != nil {
-			return result, fmt.Errorf("命令失败: %w", err)
-		}
-		return result, nil
+		return runShellStreamed(ctx, cmd)
 	},
 }
 
 // DefaultRegistry 返回包含全部内置工具的 [Registry]。
-//
-// 注册工具：
-//   - read_file          → ReadFile
-//   - write_file         → WriteFile
-//   - list_dir           → ListDir
-//   - bash               → Bash（Windows 下为 CMD）
-//   - powershell         → PowerShell（仅 Windows 注册）
-//   - str_replace_editor → FileEditTool
-//   - glob               → GlobTool（glob.go，按文件名模式搜索）
-//   - grep               → GrepTool（grep.go，按内容搜索）
-//   - web_fetch          → WebFetchTool（web_fetch.go）
-//   - web_search         → WebSearchTool（web_search.go，需 BRAVE_SEARCH_API_KEY）
-//   - sleep              → SleepTool（sleep.go）
-//   - todo_write         → TodoWriteTool（todo_write.go）
 func DefaultRegistry() *Registry {
 	r := NewRegistry()
 	r.Register(ReadFile)

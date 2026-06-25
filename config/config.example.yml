@@ -26,7 +26,7 @@ database:
   dsn: postgres://matrix:matrix@localhost:5432/matrix?sslmode=disable
   max_open_conns: 25
   auto_migrate: true     # GORM 自动建表
-  sql_migrate: true      # 执行 migrations/*.sql
+  sql_migrate: true      # 执行内嵌 SQL 版本化迁移
 
 auth:
   session:

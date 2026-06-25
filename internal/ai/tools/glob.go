@@ -51,6 +51,7 @@ func execGlob(ctx context.Context, args map[string]any) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("glob: %w", err)
 	}
+	EmitStatus(ctx, fmt.Sprintf("glob %q @ %s …", pattern, searchRoot))
 	matches, truncated, err := globSearch(pattern, searchRoot, globMaxResults)
 	if err != nil {
 		return "", fmt.Errorf("glob: %w", err)
@@ -59,10 +60,13 @@ func execGlob(ctx context.Context, args map[string]any) (string, error) {
 		return "未找到匹配文件", nil
 	}
 	var sb strings.Builder
-	for _, f := range matches {
+	for i, f := range matches {
 		f = ToAbsolutePath(f, searchRoot)
-		sb.WriteString(f)
-		sb.WriteByte('\n')
+		line := f + "\n"
+		sb.WriteString(line)
+		if i%10 == 0 || i == len(matches)-1 {
+			EmitOutput(ctx, line)
+		}
 	}
 	if truncated {
 		sb.WriteString("（结果已截断，最多显示 100 条。请使用更精确的路径或模式）")

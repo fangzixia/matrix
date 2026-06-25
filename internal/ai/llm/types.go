@@ -118,14 +118,24 @@ type AssistantTurn struct {
 	FinishReason string
 }
 
+// ToolCallDelta 描述流式 tool_calls 中单次增量。
+type ToolCallDelta struct {
+	Index          int
+	ID             string
+	Name           string
+	ArgumentsDelta string
+}
+
 // StreamEvent 是 [Client.Stream] 返回 channel 中的单个事件。
 //
-// 每个事件至多设置一个有效字段：TextDelta、ThinkingDelta 或 Turn/Err。
+// 每个事件至多设置一个有效字段：TextDelta、ThinkingDelta、ToolCallDelta、Turn 或 Err。
 type StreamEvent struct {
 	// TextDelta 为本次事件的文本增量 token，可能为空。
 	TextDelta string
 	// ThinkingDelta 为本次事件的思考增量 token，可能为空。
 	ThinkingDelta string
+	// ToolCallDelta 为 tool_calls 参数 JSON 的增量片段（input_json_delta 对齐）。
+	ToolCallDelta *ToolCallDelta
 	// Turn 在流正常结束时设置，携带完整的 AssistantTurn。
 	Turn *AssistantTurn
 	// Err 在发生错误时非 nil，此后 channel 关闭。

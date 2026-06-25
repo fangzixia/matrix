@@ -8,8 +8,10 @@ import MatrixAiChat, {
   type ChatAttachment,
   type ChatCapabilities,
 } from "@/components/ai/MatrixAiChat";
+import RunActivityPanel from "@/components/ai/RunActivityPanel";
 import * as chatApi from "@/api/chat";
 import { useTaskStream } from "@/hooks/useTaskStream";
+import type { RunActivityState } from "@/types/runStream";
 
 interface SessionState {
   id: string;
@@ -72,6 +74,9 @@ export default function ChatPage() {
     multimodal: false,
     attachment_types: [],
   });
+  const [activityState, setActivityState] = useState<RunActivityState | null>(
+    null,
+  );
 
   const mergeSessionMessages = useCallback(
     (sid: string, nextItems: AiMessage[]) => {
@@ -232,6 +237,7 @@ export default function ChatPage() {
     if ((!text && !attachments?.length) || !activeSessionId || loading) return;
     setError("");
     setLoading(true);
+    setActivityState(null);
     const sid = activeSessionId;
     const userKey = `user-${Date.now()}`;
     const aiKey = `ai-${Date.now()}`;
@@ -253,17 +259,23 @@ export default function ChatPage() {
         text,
         attachments,
       );
-      const reply = await streamTask(projectId, run.id, (_delta, full) => {
-        setItems((prev) => {
-          const next = prev.map((item) =>
-            item.key === aiKey
-              ? { ...item, content: full, loading: true }
-              : item,
-          );
-          syncCurrentSession(next);
-          return next;
-        });
-      });
+      const reply = await streamTask(
+        projectId,
+        run.id,
+        (_delta, full) => {
+          setItems((prev) => {
+            const next = prev.map((item) =>
+              item.key === aiKey
+                ? { ...item, content: full, loading: true }
+                : item,
+            );
+            syncCurrentSession(next);
+            return next;
+          });
+        },
+        (state) => setActivityState(state),
+      );
+      setActivityState(null);
       const finalItems: AiMessage[] = withUser.map((item) =>
         item.key === aiKey
           ? { ...item, content: reply || "（无回复）", loading: false }
@@ -333,6 +345,17 @@ export default function ChatPage() {
           loading={loading}
           capabilities={capabilities}
           onSubmit={send}
+          activitySlot={
+            loading && activityState ? (
+              <div style={{ margin: "0 24px 12px" }}>
+                <RunActivityPanel
+                  state={activityState}
+                  running
+                  compact
+                />
+              </div>
+            ) : null
+          }
           style={{ flex: 1, minHeight: 0, height: "100%" }}
         />
       </Flex>

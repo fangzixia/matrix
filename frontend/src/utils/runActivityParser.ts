@@ -1,5 +1,6 @@
 import type { RunEvent } from "@/api/runs";
 import type {
+  AgentSnapshot,
   RunActivityResult,
   RunActivityState,
   RunActivityTurn,
@@ -9,7 +10,8 @@ import type {
 } from "@/types/runStream";
 
 function mapToolStatus(status?: string): ToolStepStatus {
-  if (status === "started") return "loading";
+  if (status === "started" || status === "streaming" || status === "input_streaming")
+    return "loading";
   if (status === "failed") return "error";
   if (status === "completed") return "success";
   if (status === "success") return "success";
@@ -169,8 +171,43 @@ export function parseRunActivity(messages: StreamMessage[]): RunActivityState {
       if (data.elapsed_time_ms !== undefined)
         tool.elapsedMs = data.elapsed_time_ms;
     }
+    if (status === "success" || data.status === "completed" || data.status === "failed") {
+      tool.outputStreaming = false;
+    }
+  }
+  function appendToolOutputDelta(
+    turn: RunActivityTurn,
+    msg: StreamMessage,
+    data: NonNullable<StreamMessage["data"]>,
+  ) {
+    const toolUseId = msg.tool_use_id;
+    if (!toolUseId) return;
+    let tool = findToolInTurn(turn, toolUseId);
+    const toolName = data.tool_name || tool?.toolName || "tool";
+    if (!tool) {
+      tool = {
+        key: toolUseId,
+        toolName,
+        status: "loading",
+        liveOutput: "",
+        outputStreaming: true,
+      };
+      turn.tools.push(tool);
+    }
+    tool.status = "loading";
+    tool.outputStreaming = true;
+    if (data.tool_name) tool.toolName = data.tool_name;
+    if (data.delta) tool.liveOutput = (tool.liveOutput ?? "") + data.delta;
   }
   for (const msg of messages) {
+    if (msg.type === "subagent_update" || msg.type === "subagent_done") {
+      const snap = msg.snapshot as AgentSnapshot | undefined;
+      if (snap?.id) {
+        if (!state.subagents) state.subagents = {};
+        state.subagents[snap.id] = snap;
+      }
+      continue;
+    }
     if (msg.type === "progress" && msg.data) {
       const data = msg.data;
       if (data.type === "turn_progress") {
@@ -182,7 +219,31 @@ export function parseRunActivity(messages: StreamMessage[]): RunActivityState {
         }
         continue;
       }
+      if (data.type === "tool_output_delta") {
+        appendToolOutputDelta(activeTurn(msg), msg, data);
+        continue;
+      }
       if (data.type === "tool_progress" || data.type === "mcp_progress") {
+        if (data.status === "input_streaming" && data.delta) {
+          const turn = activeTurn(msg);
+          const toolUseId =
+            msg.tool_use_id || `input-${data.tool_name ?? "tool"}`;
+          let tool = findToolInTurn(turn, toolUseId);
+          const toolName = data.tool_name || tool?.toolName || "tool";
+          if (!tool) {
+            tool = {
+              key: toolUseId,
+              toolName,
+              status: "loading",
+              message: "",
+            };
+            turn.tools.push(tool);
+          }
+          tool.status = "loading";
+          tool.message = (tool.message ?? "") + data.delta;
+          if (data.tool_name) tool.toolName = data.tool_name;
+          continue;
+        }
         upsertTool(activeTurn(msg), msg, data);
         continue;
       }

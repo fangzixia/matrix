@@ -1,15 +1,23 @@
 package agent
 
+// ToolActivity 记录最近一条工具活动（对齐 Claude recentActivities）。
+type ToolActivity struct {
+	ToolName string `json:"tool_name"`
+	Status   string `json:"status,omitempty"`
+	Preview  string `json:"preview,omitempty"`
+}
+
 // Progress 描述子 Agent 运行中的可观测状态（对齐 Claude Code task progress 子集）。
 type Progress struct {
-	Turn         int    `json:"turn"`
-	Transition   string `json:"transition,omitempty"`
-	Summary      string `json:"summary,omitempty"`
-	CurrentTool  string `json:"current_tool,omitempty"`
-	ToolUseCount int    `json:"tool_use_count"`
-	LastActivity string `json:"last_activity,omitempty"`
-	InputTokens  int    `json:"input_tokens,omitempty"`
-	OutputTokens int    `json:"output_tokens,omitempty"`
+	Turn             int            `json:"turn"`
+	Transition       string         `json:"transition,omitempty"`
+	Summary          string         `json:"summary,omitempty"`
+	CurrentTool      string         `json:"current_tool,omitempty"`
+	ToolUseCount     int            `json:"tool_use_count"`
+	LastActivity     string         `json:"last_activity,omitempty"`
+	InputTokens      int            `json:"input_tokens,omitempty"`
+	OutputTokens     int            `json:"output_tokens,omitempty"`
+	RecentActivities []ToolActivity `json:"recent_activities,omitempty"`
 }
 
 // Snapshot 为前端 / Wails 暴露的子 Agent 只读视图。

@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS plans (
 CREATE INDEX IF NOT EXISTS idx_plans_project_id ON plans(project_id);
 CREATE INDEX IF NOT EXISTS idx_plans_path ON plans(project_id, path);
 
+-- Migrate legacy requirements rows (drop content column semantics).
 INSERT INTO plans (id, project_id, path, title, updated_at, created_at)
 SELECT id, project_id, path, title, updated_at, created_at
 FROM requirements

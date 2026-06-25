@@ -3,7 +3,11 @@
 export type StreamScope = "coordinator" | "worker";
 
 export interface ToolProgressData {
-  type: "turn_progress" | "tool_progress" | "mcp_progress";
+  type:
+    | "turn_progress"
+    | "tool_progress"
+    | "mcp_progress"
+    | "tool_output_delta";
   status?: string;
   turn?: number;
   transition?: string;
@@ -12,6 +16,8 @@ export interface ToolProgressData {
   server_name?: string;
   elapsed_time_ms?: number;
   message?: string;
+  delta?: string;
+  output_offset?: number;
 }
 
 export interface BlockDelta {
@@ -65,6 +71,38 @@ export interface StreamMessage {
   is_error?: boolean;
   error?: string;
   output?: string;
+  snapshot?: AgentSnapshot;
+}
+
+export interface ToolActivity {
+  tool_name: string;
+  status?: string;
+  preview?: string;
+}
+
+export interface AgentProgress {
+  turn?: number;
+  transition?: string;
+  summary?: string;
+  current_tool?: string;
+  tool_use_count?: number;
+  last_activity?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  recent_activities?: ToolActivity[];
+}
+
+export interface AgentSnapshot {
+  id: string;
+  description?: string;
+  status?: string;
+  parent_agent_id?: string;
+  parent_tool_use_id?: string;
+  progress?: AgentProgress;
+  created_at?: number;
+  sidechain_path?: string;
+  answer_preview?: string;
+  turn_count?: number;
 }
 
 export type ToolStepStatus = "loading" | "success" | "error" | "abort";
@@ -88,6 +126,8 @@ export interface RunToolStep {
   toolName: string;
   status: ToolStepStatus;
   message?: string;
+  liveOutput?: string;
+  outputStreaming?: boolean;
   elapsedMs?: number;
   serverName?: string;
   workerTurns?: RunActivityTurn[];
@@ -105,5 +145,6 @@ export interface RunActivityResult {
 
 export interface RunActivityState {
   turns: RunActivityTurn[];
+  subagents?: Record<string, AgentSnapshot>;
   result?: RunActivityResult;
 }

@@ -95,6 +95,8 @@ func (h *StreamHub) recordSidechain(msg stream.Message) {
 	})
 }
 
+const maxRecentActivities = 5
+
 // applyProgress 根据流式消息更新 Agent 进度快照。
 func (h *StreamHub) applyProgress(msg stream.Message) {
 	if h.Registry == nil || msg.AgentID == "" {
@@ -121,9 +123,31 @@ func (h *StreamHub) applyProgress(msg stream.Message) {
 				if msg.Data.ToolName != "" {
 					r.Progress.CurrentTool = msg.Data.ToolName
 					r.Progress.LastActivity = msg.Data.ToolName + ": " + msg.Data.Status
+					if msg.Data.Status == "started" || msg.Data.Status == "streaming" || msg.Data.Status == "completed" || msg.Data.Status == "failed" {
+						preview := msg.Data.Message
+						if msg.Data.Type == stream.DataToolOutputDelta && msg.Data.Delta != "" {
+							preview = msg.Data.Delta
+						}
+						r.Progress.RecentActivities = appendRecentActivity(r.Progress.RecentActivities, agent.ToolActivity{
+							ToolName: msg.Data.ToolName,
+							Status:   msg.Data.Status,
+							Preview:  audit.Preview(preview, 120),
+						})
+					}
 				}
 				if msg.Data.Status == "completed" {
 					r.Progress.ToolUseCount++
+				}
+				updated = true
+			case stream.DataToolOutputDelta:
+				if msg.Data.ToolName != "" {
+					r.Progress.CurrentTool = msg.Data.ToolName
+					r.Progress.LastActivity = msg.Data.ToolName + ": streaming"
+					r.Progress.RecentActivities = appendRecentActivity(r.Progress.RecentActivities, agent.ToolActivity{
+						ToolName: msg.Data.ToolName,
+						Status:   "streaming",
+						Preview:  audit.Preview(msg.Data.Delta, 120),
+					})
 				}
 				updated = true
 			}
@@ -142,6 +166,14 @@ func (h *StreamHub) applyProgress(msg stream.Message) {
 			h.OnUpdate(agent.ToSnapshot(rec))
 		}
 	}
+}
+
+func appendRecentActivity(items []agent.ToolActivity, act agent.ToolActivity) []agent.ToolActivity {
+	items = append(items, act)
+	if len(items) > maxRecentActivities {
+		items = items[len(items)-maxRecentActivities:]
+	}
+	return items
 }
 
 // EnsureWorkerAsync 为 Worker（及嵌套子 Worker）分配独立 AsyncSupport。

@@ -17,6 +17,10 @@ const (
 	TypeAssistant = "assistant"
 	// TypeResult 是 result 类型顶层消息。
 	TypeResult = "result"
+	// TypeSubAgentUpdate 是子 Agent 进度快照更新。
+	TypeSubAgentUpdate = "subagent_update"
+	// TypeSubAgentDone 是子 Agent 结束快照。
+	TypeSubAgentDone = "subagent_done"
 )
 
 const (
@@ -26,6 +30,8 @@ const (
 	DataMCPProgress = "mcp_progress"
 	// DataToolProgress 是通用工具进度 data.type。
 	DataToolProgress = "tool_progress"
+	// DataToolOutputDelta 是工具执行中流式输出增量 data.type。
+	DataToolOutputDelta = "tool_output_delta"
 )
 
 const (
@@ -93,6 +99,9 @@ type Message struct {
 	IsError      bool   `json:"is_error,omitempty"`
 	ErrorMessage string `json:"error,omitempty"`
 	Output       string `json:"output,omitempty"`
+
+	// subagent 类型字段（JSON 与 agent.Snapshot 对齐）
+	Snapshot any `json:"snapshot,omitempty"`
 }
 
 // ToolProgressData 为 progress 消息的 data 字段。
@@ -106,6 +115,8 @@ type ToolProgressData struct {
 	ServerName    string `json:"server_name,omitempty"`
 	ElapsedTimeMs int64  `json:"elapsed_time_ms,omitempty"`
 	Message       string `json:"message,omitempty"`
+	Delta         string `json:"delta,omitempty"`
+	OutputOffset  int64  `json:"output_offset,omitempty"`
 }
 
 // StreamEventPayload 为 stream_event.event。
@@ -224,6 +235,51 @@ func MCPProgress(sessionID, toolUseID, status, serverName, toolName string, elap
 		ServerName:    serverName,
 		ToolName:      toolName,
 		ElapsedTimeMs: elapsedMs,
+	}
+	return m
+}
+
+// ToolOutputDelta 工具执行中流式输出增量。
+func ToolOutputDelta(sessionID, toolUseID, toolName, delta string, outputOffset int64) Message {
+	m := base(sessionID)
+	m.Type = TypeProgress
+	m.ToolUseID = toolUseID
+	m.Data = &ToolProgressData{
+		Type:         DataToolOutputDelta,
+		Status:       "streaming",
+		ToolName:     toolName,
+		Delta:        delta,
+		OutputOffset: outputOffset,
+	}
+	return m
+}
+
+// SubAgentUpdate 推送子 Agent 进度快照。
+func SubAgentUpdate(sessionID string, snapshot any) Message {
+	m := base(sessionID)
+	m.Type = TypeSubAgentUpdate
+	m.Snapshot = snapshot
+	return m
+}
+
+// SubAgentDone 推送子 Agent 结束快照。
+func SubAgentDone(sessionID string, snapshot any) Message {
+	m := base(sessionID)
+	m.Type = TypeSubAgentDone
+	m.Snapshot = snapshot
+	return m
+}
+
+// ToolInputStreaming 模型生成 tool_calls 参数时的增量（input_json_delta 对齐）。
+func ToolInputStreaming(sessionID, toolUseID, toolName, delta string) Message {
+	m := base(sessionID)
+	m.Type = TypeProgress
+	m.ToolUseID = toolUseID
+	m.Data = &ToolProgressData{
+		Type:     DataToolProgress,
+		Status:   "input_streaming",
+		ToolName: toolName,
+		Delta:    delta,
 	}
 	return m
 }

@@ -328,6 +328,7 @@ func makeAgentExecute(cfg Config) func(context.Context, map[string]any) (string,
 		}
 		parentAgentID := cfg.SpawnerAgentID
 		parentToolUseID := tools.ToolCallIDFromContext(ctx)
+		tools.EmitStatus(ctx, fmt.Sprintf("子 Agent: %s …", description))
 		id := agent.NewID()
 		rec := &agent.Record{
 			ID:              id,

@@ -2,7 +2,7 @@ import { useCallback, useRef } from "react";
 import { subscribeRunStream } from "@/api/stream";
 import * as runsApi from "@/api/runs";
 import type { RunEvent } from "@/api/runs";
-import type { StreamMessage } from "@/types/runStream";
+import type { RunActivityState, StreamMessage } from "@/types/runStream";
 import {
   buildRunActivityState,
   extractReplyText,
@@ -50,6 +50,7 @@ export function useTaskStream() {
       projectId: string,
       taskId: string,
       onDelta: (text: string, full: string) => void,
+      onActivity?: (state: RunActivityState) => void,
     ): Promise<string> => {
       stop();
       const liveMessages: StreamMessage[] = [];
@@ -69,9 +70,8 @@ export function useTaskStream() {
       }
 
       function sync() {
-        const full = extractReplyText(
-          buildRunActivityState(events, liveMessages),
-        );
+        const state = buildRunActivityState(events, liveMessages);
+        const full = extractReplyText(state);
         if (full !== lastFull) {
           const delta = full.startsWith(lastFull)
             ? full.slice(lastFull.length)
@@ -79,6 +79,7 @@ export function useTaskStream() {
           lastFull = full;
           onDelta(delta, full);
         }
+        onActivity?.(state);
         return full;
       }
 

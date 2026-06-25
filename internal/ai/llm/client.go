@@ -184,7 +184,7 @@ func (c *Client) parseSSE(ctx context.Context, r io.Reader, ch chan<- StreamEven
 			for _, tc := range d.ToolCalls {
 				acc, exists := tcMap[tc.Index]
 				if !exists {
-					acc = &ToolCall{Type: "function"}
+					acc = &ToolCall{Index: tc.Index, Type: "function"}
 					tcMap[tc.Index] = acc
 				}
 				if tc.ID != "" {
@@ -193,7 +193,20 @@ func (c *Client) parseSSE(ctx context.Context, r io.Reader, ch chan<- StreamEven
 				if tc.Function.Name != "" {
 					acc.Function.Name = tc.Function.Name
 				}
-				acc.Function.Arguments += tc.Function.Arguments
+				argsDelta := tc.Function.Arguments
+				if argsDelta != "" {
+					acc.Function.Arguments += argsDelta
+				}
+				if tc.ID != "" || tc.Function.Name != "" || argsDelta != "" {
+					if !emit(StreamEvent{ToolCallDelta: &ToolCallDelta{
+						Index:          tc.Index,
+						ID:             acc.ID,
+						Name:           acc.Function.Name,
+						ArgumentsDelta: argsDelta,
+					}}) {
+						return ctx.Err()
+					}
+				}
 			}
 		}
 	}

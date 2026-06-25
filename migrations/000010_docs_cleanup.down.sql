@@ -1,1 +1,0 @@
-ALTER TABLE runs DROP COLUMN IF EXISTS eval_file_path;

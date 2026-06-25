@@ -18,6 +18,7 @@ func NewMCPTool(serverName string, tool mcp.Tool, manager *mcp.Manager) *Tool {
 	description := fmt.Sprintf("[MCP:%s] %s", serverName, desc)
 	params := convertMCPSchema(tool.InputSchema)
 	execute := func(ctx context.Context, args map[string]any) (string, error) {
+		EmitStatus(ctx, fmt.Sprintf("MCP %s/%s …", serverName, tool.Name))
 		logging.Infof("Calling MCP tool: server=%s, tool=%s", serverName, tool.Name)
 		result, err := manager.CallTool(serverName, tool.Name, args)
 		if err != nil {
@@ -26,7 +27,9 @@ func NewMCPTool(serverName string, tool mcp.Tool, manager *mcp.Manager) *Tool {
 		if result.IsError {
 			return "", fmt.Errorf("MCP tool error: %s", formatContent(result.Content))
 		}
-		return formatContent(result.Content), nil
+		out := formatContent(result.Content)
+		EmitChunks(ctx, out, defaultEmitChunkSize)
+		return out, nil
 	}
 	return &Tool{
 		Name:              name,

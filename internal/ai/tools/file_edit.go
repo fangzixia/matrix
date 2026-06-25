@@ -65,8 +65,7 @@ func execFileEdit(ctx context.Context, args map[string]any) (string, error) {
 		return "", fmt.Errorf("str_replace_editor: %w", resolveErr)
 	}
 	filePath = resolvedPath
-
-	// 读取现有内容。所有写入路径均由统一工作区策略约束。
+	EmitStatus(ctx, fmt.Sprintf("编辑 %s …", filePath))
 	content, fileExists, err := readTextFile(filePath)
 	if err != nil {
 		return "", fmt.Errorf("str_replace_editor: 读取文件失败: %w", err)
@@ -86,9 +85,13 @@ func execFileEdit(ctx context.Context, args map[string]any) (string, error) {
 			return "", fmt.Errorf("str_replace_editor: 写入失败: %w", err)
 		}
 		if fileExists {
-			return fmt.Sprintf("已更新 %s（原文件为空）", filePath), nil
+			msg := fmt.Sprintf("已更新 %s（原文件为空）", filePath)
+			EmitOutput(ctx, msg+"\n")
+			return msg, nil
 		}
-		return fmt.Sprintf("已创建 %s", filePath), nil
+		msg := fmt.Sprintf("已创建 %s", filePath)
+		EmitOutput(ctx, msg+"\n")
+		return msg, nil
 	}
 
 	// ── 文件不存在 ─────────────────────────────────────────────────────
@@ -127,10 +130,14 @@ func execFileEdit(ctx context.Context, args map[string]any) (string, error) {
 	if err := os.WriteFile(filePath, []byte(newContent), 0o644); err != nil {
 		return "", fmt.Errorf("str_replace_editor: 写入失败: %w", err)
 	}
+	var msg string
 	if replaceAll && matches > 1 {
-		return fmt.Sprintf("已更新 %s（替换了 %d 处匹配）", filePath, matches), nil
+		msg = fmt.Sprintf("已更新 %s（替换了 %d 处匹配）", filePath, matches)
+	} else {
+		msg = fmt.Sprintf("已更新 %s", filePath)
 	}
-	return fmt.Sprintf("已更新 %s", filePath), nil
+	EmitOutput(ctx, msg+"\n")
+	return msg, nil
 }
 
 // readTextFile 读取文本文件内容；文件不存在时返回 ("", false, nil)。

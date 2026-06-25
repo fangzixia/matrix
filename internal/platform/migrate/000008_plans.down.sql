@@ -1,3 +1,4 @@
+-- Revert 000008 (best-effort; plans content lives on disk)
 ALTER TABLE runs DROP COLUMN IF EXISTS file_path;
 
 ALTER TABLE artifacts DROP COLUMN IF EXISTS title;
@@ -17,7 +18,6 @@ CREATE TABLE IF NOT EXISTS requirements (
 );
 
 INSERT INTO requirements (id, project_id, path, title, updated_at, created_at)
-SELECT id, project_id, path, title, updated_at, created_at FROM plans
-WHERE EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'plans');
+SELECT id, project_id, path, title, updated_at, created_at FROM plans;
 
 DROP TABLE IF EXISTS plans;

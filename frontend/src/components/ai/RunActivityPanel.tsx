@@ -11,6 +11,7 @@ import {
 } from "@ant-design/x";
 import type { ThoughtChainItemType } from "@ant-design/x";
 import type {
+  AgentSnapshot,
   RunActivityState,
   RunActivityTurn,
   RunToolStep,
@@ -19,6 +20,8 @@ import type {
 export interface RunActivityPanelProps {
   state: RunActivityState;
   running?: boolean;
+  /** 紧凑模式：仅展示最后一轮与当前工具链。 */
+  compact?: boolean;
 }
 
 function formatToolMessage(message?: string): {
@@ -97,7 +100,10 @@ function toolToChainItem(
   tool: RunToolStep,
   running?: boolean,
 ): ThoughtChainItemType {
-  const { lang, content } = formatToolMessage(tool.message);
+  const displayText = tool.liveOutput || tool.message;
+  const { lang, content } = formatToolMessage(displayText);
+  const isStreaming =
+    running && tool.status === "loading" && Boolean(tool.outputStreaming);
   const hasWorkers = (tool.workerTurns?.length ?? 0) > 0;
   let itemContent: ReactNode = null;
   if (hasWorkers) {
@@ -114,9 +120,16 @@ function toolToChainItem(
     );
   } else if (content) {
     itemContent = (
-      <CodeHighlighter lang={lang} header={false}>
-        {content}
-      </CodeHighlighter>
+      <>
+        <CodeHighlighter lang={lang} header={false}>
+          {content}
+        </CodeHighlighter>
+        {isStreaming ? (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            输出流式更新中…
+          </Typography.Text>
+        ) : null}
+      </>
     );
   }
   const footer = tool.elapsedMs != null ? `${tool.elapsedMs} ms` : undefined;
@@ -130,11 +143,21 @@ function toolToChainItem(
     icon: tool.serverName ? <ApiOutlined /> : <ToolOutlined />,
     status: tool.status,
     blink: running && tool.status === "loading",
-    collapsible: Boolean(itemContent),
+    collapsible: Boolean(itemContent) || isStreaming,
     description,
     content: itemContent ?? undefined,
     footer,
   };
+}
+
+function subagentProgressLine(snap: AgentSnapshot): string {
+  const p = snap.progress;
+  if (!p) return snap.description || snap.id;
+  const parts: string[] = [];
+  if (p.summary) parts.push(p.summary);
+  if (p.last_activity) parts.push(p.last_activity);
+  if (p.tool_use_count != null) parts.push(`${p.tool_use_count} 次工具调用`);
+  return parts.join(" · ") || snap.description || snap.id;
 }
 
 function turnHeader(turn: RunActivityTurn) {
@@ -151,19 +174,22 @@ function turnHeader(turn: RunActivityTurn) {
 export default function RunActivityPanel({
   state,
   running,
+  compact,
 }: RunActivityPanelProps) {
-  const { turns, result } = state;
-  const latestKey = turns.at(-1)?.key;
+  const { turns, result, subagents } = state;
+  const visibleTurns = compact && turns.length ? [turns[turns.length - 1]!] : turns;
+  const latestKey = visibleTurns.at(-1)?.key;
+  const subagentList = Object.values(subagents ?? {});
   const collapseItems = useMemo(
     () =>
-      turns.map((turn) => ({
+      visibleTurns.map((turn) => ({
         key: turn.key,
         label: turnHeader(turn),
         children: renderTurnBody(turn, turn.key === latestKey, running),
       })),
-    [turns, latestKey, running],
+    [visibleTurns, latestKey, running],
   );
-  if (!turns.length && !result?.output) {
+  if (!visibleTurns.length && !result?.output && !subagentList.length) {
     if (running) {
       return (
         <Welcome
@@ -182,6 +208,23 @@ export default function RunActivityPanel({
   }
   return (
     <>
+      {subagentList.length > 0 ? (
+        <ThoughtChain
+          line
+          style={{ marginBottom: 12 }}
+          items={subagentList.map((snap: AgentSnapshot) => ({
+            key: snap.id,
+            title: snap.description || `子 Agent ${snap.id.slice(0, 8)}`,
+            icon: <RobotOutlined />,
+            status:
+              snap.status === "running"
+                ? ("loading" as const)
+                : ("success" as const),
+            description: subagentProgressLine(snap),
+            blink: running && snap.status === "running",
+          }))}
+        />
+      ) : null}
       {collapseItems.length > 0 ? (
         <Collapse
           items={collapseItems}
@@ -189,7 +232,7 @@ export default function RunActivityPanel({
         />
       ) : null}
       {result?.output &&
-      !turns.some((t) => t.message.includes(result.output!)) ? (
+      !visibleTurns.some((t) => t.message.includes(result.output!)) ? (
         <div style={{ marginTop: 16 }}>
           <Bubble role="ai" content={result.output} />
         </div>
