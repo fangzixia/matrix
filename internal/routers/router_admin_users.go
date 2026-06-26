@@ -14,13 +14,21 @@ import (
 func registerAdminUserRoutes(api *gin.RouterGroup, d *app.Deps) {
 	admin := api.Group("/admin", auth.RequireAuth(d.Sessions), auth.RequireAdmin())
 	{
+		// 列出所有用户及统计信息
 		admin.GET("/users", func(c *gin.Context) { adminListUsers(c, d) })
+		// 创建新用户
 		admin.POST("/users", func(c *gin.Context) { adminCreateUser(c, d) })
+		// 获取指定用户详情
 		admin.GET("/users/:uid", func(c *gin.Context) { adminGetUser(c, d) })
+		// 更新指定用户信息
 		admin.PUT("/users/:uid", func(c *gin.Context) { adminUpdateUser(c, d) })
+		// 删除指定用户
 		admin.DELETE("/users/:uid", func(c *gin.Context) { adminDeleteUser(c, d) })
+		// 重置用户密码
 		admin.POST("/users/:uid/reset_password", func(c *gin.Context) { adminResetPassword(c, d) })
+		// 封禁用户
 		admin.POST("/users/:uid/block", func(c *gin.Context) { adminBlockUser(c, d) })
+		// 解封用户
 		admin.POST("/users/:uid/unblock", func(c *gin.Context) { adminUnblockUser(c, d) })
 		registerSystemAdminRoutes(admin, d)
 	}

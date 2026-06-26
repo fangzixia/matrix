@@ -45,7 +45,7 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	log.Info("storage resolved", "data_dir", paths.DataDir, "log_dir", paths.LogDir)
+	log.Info("存储路径已解析", "data_dir", paths.DataDir, "log_dir", paths.LogDir)
 	db, err := platformdb.Open(cfg.Database)
 	if err != nil {
 		return err
@@ -63,14 +63,14 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	deps := app.NewDeps(cfg, runtime, paths, db, log, sysSettings)
 	if err := deps.Repositories.MigrateLegacyProjects(ctx); err != nil {
-		log.Warn("migrate legacy repositories", "err", err)
+		log.Warn("迁移旧版仓库绑定失败", "err", err)
 	}
 	deps.Runs.SetLifecycle(ctx) // 进程退出时取消进行中的 Run
 	defer deps.Close()
 	deps.StartJobWorker(ctx) // 嵌入式任务队列消费者
 	engine := platformhttp.NewEngine(log, dev)
 	routers.Register(engine, deps, opts.StaticFS)
-	log.Info("listening", "addr", cfg.Server.Addr)
+	log.Info("HTTP 服务监听中", "addr", cfg.Server.Addr)
 	srv := &httpServer{engine: engine, addr: cfg.Server.Addr}
 	return srv.ListenAndServe()
 }

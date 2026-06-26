@@ -2,18 +2,19 @@ package run
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"matrix/internal/ai/agent"
 	"matrix/internal/ai/harness"
 	"matrix/internal/ai/ports"
 	"matrix/internal/ai/query"
-	"matrix/internal/ai/stream"
 	"matrix/internal/modules/eval"
-	"matrix/internal/platform/config"
+	"matrix/internal/modules/run/view"
 	"matrix/internal/platform/db/models"
+	"matrix/internal/platform/logging"
 	"matrix/internal/platform/storage"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -32,14 +33,20 @@ type StepDTO struct {
 	FinishedAt    *time.Time `json:"finished_at,omitempty"`
 }
 
-// EventDTO 是 Run 事件 API 返回的数据传输对象。
-type EventDTO struct {
-	ID        uuid.UUID  `json:"id"`
-	RunID     uuid.UUID  `json:"run_id"`
-	StepID    *uuid.UUID `json:"step_id,omitempty"`
-	EventType string     `json:"event_type"`
-	Payload   string     `json:"payload,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
+// GetAudit 返回 Run 审计日志路径或内容。
+func (s *Service) GetAudit(ctx context.Context, runID uuid.UUID) (string, error) {
+	var m models.Run
+	if err := s.db.WithContext(ctx).First(&m, "id = ?", runID).Error; err != nil {
+		return "", err
+	}
+	if m.AuditPath == "" {
+		return "", nil
+	}
+	b, err := os.ReadFile(m.AuditPath)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 // ListSteps 返回 Run 步骤列表。
@@ -59,61 +66,56 @@ func (s *Service) ListSteps(ctx context.Context, runID uuid.UUID) ([]StepDTO, er
 	return out, nil
 }
 
-// ListEvents 返回 Run 事件列表。
-func (s *Service) ListEvents(ctx context.Context, runID uuid.UUID, afterID *uuid.UUID, limit int) ([]EventDTO, error) {
-	if limit <= 0 {
-		limit = 200
-	}
-	q := s.db.WithContext(ctx).Where("run_id = ?", runID)
-	if afterID != nil && *afterID != uuid.Nil {
-		q = q.Where("id > ?", *afterID)
-	}
-	var rows []models.RunEvent
-	if err := q.Order("created_at asc").Limit(limit).Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	out := make([]EventDTO, len(rows))
-	for i := range rows {
-		out[i] = EventDTO{
-			ID: rows[i].ID, RunID: rows[i].RunID, StepID: rows[i].StepID,
-			EventType: rows[i].EventType, Payload: rows[i].Payload, CreatedAt: rows[i].CreatedAt,
-		}
-	}
-	return out, nil
-}
-
-// GetAudit 返回 Run 审计日志路径或内容。
-func (s *Service) GetAudit(ctx context.Context, runID uuid.UUID) (string, error) {
+// GetToolLog 返回工具 spill 日志内容。
+func (s *Service) GetToolLog(ctx context.Context, runID uuid.UUID, toolUseID string) (string, error) {
 	var m models.Run
 	if err := s.db.WithContext(ctx).First(&m, "id = ?", runID).Error; err != nil {
 		return "", err
 	}
-	if m.AuditPath == "" {
-		return "", nil
-	}
-	b, err := os.ReadFile(m.AuditPath)
+	sandbox, err := s.sandboxDir(ctx, &m)
 	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(sandbox, ".matrix", "tool-outputs", sanitizeToolUseIDForLog(toolUseID)+".log")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", err
+		}
 		return "", err
 	}
 	return string(b), nil
 }
 
-// persistEvent 将 Run 事件持久化到数据库。
-func (s *Service) persistEvent(ctx context.Context, runID uuid.UUID, stepID *uuid.UUID, msg stream.Message) {
-	payload, _ := json.Marshal(msg)
-	ev := models.RunEvent{
-		RunID: runID, StepID: stepID, EventType: msg.Type, Payload: string(payload),
+func sanitizeToolUseIDForLog(id string) string {
+	out := make([]byte, 0, len(id))
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' {
+			out = append(out, c)
+		} else {
+			out = append(out, '_')
+		}
 	}
-	_ = s.db.WithContext(ctx).Create(&ev).Error
+	if len(out) == 0 {
+		return "tool"
+	}
+	return string(out)
 }
 
-// compositeSink 组合 SSE Hub 与审计 Sink。
-func (s *Service) compositeSink(runID uuid.UUID, stepID *uuid.UUID) stream.Sink {
-	base := s.hub.Sink(runID.String())
-	return stream.FuncSink(func(ctx context.Context, msg stream.Message) error {
-		s.persistEvent(ctx, runID, stepID, msg)
-		return base.Publish(ctx, msg)
-	})
+func (s *Service) finishRunView(ctx context.Context, runID uuid.UUID, status, output, errMsg, mergeStatus string) error {
+	if mergeStatus == "" {
+		var m models.Run
+		if err := s.db.WithContext(ctx).First(&m, "id = ?", runID).Error; err == nil {
+			output = m.Output
+			errMsg = m.ErrorMessage
+			mergeStatus = m.MergeStatus
+			if status == "" {
+				status = m.Status
+			}
+		}
+	}
+	return s.viewStore.FinishRun(ctx, runID.String(), status, output, errMsg, mergeStatus)
 }
 
 // ExecuteRun 执行 Run 的 Harness 流水线。
@@ -127,8 +129,24 @@ func (s *Service) ExecuteRun(ctx context.Context, runID uuid.UUID) error {
 	}
 	switch m.Status {
 	case "succeeded", "cancelled":
+		logging.Info("run: 跳过执行（已终态）",
+			"run_id", runID, "kind", m.Kind, "status", m.Status,
+			"output_len", len(m.Output), "error_message", m.ErrorMessage,
+		)
 		return nil
 	}
+	if err := ctx.Err(); err != nil {
+		logging.Warn("run: 执行前 context 已取消", "run_id", runID, "error", err.Error())
+		return err
+	}
+	if err := s.refreshAIRuntime(ctx); err != nil {
+		return fmt.Errorf("刷新 AI 配置失败: %w", err)
+	}
+	runStart := time.Now()
+	logging.Info("run: 开始执行",
+		"run_id", runID, "kind", m.Kind, "model_id", m.ModelID,
+		"chat_session_id", m.ChatSessionID, "prior_status", m.Status,
+	)
 	now := time.Now()
 	_ = s.db.WithContext(ctx).Model(&m).Updates(map[string]any{
 		"status": "running", "started_at": now, "finished_at": nil, "error_message": "",
@@ -136,6 +154,7 @@ func (s *Service) ExecuteRun(ctx context.Context, runID uuid.UUID) error {
 	if s.notifier != nil && shouldNotifyRun(m.Kind) {
 		s.notifier.NotifyRunStatus(ctx, m.CreatedBy, m.ProjectID, runID, m.Kind, "running", m.Title)
 	}
+	_ = s.viewStore.BeginRun(ctx, runID.String(), m.ProjectID.String(), m.Kind, m.Kind)
 	var runErr error
 	switch m.Kind {
 	case "build":
@@ -152,8 +171,13 @@ func (s *Service) ExecuteRun(ctx context.Context, runID uuid.UUID) error {
 	status := "succeeded"
 	errMsg := ""
 	if runErr != nil {
-		status = "failed"
-		errMsg = runErr.Error()
+		if ctx.Err() != nil {
+			status = "cancelled"
+			errMsg = "任务已取消"
+		} else {
+			status = "failed"
+			errMsg = runErr.Error()
+		}
 	}
 	updates := map[string]any{
 		"status": status, "finished_at": fin, "error_message": errMsg,
@@ -162,6 +186,9 @@ func (s *Service) ExecuteRun(ctx context.Context, runID uuid.UUID) error {
 		updates["merge_status"] = ms
 	}
 	_ = s.db.WithContext(ctx).Model(&models.Run{}).Where("id = ?", runID).Updates(updates).Error
+	if runErr == nil && status == "succeeded" && m.Kind == "chat" && m.ChatSessionID != nil && m.ChatUserMessageID != nil {
+		s.ensureChatAssistantMessage(ctx, *m.ChatSessionID, *m.ChatUserMessageID, runID)
+	}
 	if runErr != nil && s.runtimeCfg.Run.CleanupOnFailure && m.SandboxPath != "" {
 		_ = s.workspace.RemoveRunWorktree(ctx, m.ProjectID, m.RepositoryID, runID, m.RunBranch, m.SandboxPath)
 		_ = s.db.WithContext(ctx).Model(&models.Run{}).Where("id = ?", runID).Updates(map[string]any{
@@ -171,8 +198,47 @@ func (s *Service) ExecuteRun(ctx context.Context, runID uuid.UUID) error {
 	if s.notifier != nil && shouldNotifyRun(m.Kind) {
 		s.notifier.NotifyRunStatus(ctx, m.CreatedBy, m.ProjectID, runID, m.Kind, status, m.Title)
 	}
-	s.hub.Publish(runID.String(), stream.ResultSuccessMsg(runID.String(), "", "", 0, time.Since(now)))
+	var finished models.Run
+	_ = s.db.WithContext(ctx).First(&finished, "id = ?", runID).Error
+	if err := s.finishRunView(ctx, runID, status, finished.Output, errMsg, finished.MergeStatus); err != nil {
+		logging.Warn("run-view: 结束视图失败",
+			"run_id", runID, "status", status, "error", err.Error(),
+		)
+	}
+	logging.Info("run: 执行结束",
+		"run_id", runID, "kind", m.Kind, "status", status,
+		"output_len", len(finished.Output),
+		"duration_ms", time.Since(runStart).Milliseconds(),
+	)
 	return runErr
+}
+
+func (s *Service) ensureChatAssistantMessage(ctx context.Context, sessionID, userMessageID, runID uuid.UUID) {
+	var count int64
+	if err := s.db.WithContext(ctx).Model(&models.ChatMessage{}).Where("run_id = ?", runID).Count(&count).Error; err != nil {
+		logging.Warn("run: 检查助手消息失败", "run_id", runID, "error", err.Error())
+		return
+	}
+	if count > 0 {
+		logging.Debug("run: 助手消息已存在", "run_id", runID)
+		return
+	}
+	var m models.Run
+	if err := s.db.WithContext(ctx).First(&m, "id = ?", runID).Error; err != nil {
+		logging.Warn("run: 加载 Run 失败（写入助手消息）", "run_id", runID, "error", err.Error())
+		return
+	}
+	assistantID, err := s.InsertChatAssistantMessage(ctx, sessionID, userMessageID, runID, m.Output)
+	if err != nil {
+		logging.Warn("run: 写入助手消息失败",
+			"run_id", runID, "session_id", sessionID, "user_message_id", userMessageID,
+			"error", err.Error(),
+		)
+		return
+	}
+	logging.Info("run: 已写入助手消息",
+		"run_id", runID, "assistant_message_id", assistantID, "output_len", len(m.Output),
+	)
 }
 
 // prepareRunSandbox 为 Run 准备 worktree 沙箱环境。
@@ -268,9 +334,12 @@ func (s *Service) loadExistingSteps(ctx context.Context, runID uuid.UUID) (map[i
 // executePipeline 按序执行流水线各阶段。
 func (s *Service) executePipeline(ctx context.Context, m *models.Run) error {
 	if s.pipeline == nil {
-		return errors.New("pipeline not configured")
+		return errors.New("流水线未配置")
 	}
-	stages := s.pipeline.StagesForRun(ctx, m.ID, decodePipelineStages(m.PipelineStages))
+	stages, err := s.pipelineStageKinds(ctx, m)
+	if err != nil {
+		return err
+	}
 	existing, err := s.loadExistingSteps(ctx, m.ID)
 	if err != nil {
 		return err
@@ -294,6 +363,7 @@ func (s *Service) executePipeline(ctx context.Context, m *models.Run) error {
 			_ = s.db.WithContext(ctx).Model(prev).Updates(map[string]any{
 				"status": "running", "started_at": start, "finished_at": nil, "output_summary": "",
 			}).Error
+			s.viewStore.PublishStep(ctx, m.ID.String(), view.EventSTEPStarted, stepID.String(), kind, seq, "running")
 		} else {
 			step := models.RunStep{
 				RunID: m.ID, Kind: kind, Sequence: seq, Status: "running", StartedAt: &start,
@@ -304,6 +374,7 @@ func (s *Service) executePipeline(ctx context.Context, m *models.Run) error {
 			stepID = step.ID
 			existing[seq] = &step
 		}
+		s.viewStore.PublishStep(ctx, m.ID.String(), view.EventSTEPStarted, stepID.String(), kind, seq, "running")
 		var stepErr error
 		if kind == "build" {
 			stepErr = s.executeBuildLoop(ctx, m)
@@ -320,6 +391,7 @@ func (s *Service) executePipeline(ctx context.Context, m *models.Run) error {
 		_ = s.db.WithContext(ctx).Model(&models.RunStep{}).Where("id = ?", stepID).Updates(map[string]any{
 			"status": stepStatus, "finished_at": fin, "output_summary": summary,
 		}).Error
+		s.viewStore.PublishStep(ctx, m.ID.String(), view.EventSTEPFinished, stepID.String(), kind, seq, stepStatus)
 		if stepErr != nil {
 			return stepErr
 		}
@@ -347,9 +419,9 @@ func (s *Service) runHarnessStage(ctx context.Context, m *models.Run, kind strin
 		unlock := s.sandboxLocks.acquire(projectCode, m.RepositoryID)
 		defer unlock()
 	}
-	modelCfg, ok := s.runtimeCfg.AI.ActiveModel()
-	if !ok || !config.ModelConfigured(modelCfg) {
-		return errors.New("未配置模型：请在管理区域 → 系统配置中设置并启用默认模型")
+	modelCfg, _, err := s.runtimeCfg.AI.ResolveModel(m.ModelID)
+	if err != nil {
+		return err
 	}
 	msg := m.Title
 	sandboxDir, err := s.sandboxDir(ctx, m)
@@ -363,17 +435,35 @@ func (s *Service) runHarnessStage(ctx context.Context, m *models.Run, kind strin
 	planFilePath := s.harnessPlanFilePath(m.ProjectID, m.FilePath, kind)
 	evalFilePath := s.resolveHarnessEvalPath(m.ProjectID, m.EvalFilePath)
 	var messages []query.Message
-	if kind == "chat" && m.InputMessages != "" {
-		messages = MessagesFromJSON(m.InputMessages)
+	if kind == "chat" {
+		var err error
+		messages, err = s.buildChatRunMessages(ctx, m)
+		if err != nil {
+			return err
+		}
 	} else {
 		messages = BuildHarnessMessages(kind, msg, planFilePath, evalFilePath, sandboxDir, docsRoot)
+	}
+	logging.Info("run: Harness 阶段就绪",
+		"run_id", m.ID, "kind", kind,
+		"message_count", len(messages),
+		"sandbox_dir", sandboxDir,
+		"model", modelCfg.Model,
+		"chat_session_id", m.ChatSessionID,
+		"chat_user_message_id", m.ChatUserMessageID,
+	)
+	if len(messages) == 0 {
+		logging.Warn("run: LLM 输入消息为空", "run_id", m.ID, "kind", kind)
 	}
 	sessionsDir := storageProjectSessions(s.paths, projectCode)
 	docSandbox, err := s.workspace.DocSandboxDir(ctx, m.ProjectID)
 	if err != nil {
 		return err
 	}
-	sink := s.compositeSink(m.ID, stepID)
+	sink := s.viewStore.Sink(m.ID.String(), m.ProjectID.String())
+	onSubagent := func(snap agent.Snapshot) {
+		s.viewStore.OnSubagent(ctx, m.ID.String(), snap)
+	}
 	mcpPorts := mcpConfigsToPorts(s.runtimeCfg.MCP.Servers)
 	result, runErr := s.runtime.Run(ctx, ports.RunRequest{
 		RunID: m.ID.String(), Kind: kind, Messages: messages,
@@ -387,7 +477,24 @@ func (s *Service) runHarnessStage(ctx context.Context, m *models.Run, kind strin
 		Policy: ports.RuntimePolicy{
 			AllowShell: s.runtimeCfg.AI.Security.AllowShell, AllowCommandMCP: s.runtimeCfg.AI.Security.AllowCommandMCP,
 		},
+		OnSubagentUpdate: onSubagent,
+		OnSubagentDone:   onSubagent,
 	}, sink)
+	logging.Info("run: runtime.Run 返回",
+		"run_id", m.ID, "kind", kind,
+		"run_err", runErr != nil,
+		"result_err", result.Err,
+		"output_len", len(runOutputFromResult(result)),
+		"stop_reason", result.StopReason,
+		"turn_count", result.TurnCount,
+	)
+	if runErr == nil && result.Err == nil {
+		output := runOutputFromResult(result)
+		if output != "" {
+			_ = s.db.WithContext(ctx).Model(&models.Run{}).Where("id = ?", m.ID).
+				Update("output", output).Error
+		}
+	}
 	if runErr != nil {
 		return runErr
 	}

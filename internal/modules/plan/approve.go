@@ -2,7 +2,6 @@ package plan
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"matrix/internal/modules/workspace"
@@ -43,6 +42,27 @@ func (s *Service) IsApproved(ctx context.Context, projectID uuid.UUID, logicalPa
 	return row.Status == StatusApproved, nil
 }
 
+func (s *Service) savePlanResolutions(ctx context.Context, planID uuid.UUID, resolutions map[string]string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("plan_id = ?", planID).Delete(&models.PlanResolution{}).Error; err != nil {
+			return err
+		}
+		for key, val := range resolutions {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			row := models.PlanResolution{
+				PlanID: planID, ItemKey: key, Resolution: strings.TrimSpace(val),
+			}
+			if err := tx.Create(&row).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // Approve 保存用户确认并批准计划。
 func (s *Service) Approve(ctx context.Context, projectID uuid.UUID, in ConfirmInput) error {
 	path, err := workspace.SanitizeDocLogicalPath(strings.TrimSpace(in.Path))
@@ -62,29 +82,33 @@ func (s *Service) Approve(ctx context.Context, projectID uuid.UUID, in ConfirmIn
 	if len(unresolved) > 0 {
 		return fmt.Errorf("仍有未确认项: %s", strings.Join(unresolved, "; "))
 	}
-	resJSON, _ := json.Marshal(in.Resolutions)
 	now := time.Now()
 	var row models.Plan
 	err = s.db.WithContext(ctx).Where("project_id = ? AND path = ?", projectID, path).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		row = models.Plan{
-			ProjectID: projectID, Path: path,
-			Title:  titleOrFromContent(path, string(content)),
-			Status: StatusApproved, Resolutions: string(resJSON),
+			ID: uuid.New(), ProjectID: projectID, Path: path,
+			Title:     titleOrFromContent(path, string(content)),
+			Status:    StatusApproved,
 			CreatedAt: now, UpdatedAt: now,
 		}
-		return s.db.WithContext(ctx).Create(&row).Error
+		if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
+			return err
+		}
+		return s.savePlanResolutions(ctx, row.ID, in.Resolutions)
 	}
 	if err != nil {
 		return err
 	}
 	row.Status = StatusApproved
-	row.Resolutions = string(resJSON)
 	row.UpdatedAt = now
 	if row.Title == "" {
 		row.Title = titleOrFromContent(path, string(content))
 	}
-	return s.db.WithContext(ctx).Save(&row).Error
+	if err := s.db.WithContext(ctx).Save(&row).Error; err != nil {
+		return err
+	}
+	return s.savePlanResolutions(ctx, row.ID, in.Resolutions)
 }
 
 // PlanStatus 返回计划批准状态。

@@ -11,6 +11,8 @@ import (
 const (
 	// EventAgentStream 是 Run 流式 Agent 输出的 SSE 事件名。
 	EventAgentStream = "agent:stream"
+	// EventRunTerminal 是 Run 执行结束的 SSE 事件名。
+	EventRunTerminal = "run:terminal"
 	// EventSubAgentUpdate 是子 Agent 状态更新的 SSE 事件名。
 	EventSubAgentUpdate = "subagent:update"
 	// EventSubAgentDone 是子 Agent 结束的 SSE 事件名。

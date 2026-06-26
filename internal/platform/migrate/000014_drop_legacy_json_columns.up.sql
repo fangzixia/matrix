@@ -1,0 +1,4 @@
+ALTER TABLE runs DROP COLUMN IF EXISTS input_messages;
+ALTER TABLE runs DROP COLUMN IF EXISTS pipeline_stages;
+ALTER TABLE chat_sessions DROP COLUMN IF EXISTS messages;
+ALTER TABLE plans DROP COLUMN IF EXISTS resolutions;

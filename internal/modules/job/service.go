@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"matrix/internal/platform/db/models"
+	"matrix/internal/platform/logging"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,13 +33,17 @@ func NewService(db *gorm.DB, maxAttempts int) *Service {
 
 // Enqueue 将 Run 任务入队。
 func (s *Service) Enqueue(ctx context.Context, runID uuid.UUID) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&models.Run{}).Where("id = ?", runID).Update("status", "queued").Error; err != nil {
 			return err
 		}
 		job := models.RunJob{RunID: runID, Status: "queued"}
 		return tx.Create(&job).Error
 	})
+	if err == nil {
+		logging.Info("job: 任务已入队", "run_id", runID)
+	}
+	return err
 }
 
 // ClaimedJob 是 Worker 认领到的待执行任务。
@@ -110,19 +115,56 @@ func (s *Service) RunWorker(ctx context.Context, workerID string, pollInterval t
 	for {
 		select {
 		case <-ctx.Done():
+			logging.Info("job: Worker 已停止", "worker_id", workerID, "reason", "context_cancelled")
 			return
 		default:
 		}
 		claimed, err := s.Claim(ctx, workerID)
-		if err != nil || claimed == nil {
+		if err != nil {
+			logging.Warn("job: 认领失败", "worker_id", workerID, "error", err.Error())
 			time.Sleep(pollInterval)
 			continue
 		}
-		sem <- struct{}{}
+		if claimed == nil {
+			time.Sleep(pollInterval)
+			continue
+		}
+		logging.Info("job: 等待执行槽位",
+			"run_id", claimed.RunID, "job_id", claimed.JobID,
+			"worker_id", workerID, "concurrency", concurrency,
+		)
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			logging.Warn("job: 槽位等待中断，任务将重新入队",
+				"run_id", claimed.RunID, "job_id", claimed.JobID,
+			)
+			_ = s.Requeue(ctx, claimed.JobID)
+			return
+		}
 		go func(c *ClaimedJob) {
 			defer func() { <-sem }()
+			logging.Info("job: 已认领任务", "run_id", c.RunID, "job_id", c.JobID, "worker_id", workerID)
+			if err := ctx.Err(); err != nil {
+				logging.Warn("job: 执行前 context 已取消",
+					"run_id", c.RunID, "job_id", c.JobID, "error", err.Error(),
+				)
+			}
+			start := time.Now()
 			runErr := exec.ExecuteRun(ctx, c.RunID)
 			success := runErr == nil
+			if success {
+				logging.Info("job: 执行完成",
+					"run_id", c.RunID, "job_id", c.JobID,
+					"duration_ms", time.Since(start).Milliseconds(),
+				)
+			} else {
+				logging.Warn("job: 执行失败",
+					"run_id", c.RunID, "job_id", c.JobID,
+					"duration_ms", time.Since(start).Milliseconds(),
+					"error", runErr.Error(),
+				)
+			}
 			_ = s.Complete(ctx, c.JobID, success)
 			if !success && runErr != nil {
 				var job models.RunJob

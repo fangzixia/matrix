@@ -149,6 +149,7 @@ matrix/
 | 段 | 说明 |
 |----|------|
 | `storage` | 系统数据、工作区、审计、日志目录 |
+| `logging` | 运行日志路径、级别与轮转保留（默认 `logs/matrix.log`，供事后排查） |
 | `database` | PostgreSQL DSN，启动时 AutoMigrate |
 | `auth` | Session Cookie、Bootstrap admin |
 

@@ -111,7 +111,7 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 		}
 		prepareHistoryForRequest(ctx, cfg, &s.messages)
 		if cfg.MaxTurns > 0 && s.turnCount > cfg.MaxTurns {
-			logging.InfoCtx(ctx, "loop: max turns reached", "turns", s.turnCount)
+			logging.InfoCtx(ctx, "loop: 已达最大轮次", "turns", s.turnCount)
 			return Result{StopReason: StopMaxTurns, TurnCount: s.turnCount, Messages: s.messages}
 		}
 		trans := transitionStr(s.transition)
@@ -129,7 +129,7 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 				"log_prefix":    cfg.LogPrefix,
 			})
 		}
-		logging.InfoCtx(ctx, "loop: iteration",
+		logging.InfoCtx(ctx, "loop: 迭代",
 			"log_prefix", cfg.LogPrefix,
 			"message_count", len(s.messages),
 			"transition", trans,
@@ -150,7 +150,7 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 		needsFollowUp := len(turn.ToolCalls) > 0
 		if !needsFollowUp {
 			if blockingErr := report(s.messages, cfg.StopHook); blockingErr != "" {
-				logging.InfoCtx(ctx, "loop: stop hook blocking", "error", blockingErr)
+				logging.InfoCtx(ctx, "loop: Stop Hook 阻塞", "error", blockingErr)
 				s = state{
 					messages: append(s.messages, Message{
 						Role:    RoleUser,
@@ -164,11 +164,11 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 			prevLen := len(s.messages)
 			s.messages = drainAsyncResults(cfg, s.turnCount, s.messages, cfg.AsyncResults, cfg.ContextPolicy.MaxAsyncResultRunes)
 			if len(s.messages) > prevLen {
-				logging.InfoCtx(ctx, "loop: async results drained", "new_messages", len(s.messages)-prevLen)
+				logging.InfoCtx(ctx, "loop: 异步结果已消费", "new_messages", len(s.messages)-prevLen)
 				continue
 			}
 			if cfg.HasPendingAsync != nil && cfg.HasPendingAsync() {
-				logging.InfoCtx(ctx, "loop: waiting for async sub-agents")
+				logging.InfoCtx(ctx, "loop: 等待异步子 Agent")
 				select {
 				case <-ctx.Done():
 					return Result{StopReason: StopAborted, TurnCount: s.turnCount,
@@ -177,7 +177,7 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 					emitAsyncAudit(cfg, s.turnCount, msg)
 					s.messages = append(s.messages, truncateAsyncMessage(msg, cfg.ContextPolicy.MaxAsyncResultRunes))
 					s.messages = drainAsyncResults(cfg, s.turnCount, s.messages, cfg.AsyncResults, cfg.ContextPolicy.MaxAsyncResultRunes)
-					logging.InfoCtx(ctx, "loop: async result injected", "message_count", len(s.messages))
+					logging.InfoCtx(ctx, "loop: 已注入异步结果", "message_count", len(s.messages))
 					continue
 				}
 			}
@@ -197,7 +197,7 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 			turnCount:  s.turnCount + 1,
 			transition: new(TransitionNextTurn),
 		}
-		logging.InfoCtx(ctx, "loop: turn completed",
+		logging.InfoCtx(ctx, "loop: 本轮完成",
 			"completed_turn", s.turnCount-1,
 			"tool_calls", len(turn.ToolCalls),
 		)
@@ -260,7 +260,7 @@ func think(
 			"tokens_est":  tokensEst,
 		})
 	}
-	logging.InfoCtx(ctx, "loop: llm request", "model", cfg.Model, "history_len", len(history), "tokens_est", tokensEst)
+	logging.InfoCtx(ctx, "loop: LLM 请求", "model", cfg.Model, "history_len", len(history), "tokens_est", tokensEst)
 	req := llm.ChatRequest{
 		Model:     cfg.Model,
 		Messages:  buildChatMessages(cfg.SystemPrompt, history),
@@ -316,7 +316,7 @@ func think(
 			"thinking_preview": audit.Preview(finalTurn.Thinking, 300),
 		})
 	}
-	logging.InfoCtx(ctx, "loop: llm response",
+	logging.InfoCtx(ctx, "loop: LLM 响应",
 		"finish_reason", finalTurn.FinishReason,
 		"tool_calls", len(finalTurn.ToolCalls),
 		"content_len", len(finalTurn.Content),
@@ -336,7 +336,7 @@ func act(
 		return nil
 	}
 	sid := cfg.SessionID
-	logging.InfoCtx(ctx, "loop: tool execution", "count", len(toolCalls))
+	logging.InfoCtx(ctx, "loop: 工具执行", "count", len(toolCalls))
 	for _, tc := range toolCalls {
 		if cfg.Audit != nil {
 			cfg.Audit.EmitWithTool("turn.tool_call", turn, auditComponent(cfg), tc.ID, map[string]any{
@@ -357,7 +357,7 @@ func act(
 	}
 	results := tools.RunTools(ctx, toolCalls, cfg.Registry, cfg.CanUseTool, onProgress)
 	for _, r := range results {
-		logging.InfoCtx(ctx, "loop: tool result", "tool_name", r.ToolName, "is_error", r.IsError)
+		logging.InfoCtx(ctx, "loop: 工具结果", "tool_name", r.ToolName, "is_error", r.IsError)
 	}
 	return results
 }
@@ -385,7 +385,7 @@ func observe(ctx context.Context, cfg Config, turn int, results []tools.Result) 
 			IsError:    r.IsError,
 		})
 	}
-	logging.InfoCtx(ctx, "loop: observe done", "result_count", len(msgs))
+	logging.InfoCtx(ctx, "loop: Observe 完成", "result_count", len(msgs))
 	return msgs
 }
 

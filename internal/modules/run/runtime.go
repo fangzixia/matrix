@@ -53,13 +53,22 @@ func (r *Runtime) Cancel(runID string) error {
 
 // Run 在沙箱中执行一次 AI Agent 会话并流式输出事件。
 func (r *Runtime) Run(ctx context.Context, req ports.RunRequest, sink stream.Sink) (ports.RunResult, error) {
+	logging.Info("run: runtime.Run 开始",
+		"run_id", req.RunID, "kind", req.Kind,
+		"message_count", len(req.Messages),
+		"sandbox_dir", req.SandboxDir,
+		"model", req.Model.Model,
+	)
 	if req.Model.APIKey == "" {
+		logging.Warn("run: runtime.Run 拒绝（无 API Key）", "run_id", req.RunID)
 		return ports.RunResult{}, errors.New("未配置 API Key")
 	}
 	if len(req.Messages) == 0 {
+		logging.Warn("run: runtime.Run 拒绝（消息为空）", "run_id", req.RunID, "kind", req.Kind)
 		return ports.RunResult{}, errors.New("消息不能为空")
 	}
 	if req.SandboxDir == "" {
+		logging.Warn("run: runtime.Run 拒绝（沙箱为空）", "run_id", req.RunID)
 		return ports.RunResult{}, errors.New("沙箱目录未配置")
 	}
 	runID := req.RunID
@@ -91,16 +100,9 @@ func (r *Runtime) Run(ctx context.Context, req ports.RunRequest, sink stream.Sin
 	subagentsDir := filepath.Join(filepath.Dir(req.SessionsDir), "subagents")
 	sidechain := agent.NewSidechainWriter(subagentsDir)
 	auditWriter := audit.NewWriter(req.SessionsDir, req.SandboxDir, runID)
-	publishSnap := func(msg stream.Message) {
-		_ = coalesced.Publish(runCtx, msg)
-	}
 	hub := coordinator.NewStreamHub(runID, registry, sidechain, coalesced, nil,
-		func(snap agent.Snapshot) {
-			publishSnap(stream.SubAgentUpdate(runID, snap))
-		},
-		func(snap agent.Snapshot) {
-			publishSnap(stream.SubAgentDone(runID, snap))
-		},
+		req.OnSubagentUpdate,
+		req.OnSubagentDone,
 	)
 	hub.Audit = auditWriter
 	client := llm.NewClient(req.Model.BaseURL, req.Model.APIKey)
@@ -129,6 +131,14 @@ func (r *Runtime) Run(ctx context.Context, req ports.RunRequest, sink stream.Sin
 	if len(result.Messages) > 0 {
 		out.Output = result.Messages[len(result.Messages)-1].Content
 	}
+	logging.Info("run: runtime.Run 结束",
+		"run_id", runID,
+		"stop_reason", out.StopReason,
+		"turn_count", out.TurnCount,
+		"output_len", len(out.Output),
+		"duration_ms", time.Since(start).Milliseconds(),
+		"has_error", result.Err != nil,
+	)
 	return out, nil
 }
 
@@ -207,7 +217,7 @@ func (r *Runtime) buildQueryConfig(
 	parentReg := coordinator.NewParentRegistry(coordCfg)
 	asyncResults, hasPending := coordAsync.QueryConfigFields()
 	prompt := coordinator.BuildParentSystemPrompt(workerOnly.Names(), mcpMgr.Names())
-	logging.Info("run: build query config", "session_id", sessionID, "sandbox", req.SandboxDir)
+	logging.Info("run: 构建 Query 配置", "session_id", sessionID, "sandbox", req.SandboxDir)
 	return query.Config{
 		LLM:             client,
 		Model:           req.Model.Model,

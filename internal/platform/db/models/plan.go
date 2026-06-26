@@ -16,7 +16,6 @@ type Plan struct {
 	Path         string     `gorm:"size:512;not null"`
 	Title        string     `gorm:"size:512"`
 	Status       string     `gorm:"size:32;default:draft;index"`
-	Resolutions  string     `gorm:"type:text"`
 	UpdatedAt    time.Time
 	CreatedAt    time.Time
 }

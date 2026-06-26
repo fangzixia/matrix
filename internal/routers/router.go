@@ -12,6 +12,7 @@ import (
 
 // Register 挂载 REST API、Admin 路由与前端静态资源（SPA fallback）。
 func Register(r *gin.Engine, d *app.Deps, staticFS fs.FS) {
+	// 健康检查，返回服务存活状态
 	r.GET("/health", func(c *gin.Context) { c.JSON(200, gin.H{"status": "ok"}) })
 	api := r.Group("/api")
 	registerAuthRoutes(api, d)
@@ -29,6 +30,7 @@ func registerStaticRoutes(r *gin.Engine, staticFS fs.FS) {
 	if staticFS == nil {
 		return
 	}
+	// 提供前端静态资源（JS/CSS/SVG 等）
 	r.GET("/assets/*filepath", func(c *gin.Context) {
 		fp := c.Param("filepath")
 		data, err := fs.ReadFile(staticFS, "assets"+fp)
@@ -38,6 +40,7 @@ func registerStaticRoutes(r *gin.Engine, staticFS fs.FS) {
 		}
 		c.Data(200, contentType(fp), data)
 	})
+	// SPA fallback：非 API GET 请求返回 index.html
 	r.NoRoute(func(c *gin.Context) {
 		if c.Request.Method != http.MethodGet {
 			c.Status(404)

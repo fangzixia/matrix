@@ -366,10 +366,10 @@ func makeAgentExecute(cfg Config) func(context.Context, map[string]any) (string,
 		if cfg.Async != nil {
 			cfg.Async.Inc()
 			go func() {
-				logging.Info("coordinator: async sub-agent start", "agent_id", id, "description", description)
+				logging.Info("coordinator: 异步子 Agent 启动", "agent_id", id, "description", description)
 				result := runWorker()
 				finish(result)
-				logging.Info("coordinator: async sub-agent done",
+				logging.Info("coordinator: 异步子 Agent 完成",
 					"agent_id", id, "turns", result.TurnCount, "stop_reason", result.StopReason)
 				cfg.Async.Send(query.Message{
 					Role:    query.RoleUser,
@@ -382,10 +382,10 @@ func makeAgentExecute(cfg Config) func(context.Context, map[string]any) (string,
 				id, description,
 			), nil
 		}
-		logging.Info("coordinator: sync sub-agent start", "agent_id", id, "description", description)
+		logging.Info("coordinator: 同步子 Agent 启动", "agent_id", id, "description", description)
 		result := runWorker()
 		finish(result)
-		logging.Info("coordinator: sync sub-agent done", "agent_id", id, "turns", result.TurnCount)
+		logging.Info("coordinator: 同步子 Agent 完成", "agent_id", id, "turns", result.TurnCount)
 		return agent.FormatResult(id, description, result), nil
 	}
 }

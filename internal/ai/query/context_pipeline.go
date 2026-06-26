@@ -56,7 +56,7 @@ func prepareHistoryForRequest(ctx context.Context, cfg Config, msgs *[]Message) 
 		if cfg.Audit != nil {
 			cfg.Audit.Emit("context.compact", 0, auditComponent(cfg), data)
 		}
-		logging.InfoCtx(ctx, "query: context pipeline compacted",
+		logging.InfoCtx(ctx, "query: 上下文流水线已压缩",
 			"before_tokens_est", stats.BeforeTokens,
 			"after_tokens_est", stats.AfterTokens,
 			"hard_compacted", stats.HardCompacted,

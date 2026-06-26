@@ -12,7 +12,6 @@ import (
 	platformhttp "matrix/internal/platform/http"
 	"net/http"
 	"os"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -20,28 +19,49 @@ import (
 
 // registerMgmtRoutes 注册用户组、多仓库与 Run 详情等管理 API。
 func registerMgmtRoutes(api *gin.RouterGroup, d *app.Deps) {
+	// 列出当前用户可见的用户组
 	api.GET("/groups", auth.RequireAuth(d.Sessions), func(c *gin.Context) { listGroups(c, d) })
+	// 创建用户组
 	api.POST("/groups", auth.RequireAuth(d.Sessions), func(c *gin.Context) { createGroup(c, d) })
+	// 获取用户组详情
 	api.GET("/groups/:gid", auth.RequireAuth(d.Sessions), func(c *gin.Context) { getGroup(c, d) })
+	// 更新用户组信息
 	api.PUT("/groups/:gid", auth.RequireAuth(d.Sessions), func(c *gin.Context) { updateGroup(c, d) })
+	// 删除用户组
 	api.DELETE("/groups/:gid", auth.RequireAuth(d.Sessions), func(c *gin.Context) { deleteGroup(c, d) })
+	// 列出用户组成员
 	api.GET("/groups/:gid/members", auth.RequireAuth(d.Sessions), func(c *gin.Context) { listGroupMembers(c, d) })
+	// 添加用户组成员
 	api.POST("/groups/:gid/members", auth.RequireAuth(d.Sessions), func(c *gin.Context) { addGroupMember(c, d) })
+	// 更新用户组成员角色
 	api.PUT("/groups/:gid/members/:uid", auth.RequireAuth(d.Sessions), func(c *gin.Context) { updateGroupMember(c, d) })
+	// 移除用户组成员
 	api.DELETE("/groups/:gid/members/:uid", auth.RequireAuth(d.Sessions), func(c *gin.Context) { removeGroupMember(c, d) })
+	// 列出项目关联的多仓库
 	api.GET("/projects/:id/repositories", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { listRepositories(c, d) })
+	// 为项目添加仓库
 	api.POST("/projects/:id/repositories", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleMaintainer), func(c *gin.Context) { createRepository(c, d) })
+	// 删除项目仓库
 	api.DELETE("/projects/:id/repositories/:rid", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleMaintainer), func(c *gin.Context) { deleteRepository(c, d) })
+	// 拉取指定仓库最新代码
 	api.POST("/projects/:id/repositories/:rid/pull", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleDeveloper), func(c *gin.Context) { pullRepository(c, d) })
+	// 推送指定仓库本地提交
 	api.POST("/projects/:id/repositories/:rid/push", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleMaintainer), func(c *gin.Context) { pushRepository(c, d) })
+	// 获取 Run 详情
 	api.GET("/projects/:id/runs/:runId", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { getRun(c, d) })
+	// 列出 Run 执行步骤
 	api.GET("/projects/:id/runs/:runId/steps", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { listRunSteps(c, d) })
-	api.GET("/projects/:id/runs/:runId/events", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { listRunEvents(c, d) })
+	// 获取 Run 审计报告内容
 	api.GET("/projects/:id/runs/:runId/audit", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { getRunAudit(c, d) })
+	// 列出当前用户通知
 	api.GET("/notifications", auth.RequireAuth(d.Sessions), func(c *gin.Context) { listNotifications(c, d) })
+	// 获取未读通知数量
 	api.GET("/notifications/unread_count", auth.RequireAuth(d.Sessions), func(c *gin.Context) { notificationUnreadCount(c, d) })
+	// 标记单条通知为已读
 	api.POST("/notifications/:nid/read", auth.RequireAuth(d.Sessions), func(c *gin.Context) { markNotificationRead(c, d) })
+	// 将全部通知标记为已读
 	api.POST("/notifications/read_all", auth.RequireAuth(d.Sessions), func(c *gin.Context) { markAllNotificationsRead(c, d) })
+	// SSE 订阅实时通知推送
 	api.GET("/notifications/stream", auth.RequireAuth(d.Sessions), func(c *gin.Context) { streamNotifications(c, d) })
 }
 
@@ -287,25 +307,6 @@ func listRunSteps(c *gin.Context, d *app.Deps) {
 		return
 	}
 	c.JSON(200, gin.H{"steps": steps})
-}
-
-// listRunEvents 列出RunEvents。
-func listRunEvents(c *gin.Context, d *app.Deps) {
-	rid, _ := uuid.Parse(c.Param("runId"))
-	var afterID *uuid.UUID
-	if s := c.Query("after_id"); s != "" {
-		id, err := uuid.Parse(s)
-		if err == nil {
-			afterID = &id
-		}
-	}
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "200"))
-	events, err := d.Runs.ListEvents(c.Request.Context(), rid, afterID, limit)
-	if err != nil {
-		platformhttp.JSONError(c, 500, "internal", err.Error())
-		return
-	}
-	c.JSON(200, gin.H{"events": events})
 }
 
 // getRunAudit 获取RunAudit。

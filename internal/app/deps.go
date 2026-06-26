@@ -82,6 +82,7 @@ func NewDeps(cfg *config.Config, runtime *config.RuntimeConfig, paths storage.Pa
 	runs.SetPullAll(ws.PullAll)
 	runs.SetPlans(plans)
 	runs.SetArtifacts(artifactsSvc)
+	runs.SetAIRuntimeReloader(sysSettings)
 	return &Deps{
 		Config: cfg, Runtime: runtime, Paths: paths, DB: db, Log: log, Hub: hub,
 		Auth: auth, Users: users, Sessions: sessions,
@@ -106,7 +107,7 @@ func (d *Deps) StartJobWorker(ctx context.Context) {
 		return
 	}
 	wid := worker.ID()
-	d.Log.Info("embedded job worker starting",
+	d.Log.Info("嵌入式任务 Worker 启动中",
 		"worker_id", wid,
 		"concurrency", d.Runtime.Worker.Concurrency,
 		"poll_interval", d.Runtime.Worker.PollInterval,

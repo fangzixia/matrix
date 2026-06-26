@@ -16,6 +16,7 @@ export interface Run {
   run_branch?: string;
   merge_status?: string;
   error_message?: string;
+  output?: string;
   started_at?: string;
   finished_at?: string;
   created_at: string;
@@ -31,16 +32,6 @@ export interface RunStep {
   output_summary?: string;
   started_at?: string;
   finished_at?: string;
-}
-
-/** Run 事件快照 */
-export interface RunEvent {
-  id: string;
-  run_id: string;
-  step_id?: string;
-  event_type: string;
-  payload?: string;
-  created_at: string;
 }
 
 export function listRuns(projectId: string, kind?: string) {
@@ -92,17 +83,6 @@ export function getRun(projectId: string, runId: string) {
 export function listRunSteps(projectId: string, runId: string) {
   return api<{ steps: RunStep[] }>(
     `/api/projects/${projectId}/runs/${runId}/steps`,
-  );
-}
-
-export function listRunEvents(
-  projectId: string,
-  runId: string,
-  afterId?: string,
-) {
-  const q = afterId ? `?after_id=${afterId}` : "";
-  return api<{ events: RunEvent[] }>(
-    `/api/projects/${projectId}/runs/${runId}/events${q}`,
   );
 }
 

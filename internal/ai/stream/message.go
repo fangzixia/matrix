@@ -17,6 +17,8 @@ const (
 	TypeAssistant = "assistant"
 	// TypeResult 是 result 类型顶层消息。
 	TypeResult = "result"
+	// TypeRunTerminal 是 Run 执行结束（SSE run:terminal）的顶层消息。
+	TypeRunTerminal = "run_terminal"
 	// TypeSubAgentUpdate 是子 Agent 进度快照更新。
 	TypeSubAgentUpdate = "subagent_update"
 	// TypeSubAgentDone 是子 Agent 结束快照。
@@ -90,6 +92,10 @@ type Message struct {
 
 	// assistant 类型字段
 	Assistant *AssistantPayload `json:"message,omitempty"`
+
+	// run_terminal 类型字段
+	Status      string `json:"status,omitempty"`
+	MergeStatus string `json:"merge_status,omitempty"`
 
 	// result 类型字段
 	Subtype      string `json:"subtype,omitempty"`
@@ -356,6 +362,17 @@ func Assistant(sessionID, text, thinking string, toolCalls []ToolUseBlock, stopR
 		ToolCalls:  toolCalls,
 		StopReason: stopReason,
 	}
+	return m
+}
+
+// RunTerminalMsg 构建 Run 结束事件（经 SSE event: run:terminal 推送）。
+func RunTerminalMsg(sessionID, status, output, errMsg, mergeStatus string) Message {
+	m := base(sessionID)
+	m.Type = TypeRunTerminal
+	m.Status = status
+	m.Output = output
+	m.ErrorMessage = errMsg
+	m.MergeStatus = mergeStatus
 	return m
 }
 

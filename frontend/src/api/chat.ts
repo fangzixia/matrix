@@ -11,40 +11,48 @@ export interface ChatAttachment {
   data: string;
 }
 
-export interface ChatMessage {
+export interface ChatMessageNode {
+  id: string;
+  parent_id: string | null;
   role: "user" | "assistant" | "system";
   content: string;
   attachments?: ChatAttachment[];
+  run_id?: string;
+  created_at?: string;
 }
 
-export interface ChatSession {
+export interface ChatSessionSummary {
   id: string;
   title: string;
-  messages?: string | ChatMessage[];
+  model_id?: string;
+  active_leaf_id?: string | null;
   updated_at?: string;
+}
+
+export interface ChatSession extends ChatSessionSummary {
+  project_id?: string;
+  nodes?: ChatMessageNode[];
+}
+
+export interface ChatModelOption {
+  id: string;
+  name: string;
+  multimodal: boolean;
+  attachment_types: string[];
+  default?: boolean;
 }
 
 export interface ChatCapabilities {
   model_name: string;
   multimodal: boolean;
   attachment_types: string[];
+  default_model_id?: string;
+  models?: ChatModelOption[];
 }
 
-export function parseChatMessages(
-  raw: string | ChatMessage[] | undefined,
-): ChatMessage[] {
-  if (!raw) return [];
-  if (Array.isArray(raw)) return raw;
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (m): m is ChatMessage =>
-        !!m && typeof m === "object" && "role" in m && "content" in m,
-    );
-  } catch {
-    return [];
-  }
+export interface ChatRun extends Run {
+  user_message_id?: string;
+  assistant_message_id?: string;
 }
 
 export function getChatCapabilities(projectId: string) {
@@ -54,25 +62,60 @@ export function getChatCapabilities(projectId: string) {
 }
 
 export function listChatSessions(projectId: string) {
-  return api<{ sessions: ChatSession[] }>(
+  return api<{ sessions: ChatSessionSummary[] }>(
     `/api/projects/${projectId}/chat/sessions`,
   );
 }
 
-export function saveChatSessions(
+export function getChatSession(projectId: string, sessionId: string) {
+  return api<ChatSession>(
+    `/api/projects/${projectId}/chat/sessions/${sessionId}`,
+  );
+}
+
+export interface CreateChatSessionPayload {
+  id?: string;
+  title?: string;
+  model_id?: string;
+}
+
+export function createChatSession(
   projectId: string,
-  sessions: Array<{ id: string; title: string; messages: ChatMessage[] }>,
+  payload: CreateChatSessionPayload,
 ) {
-  return api<{ ok: boolean }>(`/api/projects/${projectId}/chat/sessions`, {
-    method: "PUT",
-    body: JSON.stringify({
-      sessions: sessions.map((s) => ({
-        id: s.id,
-        title: s.title,
-        messages: JSON.stringify(s.messages),
-      })),
-    }),
-  });
+  return api<ChatSessionSummary>(
+    `/api/projects/${projectId}/chat/sessions`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export interface PatchChatSessionPayload {
+  title?: string;
+  model_id?: string;
+}
+
+export function patchChatSession(
+  projectId: string,
+  sessionId: string,
+  payload: PatchChatSessionPayload,
+) {
+  return api<ChatSessionSummary>(
+    `/api/projects/${projectId}/chat/sessions/${sessionId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function deleteChatSession(projectId: string, sessionId: string) {
+  return api<{ ok: boolean }>(
+    `/api/projects/${projectId}/chat/sessions/${sessionId}`,
+    { method: "DELETE" },
+  );
 }
 
 export function sendChatMessage(
@@ -80,12 +123,39 @@ export function sendChatMessage(
   sessionId: string,
   message: string,
   attachments?: ChatAttachment[],
+  modelId?: string,
+  parentId?: string | null,
 ) {
-  return api<Run>(`/api/projects/${projectId}/chat/sessions/${sessionId}/run`, {
+  return api<ChatRun>(`/api/projects/${projectId}/chat/sessions/${sessionId}/run`, {
     method: "POST",
     body: JSON.stringify({
       message,
+      model_id: modelId || undefined,
+      parent_id: parentId ?? null,
       attachments: attachments?.length ? attachments : undefined,
     }),
   });
+}
+
+export function modelCapabilities(
+  caps: ChatCapabilities,
+  modelId?: string,
+): Pick<ChatCapabilities, "multimodal" | "attachment_types"> & {
+  model_name: string;
+} {
+  const models = caps.models ?? [];
+  const id = modelId || caps.default_model_id;
+  const found = models.find((m) => m.id === id);
+  if (found) {
+    return {
+      model_name: found.name,
+      multimodal: found.multimodal,
+      attachment_types: found.attachment_types ?? [],
+    };
+  }
+  return {
+    model_name: caps.model_name,
+    multimodal: caps.multimodal,
+    attachment_types: caps.attachment_types ?? [],
+  };
 }

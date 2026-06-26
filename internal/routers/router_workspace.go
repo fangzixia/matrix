@@ -18,12 +18,19 @@ func registerWorkspaceRoutes(api *gin.RouterGroup, d *app.Deps) {
 	guest := auth.RequireProject(d.IAM, iam.RoleGuest)
 	dev := auth.RequireProject(d.IAM, iam.RoleDeveloper)
 	maint := auth.RequireProject(d.IAM, iam.RoleMaintainer)
+	// 列出仓库目录树
 	api.GET("/projects/:id/repository/tree", authz, guest, func(c *gin.Context) { listFiles(c, d) })
+	// 读取仓库文件内容
 	api.GET("/projects/:id/repository/file", authz, guest, func(c *gin.Context) { readFile(c, d) })
+	// 拉取默认仓库最新代码
 	api.POST("/projects/:id/repository/pull", authz, dev, func(c *gin.Context) { pullRepo(c, d) })
+	// 推送默认仓库本地提交
 	api.POST("/projects/:id/repository/push", authz, maint, func(c *gin.Context) { pushRepo(c, d) })
+	// 列出项目计划
 	api.GET("/projects/:id/plans", authz, guest, func(c *gin.Context) { listPlans(c, d) })
+	// 批准计划
 	api.POST("/projects/:id/plans/approve", authz, dev, func(c *gin.Context) { approvePlan(c, d) })
+	// 列出评估结果
 	api.GET("/projects/:id/evaluations", authz, guest, func(c *gin.Context) { listEvaluations(c, d) })
 }
 

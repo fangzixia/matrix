@@ -14,14 +14,23 @@ import (
 // registerProjectRoutes 注册项目与成员管理 API。
 func registerProjectRoutes(api *gin.RouterGroup, d *app.Deps) {
 	authz := auth.RequireAuth(d.Sessions)
+	// 列出当前用户可见的项目
 	api.GET("/projects", authz, func(c *gin.Context) { listProjects(c, d) })
+	// 创建新项目并初始化默认仓库
 	api.POST("/projects", authz, func(c *gin.Context) { createProject(c, d) })
+	// 获取项目详情
 	api.GET("/projects/:id", authz, auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { getProject(c, d) })
+	// 更新项目配置
 	api.PUT("/projects/:id", authz, auth.RequireProject(d.IAM, iam.RoleMaintainer), func(c *gin.Context) { updateProject(c, d) })
+	// 删除项目
 	api.DELETE("/projects/:id", authz, auth.RequireProject(d.IAM, iam.RoleOwner), func(c *gin.Context) { deleteProject(c, d) })
+	// 列出项目成员
 	api.GET("/projects/:id/members", authz, auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { listMembers(c, d) })
+	// 添加项目成员
 	api.POST("/projects/:id/members", authz, auth.RequireProject(d.IAM, iam.RoleMaintainer), func(c *gin.Context) { addMember(c, d) })
+	// 更新成员角色
 	api.PUT("/projects/:id/members/:uid", authz, auth.RequireProject(d.IAM, iam.RoleMaintainer), func(c *gin.Context) { updateMember(c, d) })
+	// 移除项目成员
 	api.DELETE("/projects/:id/members/:uid", authz, auth.RequireProject(d.IAM, iam.RoleMaintainer), func(c *gin.Context) { removeMember(c, d) })
 }
 

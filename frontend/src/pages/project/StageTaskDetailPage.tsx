@@ -6,6 +6,7 @@ import {
   Button,
   Card,
   Descriptions,
+  Empty,
   Flex,
   Progress,
   Result,
@@ -17,13 +18,14 @@ import {
   Typography,
 } from "antd";
 import RunActivityPanel from "@/components/ai/RunActivityPanel";
-import { useRunStore } from "@/stores/run";
-import { subscribeRunStream } from "@/api/stream";
+import { getRunView, subscribeRunViewStream, runStatusPollIntervalMs } from "@/api/runView";
 import * as runsApi from "@/api/runs";
-import type { RunEvent, RunStep } from "@/api/runs";
+import type { RunStep } from "@/api/runs";
+import type { RunViewState } from "@/types/runView";
+import { applyEnvelope } from "@/utils/viewReducer";
 import { runStatusLabels, stageTitles } from "@/locales/zh-CN";
-import { buildRunActivityState } from "@/utils/runActivityParser";
 import { canMergeRun, isStageKind, stageKindFromPath } from "@/utils/stage";
+import { useRunStore } from "@/stores/run";
 
 function statusColor(status: string) {
   if (status === "succeeded") return "success";
@@ -45,6 +47,15 @@ function formatDuration(ms?: number) {
   return `${(ms / 1000).toFixed(1)} s`;
 }
 
+const emptyView = (runId: string): RunViewState => ({
+  runId,
+  seq: 0,
+  status: "running",
+  statusLabel: "",
+  replyText: "",
+  turns: [],
+});
+
 export default function StageTaskDetailPage() {
   const { id: projectId = "", taskId = "" } = useParams();
   const location = useLocation();
@@ -53,26 +64,24 @@ export default function StageTaskDetailPage() {
   const kind = pathKind && isStageKind(pathKind) ? pathKind : "plan";
   const stageTitle = stageTitles[kind] || kind;
   const currentRun = useRunStore((s) => s.current);
-  const streamMessages = useRunStore((s) => s.streamMessages);
   const setCurrent = useRunStore((s) => s.setCurrent);
-  const appendStream = useRunStore((s) => s.appendStream);
-  const [events, setEvents] = useState<RunEvent[]>([]);
+  const [viewState, setViewState] = useState<RunViewState | null>(null);
+  const [viewLoading, setViewLoading] = useState(true);
   const [steps, setSteps] = useState<RunStep[]>([]);
-  const [eventsLoading, setEventsLoading] = useState(true);
   const [mergeError, setMergeError] = useState("");
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [acting, setActing] = useState(false);
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lastEventIdRef = useRef<string | undefined>(undefined);
-  async function loadEvents(afterId?: string) {
-    const res = await runsApi.listRunEvents(projectId, taskId, afterId);
-    if (res.events.length) {
-      setEvents((prev) => [...prev, ...res.events]);
-      lastEventIdRef.current = res.events.at(-1)?.id;
-    }
-    return res.events.at(-1)?.id;
+  const seenSeqRef = useRef<Set<number>>(new Set());
+
+  async function loadView() {
+    const res = await getRunView(projectId, taskId);
+    setViewState(res.state);
+    seenSeqRef.current.clear();
+    if (res.state?.seq) seenSeqRef.current.add(res.state.seq);
   }
+
   async function loadSteps() {
     try {
       const res = await runsApi.listRunSteps(projectId, taskId);
@@ -81,6 +90,7 @@ export default function StageTaskDetailPage() {
       setSteps([]);
     }
   }
+
   async function refreshRun() {
     const run = await runsApi.getRun(projectId, taskId);
     if (run.kind !== kind) {
@@ -100,52 +110,74 @@ export default function StageTaskDetailPage() {
     setCurrent(run);
     return run;
   }
+
+  function stopPolling() {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      setEventsLoading(true);
-      setEvents([]);
-      lastEventIdRef.current = undefined;
+      setViewLoading(true);
+      setViewState(null);
       const run = await refreshRun();
       if (cancelled) return;
-      await Promise.all([loadEvents(), loadSteps()]);
+      await Promise.all([loadView(), loadSteps()]);
       if (cancelled) return;
-      setEventsLoading(false);
+      setViewLoading(false);
       const active =
         run.status === "running" ||
         run.status === "queued" ||
         run.status === "pending";
       if (active) {
-        unsubscribeRef.current = subscribeRunStream(
+        unsubscribeRef.current = subscribeRunViewStream(
           projectId,
           taskId,
-          (msg) => {
-            appendStream(msg);
+          "detail",
+          {
+            onEnvelope: (env) => {
+              if (seenSeqRef.current.has(env.seq)) return;
+              seenSeqRef.current.add(env.seq);
+              setViewState((prev) =>
+                applyEnvelope(prev ?? emptyView(taskId), env),
+              );
+            },
+            onDisconnect: () => {
+              stopPolling();
+              void refreshRun().then(() => loadView());
+            },
           },
         );
         pollTimerRef.current = setInterval(async () => {
-          await loadEvents(lastEventIdRef.current);
           await loadSteps();
           const updated = await runsApi.getRun(projectId, taskId);
           setCurrent(updated);
-          if (!["running", "queued", "pending"].includes(updated.status)) {
-            if (pollTimerRef.current) clearInterval(pollTimerRef.current);
-            pollTimerRef.current = null;
+          if (
+            !["running", "queued", "pending"].includes(updated.status)
+          ) {
+            stopPolling();
+            await loadView();
           }
-        }, 3000);
+        }, runStatusPollIntervalMs());
       }
     }
     load();
     return () => {
       cancelled = true;
       unsubscribeRef.current?.();
-      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      stopPolling();
     };
-  }, [projectId, taskId, setCurrent, appendStream]);
+  }, [projectId, taskId, setCurrent]);
+
   async function cancel() {
     await runsApi.cancelRun(projectId, taskId);
     await refreshRun();
+    await loadView();
   }
+
   async function merge() {
     setActing(true);
     setMergeError("");
@@ -162,6 +194,7 @@ export default function StageTaskDetailPage() {
       setActing(false);
     }
   }
+
   async function discard() {
     setActing(true);
     try {
@@ -171,16 +204,15 @@ export default function StageTaskDetailPage() {
       setActing(false);
     }
   }
+
   const running =
     currentRun?.status === "running" ||
     currentRun?.status === "queued" ||
     currentRun?.status === "pending";
-  const activityState = useMemo(
-    () => buildRunActivityState(events, streamMessages),
-    [events, streamMessages],
-  );
+
+  const panelState = viewState ?? emptyView(taskId);
   const canMerge = currentRun ? canMergeRun(currentRun) : false;
-  const { result } = activityState;
+  const { result } = panelState;
   const terminal = currentRun && !running;
   const resultStatus = useMemo(() => {
     if (!terminal) return null;
@@ -195,6 +227,7 @@ export default function StageTaskDetailPage() {
     if (currentRun.status === "failed") return "任务执行失败";
     return runStatusLabels[currentRun.status] || currentRun.status;
   }, [currentRun]);
+
   return (
     <Space direction="vertical" size="large" style={{ width: "100%" }}>
       <Breadcrumb
@@ -314,9 +347,13 @@ export default function StageTaskDetailPage() {
         }
         styles={{ body: { maxHeight: "65vh", overflow: "auto" } }}
       >
-        <Spin spinning={eventsLoading && !activityState.turns.length}>
-          <RunActivityPanel state={activityState} running={running} />
-        </Spin>
+        {viewLoading && !viewState ? (
+          <Spin />
+        ) : !viewState && !running ? (
+          <Empty description="暂无活动" />
+        ) : (
+          <RunActivityPanel state={panelState} running={running} />
+        )}
         {result && (result.numTurns != null || result.durationMs != null) && (
           <Flex gap="large" style={{ marginTop: 24 }}>
             {result.numTurns != null && (

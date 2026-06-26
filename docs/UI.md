@@ -57,3 +57,13 @@
 ## 主题
 
 Ant Design 主题配置：`frontend/src/theme/antdTheme.ts`，在 `App.tsx` 通过 `XProvider` 注入。
+
+## Run 视图流（AG-UI 对齐）
+
+- **SSE**：`GET /api/projects/:id/runs/:runId/stream?mode=chat|detail`，事件名 `run:view`，载荷为 `ViewEnvelope`（AG-UI 事件类型）
+- **快照**：`GET /api/projects/:id/runs/:runId/view` → `{ state: RunViewState | null }`
+- **工具日志**：`GET /api/projects/:id/runs/:runId/tools/:toolUseId/log`
+- **chat 通道**：`RUN_*` + `TEXT_MESSAGE_CONTENT` + `ACTIVITY_SNAPSHOT` + `STATE_SNAPSHOT`（Chat 页：回复文本 + 子 Agent / 工具进度）
+- **detail 通道**：完整活动视图（Stage 任务详情页使用）
+- **SSE 连接时**：服务端立即补发当前 `STATE_SNAPSHOT`（或 `RUN_STARTED`）；已结束的 Run 补发 `RUN_FINISHED` 后关闭连接；运行中每 15s 发送 keepalive 注释
+- 前端类型：`frontend/src/types/runView.ts`；状态归约：`frontend/src/utils/viewReducer.ts`

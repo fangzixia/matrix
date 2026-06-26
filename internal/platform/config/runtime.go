@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"strings"
 	"time"
 )
@@ -186,6 +187,54 @@ func (a AIConfig) ActiveModel() (ModelSpec, bool) {
 		return ModelSpec{}, false
 	}
 	return p.ToSpec(), true
+}
+
+// EnabledModels 返回所有已启用的模型配置。
+func (a AIConfig) EnabledModels() []ModelProfile {
+	var out []ModelProfile
+	for _, m := range a.Models {
+		if m.Enabled {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// ModelProfileByID 按 ID 查找已启用的模型配置。
+func (a AIConfig) ModelProfileByID(id string) (ModelProfile, bool) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ModelProfile{}, false
+	}
+	for _, m := range a.Models {
+		if m.Enabled && m.ID == id {
+			return m, true
+		}
+	}
+	return ModelProfile{}, false
+}
+
+// ResolveModel 解析生效模型：优先 modelID，否则回退到默认启用模型。
+func (a AIConfig) ResolveModel(modelID string) (ModelSpec, ModelProfile, error) {
+	if id := strings.TrimSpace(modelID); id != "" {
+		p, ok := a.ModelProfileByID(id)
+		if !ok {
+			return ModelSpec{}, ModelProfile{}, errors.New("未找到或未启用指定模型")
+		}
+		if !ModelConfigured(p.ToSpec()) {
+			return ModelSpec{}, ModelProfile{}, errors.New("指定模型配置不完整")
+		}
+		return p.ToSpec(), p, nil
+	}
+	p, ok := a.ActiveModelProfile()
+	if !ok {
+		return ModelSpec{}, ModelProfile{}, errors.New("未配置模型：请在管理区域 → 系统配置中设置并启用默认模型")
+	}
+	spec := p.ToSpec()
+	if !ModelConfigured(spec) {
+		return ModelSpec{}, ModelProfile{}, errors.New("未配置模型：请在管理区域 → 系统配置中设置并启用默认模型")
+	}
+	return spec, p, nil
 }
 
 // ModelConfigured 判断模型配置是否完整，可用于 Run 启动前校验。

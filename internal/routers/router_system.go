@@ -15,20 +15,31 @@ func registerSystemAdminRoutes(admin *gin.RouterGroup, d *app.Deps) {
 	sys := admin.Group("/system", auth.RequireRoot(rootUser))
 	{
 		ai := sys.Group("/settings/ai")
+		// 读取系统 AI 配置
 		ai.GET("", func(c *gin.Context) { getSystemAISettings(c, d) })
+		// 保存系统 AI 配置
 		ai.PUT("", func(c *gin.Context) { putSystemAISettings(c, d) })
 		mcp := sys.Group("/settings/mcp")
+		// 读取系统 MCP 配置
 		mcp.GET("", func(c *gin.Context) { getSystemMCPSettings(c, d) })
+		// 保存系统 MCP 配置
 		mcp.PUT("", func(c *gin.Context) { putSystemMCPSettings(c, d) })
 		git := sys.Group("/settings/git")
+		// 读取系统 Git 配置
 		git.GET("", func(c *gin.Context) { getSystemGitSettings(c, d) })
+		// 保存系统 Git 配置
 		git.PUT("", func(c *gin.Context) { putSystemGitSettings(c, d) })
+		// 测试 Git 仓库连通性
 		git.POST("/test", func(c *gin.Context) { postSystemGitTest(c, d) })
 		worker := sys.Group("/settings/worker")
+		// 读取系统 Worker 配置
 		worker.GET("", func(c *gin.Context) { getSystemWorkerSettings(c, d) })
+		// 保存系统 Worker 配置
 		worker.PUT("", func(c *gin.Context) { putSystemWorkerSettings(c, d) })
 		pipeline := sys.Group("/settings/pipeline")
+		// 读取系统 Pipeline 配置
 		pipeline.GET("", func(c *gin.Context) { getSystemPipelineSettings(c, d) })
+		// 保存系统 Pipeline 配置
 		pipeline.PUT("", func(c *gin.Context) { putSystemPipelineSettings(c, d) })
 	}
 }

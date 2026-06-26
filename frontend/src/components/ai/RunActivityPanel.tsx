@@ -11,14 +11,14 @@ import {
 } from "@ant-design/x";
 import type { ThoughtChainItemType } from "@ant-design/x";
 import type {
-  AgentSnapshot,
-  RunActivityState,
-  RunActivityTurn,
-  RunToolStep,
-} from "@/types/runStream";
+  RunViewState,
+  SubagentView,
+  ToolView,
+  TurnView,
+} from "@/types/runView";
 
 export interface RunActivityPanelProps {
-  state: RunActivityState;
+  state: RunViewState;
   running?: boolean;
   /** 紧凑模式：仅展示最后一轮与当前工具链。 */
   compact?: boolean;
@@ -37,17 +37,18 @@ function formatToolMessage(message?: string): {
   }
 }
 
-function toolTitle(tool: RunToolStep): string {
-  if (tool.serverName) return `${tool.serverName} / ${tool.toolName}`;
-  return tool.toolName;
+function toolTitle(tool: ToolView): string {
+  if (tool.serverName) return `${tool.serverName} / ${tool.toolCallName}`;
+  return tool.toolCallName;
 }
 
 function renderTurnBody(
-  turn: RunActivityTurn,
+  turn: TurnView,
   isLatest: boolean,
   running?: boolean,
 ) {
   const streaming = running && isLatest;
+  const tools = turn.tools ?? [];
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
       {turn.thinking ? (
@@ -65,10 +66,10 @@ function renderTurnBody(
           </Typography.Paragraph>
         </Think>
       ) : null}
-      {turn.tools.length > 0 ? (
+      {tools.length > 0 ? (
         <ThoughtChain
           line
-          items={turn.tools.map((tool) => toolToChainItem(tool, streaming))}
+          items={tools.map((tool) => toolToChainItem(tool, streaming))}
         />
       ) : null}
       {turn.message ? (
@@ -83,9 +84,7 @@ function renderTurnBody(
   );
 }
 
-function workerTurnsToChainItems(
-  turns: RunActivityTurn[],
-): ThoughtChainItemType[] {
+function workerTurnsToChainItems(turns: TurnView[]): ThoughtChainItemType[] {
   return turns.map((wt) => ({
     key: wt.key,
     title: wt.summary || `子 Agent 第 ${wt.turn} 轮`,
@@ -97,10 +96,10 @@ function workerTurnsToChainItems(
 }
 
 function toolToChainItem(
-  tool: RunToolStep,
+  tool: ToolView,
   running?: boolean,
 ): ThoughtChainItemType {
-  const displayText = tool.liveOutput || tool.message;
+  const displayText = tool.liveOutput || tool.preview;
   const { lang, content } = formatToolMessage(displayText);
   const isStreaming =
     running && tool.status === "loading" && Boolean(tool.outputStreaming);
@@ -134,14 +133,23 @@ function toolToChainItem(
   }
   const footer = tool.elapsedMs != null ? `${tool.elapsedMs} ms` : undefined;
   const description =
-    tool.status !== "loading" && tool.message && tool.message.length <= 120
-      ? tool.message
+    tool.status !== "loading" &&
+    tool.preview &&
+    (tool.preview.length ?? 0) <= 120
+      ? tool.preview
       : undefined;
   return {
-    key: tool.key,
+    key: tool.toolCallId,
     title: toolTitle(tool),
     icon: tool.serverName ? <ApiOutlined /> : <ToolOutlined />,
-    status: tool.status,
+    status:
+      tool.status === "loading"
+        ? ("loading" as const)
+        : tool.status === "error"
+          ? ("error" as const)
+          : tool.status === "abort"
+            ? ("abort" as const)
+            : ("success" as const),
     blink: running && tool.status === "loading",
     collapsible: Boolean(itemContent) || isStreaming,
     description,
@@ -150,17 +158,18 @@ function toolToChainItem(
   };
 }
 
-function subagentProgressLine(snap: AgentSnapshot): string {
-  const p = snap.progress;
+function subagentProgressLine(snap: SubagentView): string {
+  const p = snap.progress as Record<string, unknown> | undefined;
   if (!p) return snap.description || snap.id;
   const parts: string[] = [];
-  if (p.summary) parts.push(p.summary);
-  if (p.last_activity) parts.push(p.last_activity);
-  if (p.tool_use_count != null) parts.push(`${p.tool_use_count} 次工具调用`);
+  if (typeof p.summary === "string") parts.push(p.summary);
+  if (typeof p.last_activity === "string") parts.push(p.last_activity);
+  if (typeof p.tool_use_count === "number")
+    parts.push(`${p.tool_use_count} 次工具调用`);
   return parts.join(" · ") || snap.description || snap.id;
 }
 
-function turnHeader(turn: RunActivityTurn) {
+function turnHeader(turn: TurnView) {
   return (
     <Space size="small">
       <Tag color={turn.scope === "worker" ? "purple" : "blue"}>
@@ -195,14 +204,14 @@ export default function RunActivityPanel({
         <Welcome
           icon={<RobotOutlined />}
           title="Agent 运行中"
-          description="正在等待第一轮输出，请稍候…"
+          description={state.statusLabel || "正在等待第一轮输出，请稍候…"}
         />
       );
     }
     return (
       <Empty
         image={Empty.PRESENTED_IMAGE_SIMPLE}
-        description="等待 Agent 输出…"
+        description="暂无活动"
       />
     );
   }
@@ -212,7 +221,7 @@ export default function RunActivityPanel({
         <ThoughtChain
           line
           style={{ marginBottom: 12 }}
-          items={subagentList.map((snap: AgentSnapshot) => ({
+          items={subagentList.map((snap) => ({
             key: snap.id,
             title: snap.description || `子 Agent ${snap.id.slice(0, 8)}`,
             icon: <RobotOutlined />,
@@ -232,7 +241,7 @@ export default function RunActivityPanel({
         />
       ) : null}
       {result?.output &&
-      !visibleTurns.some((t) => t.message.includes(result.output!)) ? (
+      !visibleTurns.some((t) => (t.message ?? "").includes(result.output!)) ? (
         <div style={{ marginTop: 16 }}>
           <Bubble role="ai" content={result.output} />
         </div>

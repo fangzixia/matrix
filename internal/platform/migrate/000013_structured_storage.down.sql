@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS plan_resolutions;
+ALTER TABLE runs DROP COLUMN IF EXISTS output;

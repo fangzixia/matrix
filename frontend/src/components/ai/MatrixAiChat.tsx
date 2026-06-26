@@ -1,19 +1,37 @@
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
-import { Avatar, Button, Flex, Image, Tag, theme } from "antd";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Avatar,
+  Button,
+  Flex,
+  Image,
+  Spin,
+  Tag,
+  Typography,
+  message,
+  theme,
+} from "antd";
 import type { GetRef } from "antd";
 import {
   PaperClipOutlined,
   RobotOutlined,
+  SyncOutlined,
+  ToolOutlined,
   UserOutlined,
 } from "@ant-design/icons";
 import {
+  Actions,
   Attachments,
   Bubble,
+  Prompts,
   Sender,
+  Welcome,
 } from "@ant-design/x";
 import type { AttachmentsProps } from "@ant-design/x";
 import type { BubbleItemType } from "@ant-design/x";
 import MarkdownView from "@/components/docs/MarkdownView";
+import RunActivityPanel from "@/components/ai/RunActivityPanel";
+import { getRunView } from "@/api/runView";
+import type { RunViewState } from "@/types/runView";
 
 type AttachmentsRef = GetRef<typeof Attachments>;
 
@@ -32,6 +50,9 @@ export interface AiMessage {
   content: string;
   loading?: boolean;
   attachments?: ChatAttachment[];
+  runId?: string;
+  parentId?: string | null;
+  activityExpanded?: boolean;
 }
 
 export interface ChatCapabilities {
@@ -39,19 +60,32 @@ export interface ChatCapabilities {
   attachment_types: string[];
 }
 
+export interface ChatPromptItem {
+  key: string;
+  label: string;
+  description?: string;
+}
+
 export interface MatrixAiChatProps {
   items?: AiMessage[];
   loading?: boolean;
   placeholder?: string;
   capabilities?: ChatCapabilities;
+  modelLabel?: string;
+  multimodalHint?: string;
+  welcomeTitle?: string;
+  welcomeDescription?: string;
+  prompts?: ChatPromptItem[];
+  projectId?: string;
   onSubmit: (
     message: string,
     attachments?: ChatAttachment[],
   ) => void | Promise<void>;
   onCancel?: () => void;
+  onResendUserMessage?: (messageKey: string | number) => void;
+  onToggleMessageActivity?: (messageKey: string | number) => void;
   className?: string;
   style?: React.CSSProperties;
-  /** 流式运行时在消息列表下方展示的附加区域（如工具链进度）。 */
   activitySlot?: ReactNode;
 }
 
@@ -71,10 +105,7 @@ function acceptFromTypes(types: string[]): string {
   return parts.join(",");
 }
 
-function detectAttachmentType(
-  file: File,
-  allowed: string[],
-): string | null {
+function detectAttachmentType(file: File, allowed: string[]): string | null {
   if (allowed.includes("image") && file.type.startsWith("image/")) {
     return "image";
   }
@@ -121,13 +152,11 @@ async function fileToChatAttachment(
   };
 }
 
-function renderMessageContent(item: AiMessage) {
-  const hasAttachments = (item.attachments?.length ?? 0) > 0;
-  if (!hasAttachments) return item.content;
+function renderUserAttachments(item: AiMessage) {
+  if (!item.attachments?.length) return null;
   return (
     <Flex vertical gap={8}>
-      {item.content ? <div>{item.content}</div> : null}
-      {item.attachments?.map((att) => {
+      {item.attachments.map((att) => {
         if (att.type === "image") {
           return (
             <Image
@@ -146,13 +175,65 @@ function renderMessageContent(item: AiMessage) {
   );
 }
 
+function MessageActivityBlock({
+  projectId,
+  runId,
+}: {
+  projectId: string;
+  runId: string;
+}) {
+  const [state, setState] = useState<RunViewState | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    getRunView(projectId, runId)
+      .then((res) => {
+        if (!cancelled) setState(res.state);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "加载失败");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, runId]);
+
+  if (loading) return <Spin size="small" />;
+  if (error) {
+    return (
+      <Typography.Text type="danger" style={{ fontSize: 12 }}>
+        {error}
+      </Typography.Text>
+    );
+  }
+  if (!state) return null;
+  return <RunActivityPanel state={state} />;
+}
+
 export default function MatrixAiChat({
   items = [],
   loading = false,
   placeholder = "输入消息…",
   capabilities,
+  modelLabel,
+  multimodalHint,
+  welcomeTitle = "开始对话",
+  welcomeDescription,
+  prompts,
+  projectId,
   onSubmit,
   onCancel,
+  onResendUserMessage,
+  onToggleMessageActivity,
   className,
   style,
   activitySlot,
@@ -165,88 +246,181 @@ export default function MatrixAiChat({
 
   const showAttachments = capabilities?.multimodal === true;
   const allowedTypes = capabilities?.attachment_types ?? [];
+
   const accept = useMemo(
     () => acceptFromTypes(allowedTypes),
     [allowedTypes],
   );
 
-  const beforeUpload = useCallback(
-    (file: File) => {
+  const itemsByKey = useMemo(
+    () => new Map(items.map((item) => [item.key, item])),
+    [items],
+  );
+
+  const validateFile = useCallback(
+    (file: File): string | null => {
       const type = detectAttachmentType(file, allowedTypes);
       if (!type) {
-        return false;
+        return "不支持的文件类型，仅支持图片或 txt/md 文档";
       }
       const maxBytes = type === "image" ? IMAGE_MAX_BYTES : DOCUMENT_MAX_BYTES;
       if (file.size > maxBytes) {
+        const mb = Math.round(maxBytes / (1024 * 1024));
+        return `文件过大，${type === "image" ? "图片" : "文档"}最大 ${mb} MB`;
+      }
+      return null;
+    },
+    [allowedTypes],
+  );
+
+  const beforeUpload = useCallback(
+    (file: File) => {
+      const err = validateFile(file);
+      if (err) {
+        message.warning(err);
         return false;
       }
       attachmentsRef.current?.upload(file);
       return false;
     },
-    [allowedTypes],
+    [validateFile],
   );
 
   const bubbleItems: BubbleItemType[] = items.map((item) => ({
     key: item.key,
     role: item.role,
-    content:
-      item.role === "user" ? renderMessageContent(item) : item.content,
+    content: item.content,
     loading: item.loading,
     streaming: item.role === "ai" && !!item.loading,
   }));
 
   const bubbleRole = useMemo(
     () => ({
-      user: {
-        placement: "end" as const,
-        variant: "filled" as const,
-        avatar: (
-          <Avatar
-            size={32}
-            icon={<UserOutlined />}
-            style={{ backgroundColor: token.colorPrimary }}
-          />
-        ),
-        styles: {
-          content: {
-            background: token.colorPrimary,
-            color: token.colorTextLightSolid,
-          },
-        },
-      },
-      ai: (data: BubbleItemType) => ({
-        placement: "start" as const,
-        variant: "filled" as const,
-        avatar: (
-          <Avatar
-            size={32}
-            icon={<RobotOutlined />}
-            style={{
-              backgroundColor: token.colorFillSecondary,
-              color: token.colorText,
-            }}
-          />
-        ),
-        styles: {
-          content: {
-            background: token.colorFillTertiary,
-            maxWidth: "100%",
-          },
-        },
-        contentRender: (content: unknown) => {
-          if (typeof content !== "string") return content as ReactNode;
-          if (!content && data.loading) return content;
-          return (
-            <MarkdownView content={content} streaming={!!data.loading} />
+      user: (data: BubbleItemType) => {
+        const src = itemsByKey.get(data.key ?? "");
+        const hasAttachments = (src?.attachments?.length ?? 0) > 0;
+        const showResend =
+          !!onResendUserMessage &&
+          !loading &&
+          data.key != null &&
+          (src?.content?.trim() || hasAttachments);
+        const footerParts: ReactNode[] = [];
+        if (hasAttachments && src) footerParts.push(renderUserAttachments(src));
+        if (showResend) {
+          footerParts.push(
+            <Actions
+              key="resend"
+              items={[
+                {
+                  key: "resend",
+                  label: "重新发送",
+                  icon: <SyncOutlined />,
+                  onItemClick: () => onResendUserMessage(data.key!),
+                },
+              ]}
+            />,
           );
-        },
-      }),
+        }
+        return {
+          placement: "end" as const,
+          variant: "filled" as const,
+          avatar: (
+            <Avatar
+              size={32}
+              icon={<UserOutlined />}
+              style={{ backgroundColor: token.colorPrimary }}
+            />
+          ),
+          styles: {
+            content: {
+              background: token.colorPrimary,
+              color: token.colorTextLightSolid,
+            },
+          },
+          footer: footerParts.length ? (
+            <Flex vertical gap={4} align="end">
+              {footerParts}
+            </Flex>
+          ) : undefined,
+          footerPlacement: "outer-end" as const,
+        };
+      },
+      ai: (data: BubbleItemType) => {
+        const src = itemsByKey.get(data.key ?? "");
+        const textContent =
+          typeof data.content === "string" ? data.content : "";
+        const showActions = !data.loading && textContent;
+        return {
+          placement: "start" as const,
+          variant: "filled" as const,
+          avatar: (
+            <Avatar
+              size={32}
+              icon={<RobotOutlined />}
+              style={{
+                backgroundColor: token.colorFillSecondary,
+                color: token.colorText,
+              }}
+            />
+          ),
+          styles: {
+            content: {
+              background: token.colorFillTertiary,
+              maxWidth: "100%",
+            },
+          },
+          contentRender: (content: unknown) => {
+            if (typeof content !== "string") return content as ReactNode;
+            if (!content && data.loading) return content;
+            return (
+              <Flex vertical gap={8} style={{ width: "100%" }}>
+                <MarkdownView content={content} streaming={!!data.loading} />
+                {src?.activityExpanded && src.runId && projectId ? (
+                  <MessageActivityBlock
+                    projectId={projectId}
+                    runId={src.runId}
+                  />
+                ) : null}
+              </Flex>
+            );
+          },
+          footer: showActions ? (
+            <Actions
+              items={[
+                {
+                  key: "copy",
+                  actionRender: <Actions.Copy text={textContent} />,
+                },
+                ...(src?.runId && onToggleMessageActivity && data.key != null
+                  ? [
+                      {
+                        key: "tools",
+                        label: src.activityExpanded ? "收起工具" : "工具调用",
+                        icon: <ToolOutlined />,
+                        onItemClick: () =>
+                          onToggleMessageActivity(data.key!),
+                      },
+                    ]
+                  : []),
+              ]}
+            />
+          ) : undefined,
+          footerPlacement: "outer-start" as const,
+        };
+      },
     }),
-    [token],
+    [
+      itemsByKey,
+      loading,
+      onResendUserMessage,
+      onToggleMessageActivity,
+      projectId,
+      token,
+    ],
   );
 
-  async function handleSubmit(message: string) {
-    const text = message.trim();
+  async function handleSubmit(msg: string) {
+    const text = msg.trim();
     const files = attachmentItems.filter((f) => f.originFileObj);
     const attachments: ChatAttachment[] = [];
     for (const item of files) {
@@ -266,12 +440,21 @@ export default function MatrixAiChat({
   function handlePasteFile(files: FileList) {
     if (!showAttachments || files.length === 0) return;
     const firstFile = files[0];
-    const type = detectAttachmentType(firstFile, allowedTypes);
-    if (!type) return;
-    const maxBytes = type === "image" ? IMAGE_MAX_BYTES : DOCUMENT_MAX_BYTES;
-    if (firstFile.size > maxBytes) return;
+    const err = validateFile(firstFile);
+    if (err) {
+      message.warning(err);
+      return;
+    }
     attachmentsRef.current?.upload(firstFile);
   }
+
+  const attachmentHint = useMemo(() => {
+    if (!showAttachments) return undefined;
+    const parts: string[] = [];
+    if (allowedTypes.includes("image")) parts.push("图片");
+    if (allowedTypes.includes("document")) parts.push("txt/md");
+    return parts.length ? `支持附件：${parts.join("、")}` : undefined;
+  }, [showAttachments, allowedTypes]);
 
   return (
     <div
@@ -286,12 +469,44 @@ export default function MatrixAiChat({
       }}
     >
       <div style={{ minHeight: 0, overflow: "auto", padding: "16px 24px" }}>
-        {items.length > 0 && (
-          <Bubble.List
-            items={bubbleItems}
-            autoScroll
-            role={bubbleRole}
-          />
+        {items.length === 0 ? (
+          <Flex vertical gap={16} align="center" style={{ paddingTop: 48 }}>
+            <Welcome
+              icon={<RobotOutlined />}
+              title={welcomeTitle}
+              description={
+                welcomeDescription ||
+                (modelLabel ? `当前模型：${modelLabel}` : undefined)
+              }
+              variant="borderless"
+            />
+            {multimodalHint || attachmentHint ? (
+              <Typography.Text type="secondary">
+                {multimodalHint || attachmentHint}
+              </Typography.Text>
+            ) : null}
+            {prompts && prompts.length > 0 ? (
+              <Prompts
+                title="你可以问我"
+                items={prompts.map((p) => ({
+                  key: p.key,
+                  label: p.label,
+                  description: p.description,
+                }))}
+                onItemClick={(info) => {
+                  const label =
+                    typeof info.data.label === "string"
+                      ? info.data.label
+                      : String(info.data.label ?? "");
+                  setInputValue(label);
+                }}
+                styles={{ item: { flex: "1 1 200px" } }}
+                wrap
+              />
+            ) : null}
+          </Flex>
+        ) : (
+          <Bubble.List items={bubbleItems} autoScroll role={bubbleRole} />
         )}
         {activitySlot}
       </div>
@@ -342,7 +557,8 @@ export default function MatrixAiChat({
                   placeholder={{
                     icon: <PaperClipOutlined />,
                     title: "上传附件",
-                    description: "点击或拖拽文件到此处",
+                    description:
+                      attachmentHint || "点击或拖拽文件到此处",
                   }}
                 />
               </Sender.Header>

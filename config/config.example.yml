@@ -15,8 +15,8 @@ logging:
   file: matrix.log
   level: debug           # debug | info | warn | error
   format: text           # text | json
-  max_size_mb: 100
-  max_backups: 7
+  max_size_mb: 100       # 单文件上限（MB），超出后轮转
+  max_backups: 30        # 保留备份份数（约 max_size_mb × max_backups 的历史）；排查问题需更长保留时可增大
 
 server:
   addr: ":8080"          # HTTP 监听地址

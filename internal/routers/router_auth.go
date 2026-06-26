@@ -11,10 +11,15 @@ import (
 
 // registerAuthRoutes 注册认证、用户搜索与个人资料 API。
 func registerAuthRoutes(api *gin.RouterGroup, d *app.Deps) {
+	// 用户名密码登录，设置 Session Cookie
 	api.POST("/auth/login", func(c *gin.Context) { login(c, d) })
+	// 登出并清除 Session Cookie
 	api.POST("/auth/logout", auth.RequireAuth(d.Sessions), func(c *gin.Context) { logout(c, d) })
+	// 获取当前登录用户信息
 	api.GET("/auth/me", auth.RequireAuth(d.Sessions), func(c *gin.Context) { me(c, d) })
+	// 按关键词搜索用户（成员邀请等场景）
 	api.GET("/users/search", auth.RequireAuth(d.Sessions), func(c *gin.Context) { searchUsers(c, d) })
+	// 更新当前用户个人资料
 	api.PUT("/profile", auth.RequireAuth(d.Sessions), func(c *gin.Context) { updateProfile(c, d) })
 }
 

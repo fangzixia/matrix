@@ -7,15 +7,16 @@ import (
 	"gorm.io/gorm"
 )
 
-// ChatSession 是项目内 Chat 会话与消息 JSON。
+// ChatSession 是项目内 Chat 会话元数据。
 type ChatSession struct {
-	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
-	ProjectID uuid.UUID `gorm:"type:uuid;index;not null"`
-	Title     string    `gorm:"size:512"`
-	Messages  string    `gorm:"type:jsonb"`
-	CreatedBy uuid.UUID `gorm:"type:uuid;index"`
-	UpdatedAt time.Time
-	CreatedAt time.Time
+	ID           uuid.UUID  `gorm:"type:uuid;primaryKey"`
+	ProjectID    uuid.UUID  `gorm:"type:uuid;index;not null"`
+	Title        string     `gorm:"size:512"`
+	ModelID      string     `gorm:"size:64"`
+	ActiveLeafID *uuid.UUID `gorm:"type:uuid"`
+	CreatedBy    uuid.UUID  `gorm:"type:uuid;index"`
+	UpdatedAt    time.Time
+	CreatedAt    time.Time
 }
 
 // BeforeCreate 在 ChatSession 入库前生成 UUID 主键。

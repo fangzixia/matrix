@@ -8,7 +8,9 @@ import (
 	"matrix/internal/platform/config"
 	"matrix/internal/platform/db/models"
 	"matrix/internal/platform/gitutil"
+	"matrix/internal/platform/logging"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -96,6 +98,7 @@ type Service struct {
 	db      *gorm.DB
 	runtime *config.RuntimeConfig
 	hooks   Hooks
+	mu      sync.Mutex
 }
 
 // NewService 创建系统配置服务实例。
@@ -119,6 +122,8 @@ func (s *Service) Bootstrap(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if stored == nil {
 		s.apply(defaultSettings(), true)
 		return nil
@@ -157,7 +162,7 @@ func (s *Service) SaveAI(ctx context.Context, in AISettings) (*AISettings, error
 	if err := s.saveDomain(ctx, DomainAI, merged); err != nil {
 		return nil, err
 	}
-	if err := s.reloadAndApply(ctx); err != nil {
+	if err := s.ReloadRuntime(ctx); err != nil {
 		return nil, err
 	}
 	return s.GetAI(ctx)
@@ -190,7 +195,7 @@ func (s *Service) SaveMCP(ctx context.Context, servers map[string]MCPServerSetti
 	if err := s.saveDomain(ctx, DomainMCP, payload); err != nil {
 		return nil, err
 	}
-	if err := s.reloadAndApply(ctx); err != nil {
+	if err := s.ReloadRuntime(ctx); err != nil {
 		return nil, err
 	}
 	return s.GetMCP(ctx)
@@ -232,7 +237,7 @@ func (s *Service) SaveGit(ctx context.Context, in GitSettings) (*GitSettings, er
 	if err := s.saveDomain(ctx, DomainGit, merged); err != nil {
 		return nil, err
 	}
-	if err := s.reloadAndApply(ctx); err != nil {
+	if err := s.ReloadRuntime(ctx); err != nil {
 		return nil, err
 	}
 	return s.GetGit(ctx)
@@ -274,7 +279,7 @@ func (s *Service) SaveWorker(ctx context.Context, in WorkerSettings) (*WorkerSet
 	if err := s.saveDomain(ctx, DomainWorker, merged); err != nil {
 		return nil, err
 	}
-	if err := s.reloadAndApply(ctx); err != nil {
+	if err := s.ReloadRuntime(ctx); err != nil {
 		return nil, err
 	}
 	return s.GetWorker(ctx)
@@ -303,7 +308,7 @@ func (s *Service) SavePipeline(ctx context.Context, in PipelineSettings) (*Pipel
 	if err := s.saveDomain(ctx, DomainPipeline, in); err != nil {
 		return nil, err
 	}
-	if err := s.reloadAndApply(ctx); err != nil {
+	if err := s.ReloadRuntime(ctx); err != nil {
 		return nil, err
 	}
 	return s.GetPipeline(ctx)
@@ -438,16 +443,46 @@ func (s *Service) loadAllStored(ctx context.Context) (*Settings, error) {
 	return &base, nil
 }
 
-// reloadAndApply 重新加载数据库配置并应用到内存。
-func (s *Service) reloadAndApply(ctx context.Context) error {
+// ReloadRuntime 从数据库重新加载全部系统配置并热更新内存 runtime（Save* 后调用）。
+func (s *Service) ReloadRuntime(ctx context.Context) error {
 	stored, err := s.loadAllStored(ctx)
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if stored != nil {
 		s.apply(*stored, false)
 	}
+	s.logAIReload()
 	return nil
+}
+
+// ReloadAI 从数据库重新加载 AI 域配置（含 API Key），供 Run 启动前刷新 stale 内存。
+func (s *Service) ReloadAI(ctx context.Context) error {
+	stored, err := s.loadDomainAI(ctx)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if stored != nil {
+		s.applyAI(*stored)
+	}
+	s.logAIReload()
+	return nil
+}
+
+func (s *Service) logAIReload() {
+	if p, ok := s.runtime.AI.ActiveModelProfile(); ok {
+		logging.Info("settings: 已从数据库重载 AI 运行时配置",
+			"default_model", p.Name,
+			"model", p.Model,
+			"model_count", len(s.runtime.AI.Models),
+		)
+		return
+	}
+	logging.Info("settings: AI runtime reloaded from database", "model_count", len(s.runtime.AI.Models))
 }
 
 // decorateAIForGet 为 API 返回的 AI 配置脱敏 API Key。
@@ -499,8 +534,7 @@ func (s *Service) mergeWorkerInput(ctx context.Context, in WorkerSettings) (Work
 	return out, nil
 }
 
-// apply 应用。
-func (s *Service) apply(st Settings, _ bool) {
+func (s *Service) applyAI(st AISettings) {
 	normalizeModelProfiles(&st.Models)
 	s.runtime.AI.Models = toConfigModels(st.Models)
 	if st.Context.AutoCompactThreshold > 0 {
@@ -514,6 +548,11 @@ func (s *Service) apply(st Settings, _ bool) {
 	if d, err := time.ParseDuration(st.Security.ShellTimeout); err == nil && d > 0 {
 		s.runtime.AI.Security.ShellTimeout = d
 	}
+}
+
+// apply 应用。
+func (s *Service) apply(st Settings, _ bool) {
+	s.applyAI(AISettings{Models: st.Models, Context: st.Context, Security: st.Security})
 	if st.MCPServers != nil {
 		s.runtime.MCP.Servers = toMCPServers(st.MCPServers)
 	} else {

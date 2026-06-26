@@ -3,6 +3,7 @@ package ports
 
 import (
 	"context"
+	"matrix/internal/ai/agent"
 	"matrix/internal/ai/query"
 	"matrix/internal/ai/stream"
 )
@@ -43,6 +44,8 @@ type RunRequest struct {
 	Model            ModelConfig
 	MCP              []MCPServerConfig
 	Policy           RuntimePolicy
+	OnSubagentUpdate func(agent.Snapshot)
+	OnSubagentDone   func(agent.Snapshot)
 }
 
 // RunResult 是 AgentRuntime.Run 的执行结果。
