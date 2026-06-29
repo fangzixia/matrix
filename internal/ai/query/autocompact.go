@@ -11,6 +11,7 @@ import (
 const (
 	defaultAutoCompactMaxTokens = 4096
 	defaultKeepRecentMessages   = 8
+	compactBoundaryPrefix       = "[compact_boundary]"
 	autoCompactSystemPrompt     = `You are a conversation summarizer for an AI coding assistant.
 Summarize the transcript below so the assistant can continue with full context.
 Preserve: user goals, decisions, file paths, errors, pending work, and important tool outcomes.
@@ -56,7 +57,7 @@ func formatTranscriptForSummary(msgs []Message) string {
 			b.WriteString("[assistant]")
 			if m.Thinking != "" {
 				b.WriteString(" (thinking)\n")
-				b.WriteString(truncateRunes(m.Thinking, 2000))
+				b.WriteString(TruncateRunes(m.Thinking, 2000))
 				b.WriteByte('\n')
 			}
 			if m.Content != "" {
@@ -77,12 +78,12 @@ func formatTranscriptForSummary(msgs []Message) string {
 			b.WriteString("[tool:")
 			b.WriteString(name)
 			b.WriteString("] ")
-			b.WriteString(truncateRunes(m.Content, 4000))
+			b.WriteString(TruncateRunes(m.Content, 4000))
 		default:
 			b.WriteString("[")
 			b.WriteString(string(m.Role))
 			b.WriteString("] ")
-			b.WriteString(truncateRunes(messageText(m), 4000))
+			b.WriteString(TruncateRunes(messageText(m), 4000))
 		}
 	}
 	return b.String()
@@ -104,7 +105,7 @@ func llmCompactHistory(ctx context.Context, cfg Config, msgs []Message, budget i
 	tail := msgs[len(msgs)-keep:]
 	summary, err := summarizeHistory(ctx, cfg, head)
 	if err != nil {
-		logging.Warnf("query: LLM autoCompact 失败，将回退确定性压缩: %v", err)
+		logging.AgentCtx(ctx, "query: LLM autoCompact 失败，将回退确定性压缩", "error", err.Error())
 		return msgs, false
 	}
 	preTokens := estimateMessagesTokens(msgs)
@@ -112,12 +113,12 @@ func llmCompactHistory(ctx context.Context, cfg Config, msgs []Message, budget i
 	out := append([]Message{{Role: RoleSystem, Content: boundary}}, tail...)
 	if budget > 0 && estimateRequestTokens(cfg, out) > budget {
 		// 摘要仍超长：截断 boundary 文本
-		out[0].Content = truncateRunes(out[0].Content, max(400, budget*3))
+		out[0].Content = TruncateRunes(out[0].Content, max(400, budget*3))
 		if estimateRequestTokens(cfg, out) > budget {
 			return msgs, false
 		}
 	}
-	logging.Info("query: LLM autoCompact 完成",
+	logging.Agent("query: LLM autoCompact 完成",
 		"kind", kind,
 		"messages_before", len(msgs),
 		"messages_after", len(out),
@@ -129,17 +130,17 @@ func llmCompactHistory(ctx context.Context, cfg Config, msgs []Message, budget i
 
 // buildLLMCompactSummary 调用 LLM 生成会话全量摘要。
 func buildLLMCompactSummary(summary string, headCount, tailCount, preTokens int, kind string) string {
-	return fmt.Sprintf(`[compact_boundary]
+	return fmt.Sprintf(`%s
 The earlier conversation was summarized by the model before the next request (kind=%s).
 Pre-compact estimate: ~%d tokens across %d messages; %d recent messages kept verbatim.
 Summary:
-%s`, kind, preTokens, headCount, tailCount, summary)
+%s`, compactBoundaryPrefix, kind, preTokens, headCount, tailCount, summary)
 }
 
 // hasCompactBoundary 判断历史中是否已有 compact_boundary 标记。
 func hasCompactBoundary(msgs []Message) bool {
 	for _, m := range msgs {
-		if m.Role == RoleSystem && strings.HasPrefix(m.Content, "[compact_boundary]") {
+		if m.Role == RoleSystem && strings.HasPrefix(m.Content, compactBoundaryPrefix) {
 			return true
 		}
 	}

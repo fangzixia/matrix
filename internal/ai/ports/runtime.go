@@ -2,10 +2,8 @@
 package ports
 
 import (
-	"context"
 	"matrix/internal/ai/agent"
 	"matrix/internal/ai/query"
-	"matrix/internal/ai/stream"
 )
 
 // ModelConfig 描述单次 Run 使用的 LLM 端点与模型参数。
@@ -33,7 +31,7 @@ type RuntimePolicy struct {
 	AllowCommandMCP bool
 }
 
-// RunRequest 是 AgentRuntime.Run 的输入参数。
+// RunRequest 是 Run 执行的输入参数。
 type RunRequest struct {
 	RunID            string
 	Kind             string
@@ -48,17 +46,11 @@ type RunRequest struct {
 	OnSubagentDone   func(agent.Snapshot)
 }
 
-// RunResult 是 AgentRuntime.Run 的执行结果。
+// RunResult 是 Run 执行的返回结果。
 type RunResult struct {
 	Output     string
 	StopReason string
 	TurnCount  int
 	Err        error
 	Messages   []query.Message
-}
-
-// AgentRuntime 是 AI 内核对外暴露的运行时接口，由 modules/run 实现。
-type AgentRuntime interface {
-	Run(ctx context.Context, req RunRequest, sink stream.Sink) (RunResult, error)
-	Cancel(runID string) error
 }

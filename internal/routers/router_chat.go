@@ -301,7 +301,7 @@ func runChat(c *gin.Context, d *app.Deps) {
 		return
 	}
 	rn.UserMessageID = userMessageID.String()
-	logging.Info("chat: Run 已创建",
+	logging.Agent("chat: Run 已创建",
 		"run_id", rn.ID,
 		"session_id", sessionID,
 		"user_message_id", userMessageID,

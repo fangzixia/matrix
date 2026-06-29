@@ -37,7 +37,7 @@ func (s *Service) buildChatRunMessages(ctx context.Context, m *models.Run) ([]qu
 		Role: query.RoleUser, Content: userRow.Content, Attachments: attachments,
 	}
 	out := append(history, userMsg)
-	logging.Info("run: chat 消息已构建",
+	logging.Agent("run: chat 消息已构建",
 		"run_id", m.ID,
 		"session_id", *m.ChatSessionID,
 		"user_message_id", *m.ChatUserMessageID,

@@ -19,15 +19,33 @@ func NewMCPTool(serverName string, tool mcp.Tool, manager *mcp.Manager) *Tool {
 	params := convertMCPSchema(tool.InputSchema)
 	execute := func(ctx context.Context, args map[string]any) (string, error) {
 		EmitStatus(ctx, fmt.Sprintf("MCP %s/%s …", serverName, tool.Name))
-		logging.Infof("Calling MCP tool: server=%s, tool=%s", serverName, tool.Name)
+		argsJSON, _ := json.Marshal(args)
+		logging.AgentCtx(ctx, "loop: MCP 工具调用",
+			"server", serverName,
+			"tool", tool.Name,
+			"input", string(argsJSON),
+		)
 		result, err := manager.CallTool(serverName, tool.Name, args)
 		if err != nil {
 			return "", fmt.Errorf("call MCP tool: %w", err)
 		}
 		if result.IsError {
-			return "", fmt.Errorf("MCP tool error: %s", formatContent(result.Content))
+			out := formatContent(result.Content)
+			logging.AgentCtx(ctx, "loop: MCP 工具结果",
+				"server", serverName,
+				"tool", tool.Name,
+				"is_error", true,
+				"output", out,
+			)
+			return "", fmt.Errorf("MCP tool error: %s", out)
 		}
 		out := formatContent(result.Content)
+		logging.AgentCtx(ctx, "loop: MCP 工具结果",
+			"server", serverName,
+			"tool", tool.Name,
+			"is_error", false,
+			"output", out,
+		)
 		EmitChunks(ctx, out, defaultEmitChunkSize)
 		return out, nil
 	}

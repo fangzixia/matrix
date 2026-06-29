@@ -53,54 +53,77 @@ func (r *Runtime) Cancel(runID string) error {
 
 // Run 在沙箱中执行一次 AI Agent 会话并流式输出事件。
 func (r *Runtime) Run(ctx context.Context, req ports.RunRequest, sink stream.Sink) (ports.RunResult, error) {
-	logging.Info("run: runtime.Run 开始",
+	logging.Agent("run: runtime.Run 开始",
 		"run_id", req.RunID, "kind", req.Kind,
 		"message_count", len(req.Messages),
 		"sandbox_dir", req.SandboxDir,
 		"model", req.Model.Model,
 	)
-	if req.Model.APIKey == "" {
-		logging.Warn("run: runtime.Run 拒绝（无 API Key）", "run_id", req.RunID)
-		return ports.RunResult{}, errors.New("未配置 API Key")
-	}
-	if len(req.Messages) == 0 {
-		logging.Warn("run: runtime.Run 拒绝（消息为空）", "run_id", req.RunID, "kind", req.Kind)
-		return ports.RunResult{}, errors.New("消息不能为空")
-	}
-	if req.SandboxDir == "" {
-		logging.Warn("run: runtime.Run 拒绝（沙箱为空）", "run_id", req.RunID)
-		return ports.RunResult{}, errors.New("沙箱目录未配置")
+	if err := validateRunRequest(req); err != nil {
+		return ports.RunResult{}, err
 	}
 	runID := req.RunID
 	if runID == "" {
 		runID = uuid.NewString()
 	}
+	runCtx, cleanup := r.attachRunCancel(ctx, runID, req.SandboxDir, req.ExtraSandboxDirs)
+	defer cleanup()
+	streamSink, closeSink := r.buildStreamingSink(sink, runID)
+	defer closeSink()
+	return r.runTAORSession(runCtx, req, runID, streamSink)
+}
+
+func validateRunRequest(req ports.RunRequest) error {
+	if req.Model.APIKey == "" {
+		logging.Agent("run: runtime.Run 拒绝（无 API Key）", "run_id", req.RunID)
+		return errors.New("未配置 API Key")
+	}
+	if len(req.Messages) == 0 {
+		logging.Agent("run: runtime.Run 拒绝（消息为空）", "run_id", req.RunID, "kind", req.Kind)
+		return errors.New("消息不能为空")
+	}
+	if req.SandboxDir == "" {
+		logging.Agent("run: runtime.Run 拒绝（沙箱为空）", "run_id", req.RunID)
+		return errors.New("沙箱目录未配置")
+	}
+	return nil
+}
+
+func (r *Runtime) attachRunCancel(ctx context.Context, runID, sandboxDir string, extraSandbox []string) (context.Context, func()) {
 	runCtx, cancel := context.WithCancel(ctx)
-	runCtx = tools.WithSandbox(runCtx, req.SandboxDir)
-	if len(req.ExtraSandboxDirs) > 0 {
-		runCtx = tools.WithExtraSandboxRoots(runCtx, req.ExtraSandboxDirs)
+	runCtx = tools.WithSandbox(runCtx, sandboxDir)
+	if len(extraSandbox) > 0 {
+		runCtx = tools.WithExtraSandboxRoots(runCtx, extraSandbox)
 	}
 	r.mu.Lock()
 	r.runCancels[runID] = cancel
 	r.mu.Unlock()
-	defer func() {
+	return runCtx, func() {
 		r.mu.Lock()
 		delete(r.runCancels, runID)
 		r.mu.Unlock()
 		cancel()
-	}()
-	coalescedText := stream.NewCoalesceSink(sink, runID, 100*time.Millisecond)
-	defer coalescedText.Close()
+	}
+}
+
+func (r *Runtime) buildStreamingSink(base stream.Sink, runID string) (stream.Sink, func()) {
+	coalescedText := stream.NewCoalesceSink(base, runID, 100*time.Millisecond)
 	coalesced := stream.NewOutputCoalesceSink(coalescedText, runID, 200*time.Millisecond)
-	defer coalesced.Close()
+	return coalesced, func() {
+		coalesced.Close()
+		coalescedText.Close()
+	}
+}
+
+func (r *Runtime) runTAORSession(ctx context.Context, req ports.RunRequest, runID string, sink stream.Sink) (ports.RunResult, error) {
 	mcpMgr := r.newMCPManager(req.MCP)
-	registry := coordinator.NewRegistry()
+	registry := agent.NewRegistry()
 	coordAsync := coordinator.NewAsyncSupport()
 	workerRun := coordinator.NewRunControl()
 	subagentsDir := filepath.Join(filepath.Dir(req.SessionsDir), "subagents")
 	sidechain := agent.NewSidechainWriter(subagentsDir)
 	auditWriter := audit.NewWriter(req.SessionsDir, req.SandboxDir, runID)
-	hub := coordinator.NewStreamHub(runID, registry, sidechain, coalesced, nil,
+	hub := coordinator.NewStreamHub(runID, registry, sidechain, sink, nil,
 		req.OnSubagentUpdate,
 		req.OnSubagentDone,
 	)
@@ -110,10 +133,10 @@ func (r *Runtime) Run(ctx context.Context, req ports.RunRequest, sink stream.Sin
 	if err != nil {
 		return ports.RunResult{}, err
 	}
-	workerRun.SetParent(runCtx)
+	workerRun.SetParent(ctx)
 	defer workerRun.SetParent(context.Background())
 	start := time.Now()
-	result := query.RunSession(runCtx, cfg, coalesced)
+	result := query.RunSession(ctx, cfg, sink)
 	_ = auditWriter.Close(audit.SessionMeta{
 		StopReason: string(result.StopReason),
 		TurnCount:  result.TurnCount,
@@ -131,7 +154,7 @@ func (r *Runtime) Run(ctx context.Context, req ports.RunRequest, sink stream.Sin
 	if len(result.Messages) > 0 {
 		out.Output = result.Messages[len(result.Messages)-1].Content
 	}
-	logging.Info("run: runtime.Run 结束",
+	logging.Agent("run: runtime.Run 结束",
 		"run_id", runID,
 		"stop_reason", out.StopReason,
 		"turn_count", out.TurnCount,
@@ -142,27 +165,13 @@ func (r *Runtime) Run(ctx context.Context, req ports.RunRequest, sink stream.Sin
 	return out, nil
 }
 
-// newMCPManager 根据配置创建 MCP 管理器。
-func (r *Runtime) newMCPManager(extra []ports.MCPServerConfig) *mcp.Manager {
+// newMCPManager 根据调用方已组装的 MCP 配置创建管理器（不再读取 runtimeCfg.MCP）。
+func (r *Runtime) newMCPManager(servers []ports.MCPServerConfig) *mcp.Manager {
 	m := mcp.NewManager()
 	cfgs := map[string]mcp.ServerConfig{}
-	for name, s := range r.runtimeCfg.MCP.Servers {
-		if s.Disabled {
-			continue
-		}
-		if !r.runtimeCfg.AI.Security.AllowCommandMCP && s.Command != "" {
-			continue
-		}
-		cfgs[name] = mcp.ServerConfig{
-			Command: s.Command, Args: s.Args, URL: s.URL, Headers: s.Headers, Env: s.Env, Disabled: s.Disabled,
-		}
-	}
-	for _, e := range extra {
+	for _, e := range servers {
 		if e.Disabled {
 			delete(cfgs, e.Name)
-			continue
-		}
-		if !r.runtimeCfg.AI.Security.AllowCommandMCP && e.Command != "" {
 			continue
 		}
 		cfgs[e.Name] = mcp.ServerConfig{
@@ -171,6 +180,17 @@ func (r *Runtime) newMCPManager(extra []ports.MCPServerConfig) *mcp.Manager {
 	}
 	m.UpdateConfigs(cfgs)
 	return m
+}
+
+func contextPolicyFromRuntime(runtimeCfg *config.RuntimeConfig) query.ContextPolicy {
+	ctxPolicy := query.ContextPolicy{
+		AutoCompactThreshold: runtimeCfg.AI.Context.AutoCompactThreshold,
+		KeepRecentMessages:   runtimeCfg.AI.Context.KeepRecentMessages,
+	}
+	if ctxPolicy.KeepRecentMessages < 1 {
+		ctxPolicy.KeepRecentMessages = 8
+	}
+	return ctxPolicy
 }
 
 // buildQueryConfig 为 Run 构建 query.Config。
@@ -191,13 +211,7 @@ func (r *Runtime) buildQueryConfig(
 	}
 	_ = tools.RegisterMCPTools(reg, mcpMgr)
 	workerOnly := coordinator.CloneWorkerRegistry(reg)
-	ctxPolicy := query.ContextPolicy{
-		AutoCompactThreshold: r.runtimeCfg.AI.Context.AutoCompactThreshold,
-		KeepRecentMessages:   r.runtimeCfg.AI.Context.KeepRecentMessages,
-	}
-	if ctxPolicy.KeepRecentMessages < 1 {
-		ctxPolicy.KeepRecentMessages = 8
-	}
+	ctxPolicy := contextPolicyFromRuntime(r.runtimeCfg)
 	coordCfg := coordinator.Config{
 		LLM:           client,
 		Model:         req.Model.Model,
@@ -217,20 +231,12 @@ func (r *Runtime) buildQueryConfig(
 	parentReg := coordinator.NewParentRegistry(coordCfg)
 	asyncResults, hasPending := coordAsync.QueryConfigFields()
 	prompt := coordinator.BuildParentSystemPrompt(workerOnly.Names(), mcpMgr.Names())
-	logging.Info("run: 构建 Query 配置", "session_id", sessionID, "sandbox", req.SandboxDir)
-	return query.Config{
-		LLM:             client,
-		Model:           req.Model.Model,
+	logging.Agent("run: 构建 Query 配置", "session_id", sessionID, "sandbox", req.SandboxDir)
+	return coordinator.QueryConfigFromCoordinator(coordCfg, coordinator.QueryConfigOverrides{
 		SystemPrompt:    prompt,
 		Registry:        parentReg,
-		MaxTurns:        200,
-		MaxTokens:       req.Model.MaxTokens,
-		ContextPolicy:   ctxPolicy,
-		CanUseTool:      func(string, map[string]any) bool { return true },
 		AsyncResults:    asyncResults,
 		HasPendingAsync: hasPending,
-		SessionID:       sessionID,
-		Audit:           auditWriter,
 		InitialMessages: append([]query.Message(nil), req.Messages...),
-	}, nil
+	}), nil
 }

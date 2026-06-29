@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Paths 是解析后的本地存储目录绝对路径集合。
@@ -16,7 +17,20 @@ type Paths struct {
 	AuditDir      string
 	ExportsDir    string
 	LogDir        string
-	LogFile       string
+	LogCategories LogCategories
+}
+
+// LogCategories 是各类别日志子目录名（实际文件为 {dir}/{category}/{YYYY-MM-DD}.log）。
+type LogCategories struct {
+	System string
+	API    string
+	LLM    string
+	Agent  string
+}
+
+// LogPath 返回指定类别与日期的日志文件绝对路径。
+func (p Paths) LogPath(category string, date time.Time) string {
+	return filepath.Join(p.LogDir, category, date.Format("2006-01-02")+".log")
 }
 
 // Resolve 根据配置计算各数据目录的绝对路径并校验 allowed_roots。
@@ -29,7 +43,12 @@ func Resolve(cfg *config.Config) (Paths, error) {
 		AuditDir:      config.ResolvePath(data, cfg.Storage.AuditDir),
 		ExportsDir:    config.ResolvePath(data, cfg.Storage.ExportsDir),
 		LogDir:        config.ResolvePath(".", cfg.Logging.Dir),
-		LogFile:       filepath.Join(config.ResolvePath(".", cfg.Logging.Dir), cfg.Logging.File),
+		LogCategories: LogCategories{
+			System: cfg.Logging.Categories.System,
+			API:    cfg.Logging.Categories.API,
+			LLM:    cfg.Logging.Categories.LLM,
+			Agent:  cfg.Logging.Categories.Agent,
+		},
 	}
 	if err := validateAllowedRoots(cfg.Storage.AllowedRoots, p); err != nil {
 		return Paths{}, err
@@ -77,7 +96,13 @@ func underAllowedRoot(path string, allowed []string) bool {
 
 // EnsureLayout 创建 DataDir、WorkspacesDir 等必要目录。
 func EnsureLayout(p Paths) error {
-	for _, dir := range []string{p.DataDir, p.WorkspacesDir, p.AuditDir, p.ExportsDir, p.LogDir} {
+	dirs := []string{p.DataDir, p.WorkspacesDir, p.AuditDir, p.ExportsDir, p.LogDir}
+	for _, cat := range []string{p.LogCategories.System, p.LogCategories.API, p.LogCategories.LLM, p.LogCategories.Agent} {
+		if cat != "" {
+			dirs = append(dirs, filepath.Join(p.LogDir, cat))
+		}
+	}
+	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("storage: mkdir %s: %w", dir, err)
 		}

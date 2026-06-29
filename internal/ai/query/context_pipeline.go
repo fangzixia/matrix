@@ -56,7 +56,7 @@ func prepareHistoryForRequest(ctx context.Context, cfg Config, msgs *[]Message) 
 		if cfg.Audit != nil {
 			cfg.Audit.Emit("context.compact", 0, auditComponent(cfg), data)
 		}
-		logging.InfoCtx(ctx, "query: 上下文流水线已压缩",
+		logging.AgentCtx(ctx, "query: 上下文流水线已压缩",
 			"before_tokens_est", stats.BeforeTokens,
 			"after_tokens_est", stats.AfterTokens,
 			"hard_compacted", stats.HardCompacted,
@@ -146,7 +146,7 @@ func deterministicCompactToBudget(cfg Config, msgs []Message, budget int) []Mess
 		Content: buildDeterministicSummary(msgs),
 	}
 	if estimateRequestTokens(cfg, []Message{summary}) > budget {
-		summary.Content = truncateRunes(summary.Content, max(200, budget*2))
+		summary.Content = TruncateRunes(summary.Content, max(200, budget*2))
 	}
 	kept := make([]Message, 0, min(len(msgs), 16))
 	for i := len(msgs) - 1; i >= 0; i-- {
@@ -159,7 +159,7 @@ func deterministicCompactToBudget(cfg Config, msgs []Message, budget int) []Mess
 	}
 	if len(kept) == 0 && len(msgs) > 0 {
 		last := normalizeForCompactTail(msgs[len(msgs)-1])
-		last.Content = truncateRunes(messageText(last), max(200, budget*2))
+		last.Content = TruncateRunes(messageText(last), max(200, budget*2))
 		kept = append(kept, last)
 	}
 	return append([]Message{summary}, kept...)
@@ -180,14 +180,14 @@ func buildDeterministicSummary(msgs []Message) string {
 			assistantCount++
 		}
 		if i >= start {
-			recent = append(recent, fmt.Sprintf("- %s: %s", m.Role, truncateRunes(messageText(m), 260)))
+			recent = append(recent, fmt.Sprintf("- %s: %s", m.Role, TruncateRunes(messageText(m), 260)))
 		}
 	}
-	return fmt.Sprintf(`[compact_boundary]
+	return fmt.Sprintf(`%s
 The earlier conversation was deterministically compacted before an LLM request to stay within the model context window.
 Original history summary: %d messages, %d user messages, %d assistant messages, %d tool results.
 Recent pre-compact messages:
-%s`, len(msgs), userCount, assistantCount, toolCount, strings.Join(recent, "\n"))
+%s`, compactBoundaryPrefix, len(msgs), userCount, assistantCount, toolCount, strings.Join(recent, "\n"))
 }
 
 // normalizeForCompactTail 规范化保留尾部消息用于压缩。
@@ -204,7 +204,7 @@ func normalizeForCompactTail(m Message) Message {
 		if name == "" {
 			name = "tool"
 		}
-		return Message{Role: RoleUser, Content: fmt.Sprintf("[tool_result:%s] %s", name, truncateRunes(m.Content, 1200))}
+		return Message{Role: RoleUser, Content: fmt.Sprintf("[tool_result:%s] %s", name, TruncateRunes(m.Content, 1200))}
 	default:
 		m.Thinking = ""
 		m.ToolCalls = nil
@@ -281,7 +281,7 @@ func truncateAsyncMessage(m Message, maxRunes int) Message {
 	if maxRunes <= 0 || utf8.RuneCountInString(m.Content) <= maxRunes {
 		return m
 	}
-	m.Content = truncateRunes(m.Content, maxRunes)
+	m.Content = TruncateRunes(m.Content, maxRunes)
 	return m
 }
 

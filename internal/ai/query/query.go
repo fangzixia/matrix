@@ -58,35 +58,58 @@ func auditComponent(cfg Config) string {
 	return "query"
 }
 
+// logAgentOutcome 记录 TAOR 循环终态到 agent.log。
+func logAgentOutcome(ctx context.Context, r Result) {
+	args := []any{"stop_reason", r.StopReason, "turns", r.TurnCount}
+	if r.Err != nil {
+		args = append(args, "error", r.Err.Error())
+	}
+	logging.AgentCtx(ctx, "loop: 结束", args...)
+}
+
+func returnOutcome(ctx context.Context, r Result) Result {
+	logAgentOutcome(ctx, r)
+	return r
+}
+
 // publishResult 推送 TAOR 循环最终结果。
 func publishResult(ctx context.Context, sid string, sink StreamSink, r Result, start time.Time) {
 	if sink == nil {
 		return
 	}
-	dur := time.Since(start)
+	msg, logType := buildResultMessage(sid, r, time.Since(start))
+	if msg.Type == "" {
+		return
+	}
+	if err := sink.Publish(ctx, msg); err != nil {
+		logging.AgentCtx(ctx, "stream: publish 失败", "error", err, "session_id", sid, "type", logType)
+	}
+}
+
+func buildResultMessage(sid string, r Result, dur time.Duration) (stream.Message, string) {
 	switch r.StopReason {
 	case StopCompleted:
-		_ = sink.Publish(ctx, stream.ResultSuccessMsg(sid, r.Answer, string(r.StopReason), r.TurnCount, dur))
+		return stream.ResultSuccessMsg(sid, r.Answer, string(r.StopReason), r.TurnCount, dur), "result_success"
 	case StopMaxTurns:
-		_ = sink.Publish(ctx, stream.ResultMaxTurns(sid, r.TurnCount, dur))
+		return stream.ResultMaxTurns(sid, r.TurnCount, dur), "result_max_turns"
 	case StopAborted:
 		errMsg := "已取消"
 		if r.Err != nil {
 			errMsg = r.Err.Error()
 		}
-		_ = sink.Publish(ctx, stream.ResultErrorMsg(sid, string(r.StopReason), errMsg, r.TurnCount, dur))
+		return stream.ResultErrorMsg(sid, string(r.StopReason), errMsg, r.TurnCount, dur), "result_aborted"
 	case StopModelError:
 		errMsg := "模型错误"
 		if r.Err != nil {
 			errMsg = r.Err.Error()
 		}
-		_ = sink.Publish(ctx, stream.ResultErrorMsg(sid, string(r.StopReason), errMsg, r.TurnCount, dur))
+		return stream.ResultErrorMsg(sid, string(r.StopReason), errMsg, r.TurnCount, dur), "result_model_error"
 	default:
 		errMsg := ""
 		if r.Err != nil {
 			errMsg = r.Err.Error()
 		}
-		_ = sink.Publish(ctx, stream.ResultErrorMsg(sid, string(r.StopReason), errMsg, r.TurnCount, dur))
+		return stream.ResultErrorMsg(sid, string(r.StopReason), errMsg, r.TurnCount, dur), "result_error"
 	}
 }
 
@@ -95,7 +118,9 @@ func publish(ctx context.Context, sink StreamSink, msg stream.Message) {
 	if sink == nil {
 		return
 	}
-	_ = sink.Publish(ctx, msg)
+	if err := sink.Publish(ctx, msg); err != nil {
+		logging.AgentCtx(ctx, "stream: publish 失败", "error", err, "session_id", msg.SessionID, "type", msg.Type)
+	}
 }
 
 // queryLoop 是 TAOR 循环的核心 for{} 状态机。
@@ -107,12 +132,11 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 	}
 	for {
 		if err := ctx.Err(); err != nil {
-			return Result{StopReason: StopAborted, TurnCount: s.turnCount, Err: err, Messages: s.messages}
+			return returnOutcome(ctx, Result{StopReason: StopAborted, TurnCount: s.turnCount, Err: err, Messages: s.messages})
 		}
 		prepareHistoryForRequest(ctx, cfg, &s.messages)
 		if cfg.MaxTurns > 0 && s.turnCount > cfg.MaxTurns {
-			logging.InfoCtx(ctx, "loop: 已达最大轮次", "turns", s.turnCount)
-			return Result{StopReason: StopMaxTurns, TurnCount: s.turnCount, Messages: s.messages}
+			return returnOutcome(ctx, Result{StopReason: StopMaxTurns, TurnCount: s.turnCount, Messages: s.messages})
 		}
 		trans := transitionStr(s.transition)
 		summary := fmt.Sprintf("%s第 %d 轮（跃迁: %s）", logLinePrefix(cfg), s.turnCount, trans)
@@ -129,14 +153,14 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 				"log_prefix":    cfg.LogPrefix,
 			})
 		}
-		logging.InfoCtx(ctx, "loop: 迭代",
+		logging.AgentCtx(ctx, "loop: 迭代",
 			"log_prefix", cfg.LogPrefix,
 			"message_count", len(s.messages),
 			"transition", trans,
 		)
 		turn, err := think(ctx, cfg, s.turnCount, s.messages, sink)
 		if err != nil {
-			return Result{StopReason: StopModelError, TurnCount: s.turnCount, Err: err, Messages: s.messages}
+			return returnOutcome(ctx, Result{StopReason: StopModelError, TurnCount: s.turnCount, Err: err, Messages: s.messages})
 		}
 		assistantMsg := Message{
 			Role:      RoleAssistant,
@@ -147,46 +171,11 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 		s.messages = append(s.messages, assistantMsg)
 		toolBlocks := toolCallsToBlocks(turn.ToolCalls)
 		publish(ctx, sink, stream.Assistant(sid, turn.Content, turn.Thinking, toolBlocks, turn.FinishReason))
-		needsFollowUp := len(turn.ToolCalls) > 0
-		if !needsFollowUp {
-			if blockingErr := report(s.messages, cfg.StopHook); blockingErr != "" {
-				logging.InfoCtx(ctx, "loop: Stop Hook 阻塞", "error", blockingErr)
-				s = state{
-					messages: append(s.messages, Message{
-						Role:    RoleUser,
-						Content: "[stop_hook] " + blockingErr,
-					}),
-					turnCount:  s.turnCount,
-					transition: new(TransitionStopHookBlocking),
-				}
-				continue
+		if len(turn.ToolCalls) == 0 {
+			if done, finished := tryFinishTurn(ctx, cfg, &s, turn); finished {
+				return returnOutcome(ctx, done)
 			}
-			prevLen := len(s.messages)
-			s.messages = drainAsyncResults(cfg, s.turnCount, s.messages, cfg.AsyncResults, cfg.ContextPolicy.MaxAsyncResultRunes)
-			if len(s.messages) > prevLen {
-				logging.InfoCtx(ctx, "loop: 异步结果已消费", "new_messages", len(s.messages)-prevLen)
-				continue
-			}
-			if cfg.HasPendingAsync != nil && cfg.HasPendingAsync() {
-				logging.InfoCtx(ctx, "loop: 等待异步子 Agent")
-				select {
-				case <-ctx.Done():
-					return Result{StopReason: StopAborted, TurnCount: s.turnCount,
-						Err: ctx.Err(), Messages: s.messages}
-				case msg := <-cfg.AsyncResults:
-					emitAsyncAudit(cfg, s.turnCount, msg)
-					s.messages = append(s.messages, truncateAsyncMessage(msg, cfg.ContextPolicy.MaxAsyncResultRunes))
-					s.messages = drainAsyncResults(cfg, s.turnCount, s.messages, cfg.AsyncResults, cfg.ContextPolicy.MaxAsyncResultRunes)
-					logging.InfoCtx(ctx, "loop: 已注入异步结果", "message_count", len(s.messages))
-					continue
-				}
-			}
-			return Result{
-				StopReason: StopCompleted,
-				TurnCount:  s.turnCount,
-				Answer:     turn.Content,
-				Messages:   s.messages,
-			}
+			continue
 		}
 		toolResults := act(ctx, cfg, s.turnCount, turn.ToolCalls, sink)
 		observeMsgs := observe(ctx, cfg, s.turnCount, toolResults)
@@ -197,11 +186,58 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 			turnCount:  s.turnCount + 1,
 			transition: new(TransitionNextTurn),
 		}
-		logging.InfoCtx(ctx, "loop: 本轮完成",
+		logging.AgentCtx(ctx, "loop: 本轮完成",
 			"completed_turn", s.turnCount-1,
 			"tool_calls", len(turn.ToolCalls),
 		)
 	}
+}
+
+// tryFinishTurn 处理无 tool call 时的 stop hook、async drain 与阻塞等待。
+// finished 为 true 时 done 为终态结果；false 时调用方应 continue 主循环。
+func tryFinishTurn(ctx context.Context, cfg Config, s *state, turn *llm.AssistantTurn) (done Result, finished bool) {
+	if blockingErr := report(s.messages, cfg.StopHook); blockingErr != "" {
+		logging.AgentCtx(ctx, "loop: Stop Hook 阻塞", "error", blockingErr)
+		*s = state{
+			messages: append(s.messages, Message{
+				Role:    RoleUser,
+				Content: "[stop_hook] " + blockingErr,
+			}),
+			turnCount:  s.turnCount,
+			transition: new(TransitionStopHookBlocking),
+		}
+		return Result{}, false
+	}
+	prevLen := len(s.messages)
+	s.messages = drainAsyncResults(cfg, s.turnCount, s.messages, cfg.AsyncResults, cfg.ContextPolicy.MaxAsyncResultRunes)
+	if len(s.messages) > prevLen {
+		logging.AgentCtx(ctx, "loop: 异步结果已消费", "new_messages", len(s.messages)-prevLen)
+		return Result{}, false
+	}
+	if cfg.HasPendingAsync != nil && cfg.HasPendingAsync() {
+		logging.AgentCtx(ctx, "loop: 等待异步子 Agent")
+		select {
+		case <-ctx.Done():
+			return Result{
+				StopReason: StopAborted,
+				TurnCount:  s.turnCount,
+				Err:        ctx.Err(),
+				Messages:   s.messages,
+			}, true
+		case msg := <-cfg.AsyncResults:
+			emitAsyncAudit(cfg, s.turnCount, msg)
+			s.messages = append(s.messages, truncateAsyncMessage(msg, cfg.ContextPolicy.MaxAsyncResultRunes))
+			s.messages = drainAsyncResults(cfg, s.turnCount, s.messages, cfg.AsyncResults, cfg.ContextPolicy.MaxAsyncResultRunes)
+			logging.AgentCtx(ctx, "loop: 已注入异步结果", "message_count", len(s.messages))
+			return Result{}, false
+		}
+	}
+	return Result{
+		StopReason: StopCompleted,
+		TurnCount:  s.turnCount,
+		Answer:     turn.Content,
+		Messages:   s.messages,
+	}, true
 }
 
 // emitAsyncAudit 记录异步子 Agent 相关审计事件。
@@ -260,7 +296,6 @@ func think(
 			"tokens_est":  tokensEst,
 		})
 	}
-	logging.InfoCtx(ctx, "loop: LLM 请求", "model", cfg.Model, "history_len", len(history), "tokens_est", tokensEst)
 	req := llm.ChatRequest{
 		Model:     cfg.Model,
 		Messages:  buildChatMessages(cfg.SystemPrompt, history),
@@ -285,17 +320,7 @@ func think(
 		}
 		if ev.ToolCallDelta != nil {
 			d := ev.ToolCallDelta
-			toolUseID := d.ID
-			if toolUseID == "" {
-				if existing, ok := pendingToolIDs[d.Index]; ok {
-					toolUseID = existing
-				} else {
-					toolUseID = fmt.Sprintf("pending-%d", d.Index)
-					pendingToolIDs[d.Index] = toolUseID
-				}
-			} else {
-				pendingToolIDs[d.Index] = toolUseID
-			}
+			toolUseID := resolveToolUseID(d, pendingToolIDs)
 			if d.Name != "" || d.ArgumentsDelta != "" {
 				publish(ctx, sink, stream.ToolInputStreaming(sid, toolUseID, d.Name, d.ArgumentsDelta))
 			}
@@ -316,12 +341,20 @@ func think(
 			"thinking_preview": audit.Preview(finalTurn.Thinking, 300),
 		})
 	}
-	logging.InfoCtx(ctx, "loop: LLM 响应",
-		"finish_reason", finalTurn.FinishReason,
-		"tool_calls", len(finalTurn.ToolCalls),
-		"content_len", len(finalTurn.Content),
-	)
 	return finalTurn, nil
+}
+
+func resolveToolUseID(d *llm.ToolCallDelta, pending map[int]string) string {
+	if d.ID != "" {
+		pending[d.Index] = d.ID
+		return d.ID
+	}
+	if existing, ok := pending[d.Index]; ok {
+		return existing
+	}
+	id := fmt.Sprintf("pending-%d", d.Index)
+	pending[d.Index] = id
+	return id
 }
 
 // act 执行 TAOR 循环的 A（行动）阶段：执行工具调用。
@@ -336,8 +369,12 @@ func act(
 		return nil
 	}
 	sid := cfg.SessionID
-	logging.InfoCtx(ctx, "loop: 工具执行", "count", len(toolCalls))
 	for _, tc := range toolCalls {
+		logging.AgentCtx(ctx, "loop: 工具执行",
+			"tool_name", tc.Function.Name,
+			"tool_call_id", tc.ID,
+			"input", tc.Function.Arguments,
+		)
 		if cfg.Audit != nil {
 			cfg.Audit.EmitWithTool("turn.tool_call", turn, auditComponent(cfg), tc.ID, map[string]any{
 				"tool_name":     tc.Function.Name,
@@ -357,7 +394,12 @@ func act(
 	}
 	results := tools.RunTools(ctx, toolCalls, cfg.Registry, cfg.CanUseTool, onProgress)
 	for _, r := range results {
-		logging.InfoCtx(ctx, "loop: 工具结果", "tool_name", r.ToolName, "is_error", r.IsError)
+		logging.AgentCtx(ctx, "loop: 工具结果",
+			"tool_name", r.ToolName,
+			"tool_call_id", r.ToolCallID,
+			"is_error", r.IsError,
+			"output", r.Output,
+		)
 	}
 	return results
 }
@@ -368,7 +410,7 @@ func observe(ctx context.Context, cfg Config, turn int, results []tools.Result) 
 	for _, r := range results {
 		out := r.Output
 		if cfg.MaxToolResultRunes > 0 {
-			out = truncateRunes(out, cfg.MaxToolResultRunes)
+			out = TruncateRunes(out, cfg.MaxToolResultRunes)
 		}
 		if cfg.Audit != nil {
 			cfg.Audit.EmitWithTool("turn.tool_result", turn, auditComponent(cfg), r.ToolCallID, map[string]any{
@@ -385,12 +427,12 @@ func observe(ctx context.Context, cfg Config, turn int, results []tools.Result) 
 			IsError:    r.IsError,
 		})
 	}
-	logging.InfoCtx(ctx, "loop: Observe 完成", "result_count", len(msgs))
+	logging.AgentCtx(ctx, "loop: Observe 完成", "result_count", len(msgs))
 	return msgs
 }
 
-// truncateRunes 按 Unicode rune 截断字符串。
-func truncateRunes(s string, maxRunes int) string {
+// TruncateRunes 按 Unicode rune 截断字符串。
+func TruncateRunes(s string, maxRunes int) string {
 	if maxRunes <= 0 {
 		return s
 	}

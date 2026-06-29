@@ -38,12 +38,21 @@ type StorageConfig struct {
 
 // LoggingConfig 是日志输出选项。
 type LoggingConfig struct {
-	Dir        string `yaml:"dir"`
-	File       string `yaml:"file"`
-	Level      string `yaml:"level"`
-	Format     string `yaml:"format"`
-	MaxSizeMB  int    `yaml:"max_size_mb"`
-	MaxBackups int    `yaml:"max_backups"`
+	Dir              string                  `yaml:"dir"`
+	Level            string                  `yaml:"level"`
+	Format           string                  `yaml:"format"`
+	AccessFormat     string                  `yaml:"access_format"`
+	StructuredFormat string                  `yaml:"structured_format"`
+	RetentionDays    int                     `yaml:"retention_days"`
+	Categories       LoggingCategoriesConfig `yaml:"categories"`
+}
+
+// LoggingCategoriesConfig 是各类别日志子目录名。
+type LoggingCategoriesConfig struct {
+	System string `yaml:"system"`
+	API    string `yaml:"api"`
+	LLM    string `yaml:"llm"`
+	Agent  string `yaml:"agent"`
 }
 
 // ServerConfig 是 HTTP 服务监听参数。
@@ -93,10 +102,38 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
 		return nil, err
 	}
+	normalizeLogging(&cfg.Logging)
 	if err := validate(&cfg); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+func normalizeLogging(cfg *LoggingConfig) {
+	if cfg == nil {
+		return
+	}
+	if cfg.RetentionDays <= 0 {
+		cfg.RetentionDays = 30
+	}
+	if strings.TrimSpace(cfg.AccessFormat) == "" {
+		cfg.AccessFormat = "combined"
+	}
+	if strings.TrimSpace(cfg.StructuredFormat) == "" {
+		cfg.StructuredFormat = "json"
+	}
+	if strings.TrimSpace(cfg.Categories.System) == "" {
+		cfg.Categories.System = "system"
+	}
+	if strings.TrimSpace(cfg.Categories.API) == "" {
+		cfg.Categories.API = "api"
+	}
+	if strings.TrimSpace(cfg.Categories.LLM) == "" {
+		cfg.Categories.LLM = "llm"
+	}
+	if strings.TrimSpace(cfg.Categories.Agent) == "" {
+		cfg.Categories.Agent = "agent"
+	}
 }
 
 func validate(cfg *Config) error {
@@ -123,9 +160,6 @@ func validate(cfg *Config) error {
 	}
 	if strings.TrimSpace(cfg.Logging.Dir) == "" {
 		return fmt.Errorf("logging.dir is required")
-	}
-	if strings.TrimSpace(cfg.Logging.File) == "" {
-		return fmt.Errorf("logging.file is required")
 	}
 	if strings.TrimSpace(cfg.Logging.Level) == "" {
 		return fmt.Errorf("logging.level is required")

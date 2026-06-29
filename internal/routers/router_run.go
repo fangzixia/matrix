@@ -114,7 +114,7 @@ func streamRun(c *gin.Context, d *app.Deps) {
 			}
 		} else {
 			if first {
-				logging.Info("run-view: SSE 已连接",
+				logging.Agent("run-view: SSE 已连接",
 					"run_id", runID, "mode", mode, "catchup_events", len(envs),
 				)
 				first = false
@@ -127,7 +127,7 @@ func streamRun(c *gin.Context, d *app.Deps) {
 			}
 			flusher.Flush()
 			if done {
-				logging.Info("run-view: SSE 终态已送达", "run_id", runID, "mode", mode)
+				logging.Agent("run-view: SSE 终态已送达", "run_id", runID, "mode", mode)
 				return
 			}
 		}
@@ -135,7 +135,7 @@ func streamRun(c *gin.Context, d *app.Deps) {
 		select {
 		case <-time.After(pollInterval):
 		case <-c.Request.Context().Done():
-			logging.Info("run-view: SSE 客户端断开", "run_id", runID, "mode", mode)
+			logging.Agent("run-view: SSE 客户端断开", "run_id", runID, "mode", mode)
 			return
 		}
 	}

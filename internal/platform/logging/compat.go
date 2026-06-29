@@ -20,12 +20,12 @@ const (
 
 type ctxKey struct{}
 
-// With 将 Fields 附加到 context，供 InfoCtx 等函数合并输出。
+// With 将 Fields 附加到 context，供 AgentCtx 等函数合并输出。
 func With(ctx context.Context, f Fields) context.Context {
 	return context.WithValue(ctx, ctxKey{}, f)
 }
 
-// fieldsFrom 将键值对切片转换为 slog 属性列表。
+// fieldsFrom 将 context 中的 Fields 转为 slog 键值对切片。
 func fieldsFrom(ctx context.Context) []any {
 	v := ctx.Value(ctxKey{})
 	if v == nil {
@@ -37,12 +37,6 @@ func fieldsFrom(ctx context.Context) []any {
 		args = append(args, k, val)
 	}
 	return args
-}
-
-// InfoCtx 写入 info 级别日志，并合并 context 中的 Fields。
-func InfoCtx(ctx context.Context, msg string, args ...any) {
-	all := append(fieldsFrom(ctx), args...)
-	slog.Info(msg, all...)
 }
 
 // Infof 以格式化字符串写入 info 级别日志。

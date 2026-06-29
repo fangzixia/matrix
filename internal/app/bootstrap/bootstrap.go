@@ -41,11 +41,12 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	dev := cfg.System.Env == "development"
-	log, err := logging.Init(cfg.Logging, paths, dev)
+	loggers, err := logging.Init(cfg.Logging, paths, dev)
 	if err != nil {
 		return err
 	}
-	log.Info("存储路径已解析", "data_dir", paths.DataDir, "log_dir", paths.LogDir)
+	defer loggers.Close()
+	loggers.System.Info("存储路径已解析", "data_dir", paths.DataDir, "log_dir", paths.LogDir)
 	db, err := platformdb.Open(cfg.Database)
 	if err != nil {
 		return err
@@ -61,16 +62,16 @@ func Run(ctx context.Context, opts Options) error {
 	if err := sysSettings.Bootstrap(ctx); err != nil {
 		return fmt.Errorf("system settings: %w", err)
 	}
-	deps := app.NewDeps(cfg, runtime, paths, db, log, sysSettings)
+	deps := app.NewDeps(cfg, runtime, paths, db, loggers.System, sysSettings)
 	if err := deps.Repositories.MigrateLegacyProjects(ctx); err != nil {
-		log.Warn("迁移旧版仓库绑定失败", "err", err)
+		loggers.System.Warn("迁移旧版仓库绑定失败", "err", err)
 	}
 	deps.Runs.SetLifecycle(ctx) // 进程退出时取消进行中的 Run
 	defer deps.Close()
 	deps.StartJobWorker(ctx) // 嵌入式任务队列消费者
-	engine := platformhttp.NewEngine(log, dev)
+	engine := platformhttp.NewEngine(loggers.Access, loggers.System, dev)
 	routers.Register(engine, deps, opts.StaticFS)
-	log.Info("HTTP 服务监听中", "addr", cfg.Server.Addr)
+	loggers.System.Info("HTTP 服务监听中", "addr", cfg.Server.Addr)
 	srv := &httpServer{engine: engine, addr: cfg.Server.Addr}
 	return srv.ListenAndServe()
 }

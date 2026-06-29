@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"matrix/internal/platform/logging"
 	"net/http"
 	"strings"
 	"time"
@@ -43,9 +44,15 @@ func (c *Client) Stream(ctx context.Context, req ChatRequest) <-chan StreamEvent
 	req.Stream = true
 	go func() {
 		defer close(ch)
-		if err := c.stream(ctx, req, ch); err != nil {
-			// 直接发送错误事件；缓冲区（16）足够容纳此最终事件，不会阻塞。
-			// 不用 select+ctx.Done() 以防止两分支同时就绪时随机丢弃错误。
+		start := time.Now()
+		defer func() {
+			if r := recover(); r != nil {
+				err := fmt.Errorf("llm: panic: %v", r)
+				c.failLLM(ctx, start, err, 0, "")
+				ch <- StreamEvent{Err: err}
+			}
+		}()
+		if err := c.stream(ctx, req, ch, start); err != nil {
 			ch <- StreamEvent{Err: err}
 		}
 	}()
@@ -55,6 +62,7 @@ func (c *Client) Stream(ctx context.Context, req ChatRequest) <-chan StreamEvent
 // Context 通过流式对话补全收束为完整文本，返回助手内容。
 // 用于会话摘要等无需工具调用的单次生成场景。
 func (c *Client) Context(ctx context.Context, req ChatRequest) (string, error) {
+	start := time.Now()
 	var finalTurn *AssistantTurn
 	for ev := range c.Stream(ctx, req) {
 		if ev.Err != nil {
@@ -65,23 +73,38 @@ func (c *Client) Context(ctx context.Context, req ChatRequest) (string, error) {
 		}
 	}
 	if finalTurn == nil {
-		return "", fmt.Errorf("llm: 流结束但未收到完整 turn")
+		err := fmt.Errorf("llm: 流结束但未收到完整 turn")
+		c.failLLM(ctx, start, err, 0, "")
+		return "", err
 	}
 	text := finalTurn.Content
 	if text == "" {
 		text = finalTurn.Thinking
 	}
 	if text == "" {
-		return "", fmt.Errorf("llm: 响应内容为空")
+		err := fmt.Errorf("llm: 响应内容为空")
+		c.failLLM(ctx, start, err, 0, "")
+		return "", err
 	}
 	return text, nil
 }
 
+func (c *Client) failLLM(ctx context.Context, start time.Time, err error, status int, body string) error {
+	logging.LogLLMError(ctx, err, status, body, time.Since(start))
+	return err
+}
+
+func (c *Client) succeedLLM(ctx context.Context, start time.Time, turn *AssistantTurn) {
+	logging.LogLLMResponse(ctx, turn.Content, turn.Thinking, turn.ToolCalls, turn.FinishReason, time.Since(start))
+}
+
 // stream 为 Stream 的内部阻塞实现，负责 HTTP 请求和 SSE 解析。
-func (c *Client) stream(ctx context.Context, req ChatRequest, ch chan<- StreamEvent) error {
+func (c *Client) stream(ctx context.Context, req ChatRequest, ch chan<- StreamEvent, start time.Time) error {
+	logging.LogLLMRequest(ctx, req.Model, req.Messages, req.Tools, req.MaxTokens)
+
 	body, err := json.Marshal(req)
 	if err != nil {
-		return fmt.Errorf("llm: 序列化请求失败: %w", err)
+		return c.failLLM(ctx, start, fmt.Errorf("llm: 序列化请求失败: %w", err), 0, "")
 	}
 	httpReq, err := http.NewRequestWithContext(
 		ctx,
@@ -90,7 +113,7 @@ func (c *Client) stream(ctx context.Context, req ChatRequest, ch chan<- StreamEv
 		bytes.NewReader(body),
 	)
 	if err != nil {
-		return fmt.Errorf("llm: 构建 HTTP 请求失败: %w", err)
+		return c.failLLM(ctx, start, fmt.Errorf("llm: 构建 HTTP 请求失败: %w", err), 0, "")
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
@@ -99,32 +122,34 @@ func (c *Client) stream(ctx context.Context, req ChatRequest, ch chan<- StreamEv
 	}
 	resp, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
-		return fmt.Errorf("llm: HTTP 请求失败: %w", err)
+		return c.failLLM(ctx, start, fmt.Errorf("llm: HTTP 请求失败: %w", err), 0, "")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("llm: 服务端返回 %d: %s", resp.StatusCode, raw)
+		raw, _ := io.ReadAll(resp.Body)
+		return c.failLLM(ctx, start, fmt.Errorf("llm: 服务端返回 %d: %s", resp.StatusCode, raw), resp.StatusCode, string(raw))
 	}
-	return c.parseSSE(ctx, resp.Body, ch)
+	turn, err := c.parseSSE(ctx, resp.Body, ch)
+	if err != nil {
+		return c.failLLM(ctx, start, err, resp.StatusCode, "")
+	}
+	if turn == nil {
+		return c.failLLM(ctx, start, fmt.Errorf("llm: 流结束但未收到完整 turn"), resp.StatusCode, "")
+	}
+	c.succeedLLM(ctx, start, turn)
+	return nil
 }
 
 // parseSSE 逐行读取 Server-Sent Events 流并将解析结果写入 ch。
-//
-// SSE 格式示例：
-//
-//	data: {"choices":[{"delta":{"content":"你好"},"finish_reason":null}]}
-//	data: [DONE]
-func (c *Client) parseSSE(ctx context.Context, r io.Reader, ch chan<- StreamEvent) error {
+func (c *Client) parseSSE(ctx context.Context, r io.Reader, ch chan<- StreamEvent) (*AssistantTurn, error) {
 	var (
-		contentBuf  strings.Builder
-		thinkingBuf strings.Builder
-		// tcMap 按 index 稀疏存储 tool_call 累积状态，顺序无关。
+		contentBuf   strings.Builder
+		thinkingBuf  strings.Builder
 		tcMap        = make(map[int]*ToolCall)
 		finishReason string
+		finalTurn    *AssistantTurn
 	)
 
-	// emit 向 ch 非阻塞发送事件，ctx 取消时返回 false。
 	emit := func(ev StreamEvent) bool {
 		select {
 		case ch <- ev:
@@ -134,25 +159,24 @@ func (c *Client) parseSSE(ctx context.Context, r io.Reader, ch chan<- StreamEven
 		}
 	}
 	scanner := bufio.NewScanner(r)
-	// 增大扫描缓冲区，以应对包含大型 tool_call JSON 的行。
 	scanner.Buffer(make([]byte, 1<<20), 1<<20)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
-			continue // SSE 事件分隔空行
+			continue
 		}
 		if !strings.HasPrefix(line, "data: ") {
-			continue // 跳过 "event:"、"id:"、"retry:" 等控制行
+			continue
 		}
 		payload := strings.TrimPrefix(line, "data: ")
 		if payload == "[DONE]" {
 			turn := c.assembleTurn(&contentBuf, &thinkingBuf, tcMap, finishReason)
 			emit(StreamEvent{Turn: turn})
-			return nil
+			return turn, nil
 		}
 		var chunk StreamChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			continue // 格式异常的块跳过，不中断整个流
+			continue
 		}
 		for _, choice := range chunk.Choices {
 			if choice.FinishReason != "" {
@@ -162,13 +186,9 @@ func (c *Client) parseSSE(ctx context.Context, r io.Reader, ch chan<- StreamEven
 			if d.Content != "" {
 				contentBuf.WriteString(d.Content)
 				if !emit(StreamEvent{TextDelta: d.Content}) {
-					return ctx.Err()
+					return nil, ctx.Err()
 				}
 			}
-
-			// [compat:claude]   delta.thinking          → 思考增量
-			// [compat:deepseek] delta.reasoning_content → 思考增量（语义相同，字段名不同）
-			// 两者均非 OpenAI 标准字段，此处统一归并处理。
 			thinkingDelta := d.Thinking
 			if thinkingDelta == "" {
 				thinkingDelta = d.ReasoningContent
@@ -176,11 +196,9 @@ func (c *Client) parseSSE(ctx context.Context, r io.Reader, ch chan<- StreamEven
 			if thinkingDelta != "" {
 				thinkingBuf.WriteString(thinkingDelta)
 				if !emit(StreamEvent{ThinkingDelta: thinkingDelta}) {
-					return ctx.Err()
+					return nil, ctx.Err()
 				}
 			}
-
-			// tool_call 按 index 累积，流式分片的 arguments 逐块追加。
 			for _, tc := range d.ToolCalls {
 				acc, exists := tcMap[tc.Index]
 				if !exists {
@@ -204,20 +222,18 @@ func (c *Client) parseSSE(ctx context.Context, r io.Reader, ch chan<- StreamEven
 						Name:           acc.Function.Name,
 						ArgumentsDelta: argsDelta,
 					}}) {
-						return ctx.Err()
+						return nil, ctx.Err()
 					}
 				}
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("llm: 读取响应流失败: %w", err)
+		return nil, fmt.Errorf("llm: 读取响应流失败: %w", err)
 	}
-
-	// 流在 [DONE] 前结束（截断或非标准实现），仍发出已收集内容。
-	turn := c.assembleTurn(&contentBuf, &thinkingBuf, tcMap, finishReason)
-	emit(StreamEvent{Turn: turn})
-	return nil
+	finalTurn = c.assembleTurn(&contentBuf, &thinkingBuf, tcMap, finishReason)
+	emit(StreamEvent{Turn: finalTurn})
+	return finalTurn, nil
 }
 
 // assembleTurn 将累积的缓冲区和 tool_calls map 组装为 AssistantTurn。

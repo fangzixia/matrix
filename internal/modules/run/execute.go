@@ -79,9 +79,6 @@ func (s *Service) GetToolLog(ctx context.Context, runID uuid.UUID, toolUseID str
 	path := filepath.Join(sandbox, ".matrix", "tool-outputs", sanitizeToolUseIDForLog(toolUseID)+".log")
 	b, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", err
-		}
 		return "", err
 	}
 	return string(b), nil
@@ -120,30 +117,16 @@ func (s *Service) finishRunView(ctx context.Context, runID uuid.UUID, status, ou
 
 // ExecuteRun 执行 Run 的 Harness 流水线。
 func (s *Service) ExecuteRun(ctx context.Context, runID uuid.UUID) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	var m models.Run
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", runID).Error; err != nil {
-		return err
-	}
-	switch m.Status {
-	case "succeeded", "cancelled":
-		logging.Info("run: 跳过执行（已终态）",
-			"run_id", runID, "kind", m.Kind, "status", m.Status,
-			"output_len", len(m.Output), "error_message", m.ErrorMessage,
-		)
-		return nil
-	}
-	if err := ctx.Err(); err != nil {
-		logging.Warn("run: 执行前 context 已取消", "run_id", runID, "error", err.Error())
+	m, skip, err := s.loadRunForExecute(ctx, runID)
+	if err != nil || skip {
 		return err
 	}
 	if err := s.refreshAIRuntime(ctx); err != nil {
+		logging.Agent("run: 刷新 AI 配置失败", "run_id", runID, "error", err.Error())
 		return fmt.Errorf("刷新 AI 配置失败: %w", err)
 	}
 	runStart := time.Now()
-	logging.Info("run: 开始执行",
+	logging.Agent("run: 开始执行",
 		"run_id", runID, "kind", m.Kind, "model_id", m.ModelID,
 		"chat_session_id", m.ChatSessionID, "prior_status", m.Status,
 	)
@@ -155,6 +138,7 @@ func (s *Service) ExecuteRun(ctx context.Context, runID uuid.UUID) error {
 		s.notifier.NotifyRunStatus(ctx, m.CreatedBy, m.ProjectID, runID, m.Kind, "running", m.Title)
 	}
 	_ = s.viewStore.BeginRun(ctx, runID.String(), m.ProjectID.String(), m.Kind, m.Kind)
+
 	var runErr error
 	switch m.Kind {
 	case "build":
@@ -167,6 +151,34 @@ func (s *Service) ExecuteRun(ctx context.Context, runID uuid.UUID) error {
 	if ctx.Err() != nil {
 		runErr = ctx.Err()
 	}
+	return s.finalizeRun(ctx, runID, m, runErr, runStart)
+}
+
+func (s *Service) loadRunForExecute(ctx context.Context, runID uuid.UUID) (models.Run, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return models.Run{}, false, err
+	}
+	var m models.Run
+	if err := s.db.WithContext(ctx).First(&m, "id = ?", runID).Error; err != nil {
+		logging.Agent("run: 加载 Run 失败", "run_id", runID, "error", err.Error())
+		return models.Run{}, false, err
+	}
+	switch m.Status {
+	case "succeeded", "cancelled":
+		logging.Agent("run: 跳过执行（已终态）",
+			"run_id", runID, "kind", m.Kind, "status", m.Status,
+			"output_len", len(m.Output), "error_message", m.ErrorMessage,
+		)
+		return m, true, nil
+	}
+	if err := ctx.Err(); err != nil {
+		logging.Agent("run: 执行前 context 已取消", "run_id", runID, "error", err.Error())
+		return m, false, err
+	}
+	return m, false, nil
+}
+
+func (s *Service) finalizeRun(ctx context.Context, runID uuid.UUID, m models.Run, runErr error, runStart time.Time) error {
 	fin := time.Now()
 	status := "succeeded"
 	errMsg := ""
@@ -201,13 +213,14 @@ func (s *Service) ExecuteRun(ctx context.Context, runID uuid.UUID) error {
 	var finished models.Run
 	_ = s.db.WithContext(ctx).First(&finished, "id = ?", runID).Error
 	if err := s.finishRunView(ctx, runID, status, finished.Output, errMsg, finished.MergeStatus); err != nil {
-		logging.Warn("run-view: 结束视图失败",
+		logging.Agent("run-view: 结束视图失败",
 			"run_id", runID, "status", status, "error", err.Error(),
 		)
 	}
-	logging.Info("run: 执行结束",
+	logging.Agent("run: 执行结束",
 		"run_id", runID, "kind", m.Kind, "status", status,
 		"output_len", len(finished.Output),
+		"error_message", errMsg,
 		"duration_ms", time.Since(runStart).Milliseconds(),
 	)
 	return runErr
@@ -216,27 +229,27 @@ func (s *Service) ExecuteRun(ctx context.Context, runID uuid.UUID) error {
 func (s *Service) ensureChatAssistantMessage(ctx context.Context, sessionID, userMessageID, runID uuid.UUID) {
 	var count int64
 	if err := s.db.WithContext(ctx).Model(&models.ChatMessage{}).Where("run_id = ?", runID).Count(&count).Error; err != nil {
-		logging.Warn("run: 检查助手消息失败", "run_id", runID, "error", err.Error())
+		logging.Agent("run: 检查助手消息失败", "run_id", runID, "error", err.Error())
 		return
 	}
 	if count > 0 {
-		logging.Debug("run: 助手消息已存在", "run_id", runID)
+		logging.Agent("run: 助手消息已存在", "run_id", runID)
 		return
 	}
 	var m models.Run
 	if err := s.db.WithContext(ctx).First(&m, "id = ?", runID).Error; err != nil {
-		logging.Warn("run: 加载 Run 失败（写入助手消息）", "run_id", runID, "error", err.Error())
+		logging.Agent("run: 加载 Run 失败（写入助手消息）", "run_id", runID, "error", err.Error())
 		return
 	}
 	assistantID, err := s.InsertChatAssistantMessage(ctx, sessionID, userMessageID, runID, m.Output)
 	if err != nil {
-		logging.Warn("run: 写入助手消息失败",
+		logging.Agent("run: 写入助手消息失败",
 			"run_id", runID, "session_id", sessionID, "user_message_id", userMessageID,
 			"error", err.Error(),
 		)
 		return
 	}
-	logging.Info("run: 已写入助手消息",
+	logging.Agent("run: 已写入助手消息",
 		"run_id", runID, "assistant_message_id", assistantID, "output_len", len(m.Output),
 	)
 }
@@ -270,44 +283,50 @@ func (s *Service) executeBuildLoop(ctx context.Context, m *models.Run) error {
 	if err := s.prepareRunSandbox(ctx, m, "build"); err != nil {
 		return err
 	}
-	var unlock func()
-	if s.shouldUseSharedLock(m) {
-		projectCode, err := s.workspace.ProjectWorkspaceKey(ctx, m.ProjectID)
-		if err != nil {
-			return err
-		}
-		unlock = s.sandboxLocks.acquire(projectCode, m.RepositoryID)
-		defer unlock()
-	}
-	for round := 1; round <= buildMaxRounds; round++ {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := s.runHarnessStage(ctx, m, "implement", nil, false); err != nil {
-			return fmt.Errorf("构建第 %d 轮编码: %w", round, err)
-		}
-		if err := s.runHarnessStage(ctx, m, "verify", nil, false); err != nil {
-			return fmt.Errorf("构建第 %d 轮验证: %w", round, err)
-		}
-		docsRoot, err := s.workspace.DocsRoot(ctx, m.ProjectID)
-		if err != nil {
-			return err
-		}
-		score, evalPath, ok, err := eval.LatestScore(docsRoot, m.FilePath)
-		if err != nil {
-			return err
-		}
-		if ok && score >= eval.PassScore {
-			return nil
-		}
-		if round == buildMaxRounds {
-			if !ok {
-				return fmt.Errorf("构建未达标：无法解析评测综合分")
+	return s.withSharedSandboxLock(ctx, m, func() error {
+		for round := 1; round <= buildMaxRounds; round++ {
+			if err := ctx.Err(); err != nil {
+				return err
 			}
-			return fmt.Errorf("构建未达标：综合分 %.1f < %.1f（%s）", score, eval.PassScore, evalPath)
+			if err := s.runHarnessStage(ctx, m, "implement", nil, false); err != nil {
+				return fmt.Errorf("构建第 %d 轮编码: %w", round, err)
+			}
+			if err := s.runHarnessStage(ctx, m, "verify", nil, false); err != nil {
+				return fmt.Errorf("构建第 %d 轮验证: %w", round, err)
+			}
+			docsRoot, err := s.workspace.DocsRoot(ctx, m.ProjectID)
+			if err != nil {
+				return err
+			}
+			score, evalPath, ok, err := eval.LatestScore(docsRoot, m.FilePath)
+			if err != nil {
+				return err
+			}
+			if ok && score >= eval.PassScore {
+				return nil
+			}
+			if round == buildMaxRounds {
+				if !ok {
+					return fmt.Errorf("构建未达标：无法解析评测综合分")
+				}
+				return fmt.Errorf("构建未达标：综合分 %.1f < %.1f（%s）", score, eval.PassScore, evalPath)
+			}
 		}
+		return nil
+	})
+}
+
+func (s *Service) withSharedSandboxLock(ctx context.Context, m *models.Run, fn func() error) error {
+	if !s.shouldUseSharedLock(m) {
+		return fn()
 	}
-	return nil
+	projectCode, err := s.workspace.ProjectWorkspaceKey(ctx, m.ProjectID)
+	if err != nil {
+		return err
+	}
+	unlock := s.sandboxLocks.acquire(projectCode, m.RepositoryID)
+	defer unlock()
+	return fn()
 }
 
 // sandboxDir 解析 Run 的沙箱目录路径。
@@ -353,28 +372,14 @@ func (s *Service) executePipeline(ctx context.Context, m *models.Run) error {
 			return err
 		}
 		seq := i + 1
-		if prev, ok := existing[seq]; ok && prev.Status == "succeeded" {
+		prev := existing[seq]
+		if prev != nil && prev.Status == "succeeded" {
 			continue
 		}
-		var stepID uuid.UUID
-		start := time.Now()
-		if prev, ok := existing[seq]; ok {
-			stepID = prev.ID
-			_ = s.db.WithContext(ctx).Model(prev).Updates(map[string]any{
-				"status": "running", "started_at": start, "finished_at": nil, "output_summary": "",
-			}).Error
-			s.viewStore.PublishStep(ctx, m.ID.String(), view.EventSTEPStarted, stepID.String(), kind, seq, "running")
-		} else {
-			step := models.RunStep{
-				RunID: m.ID, Kind: kind, Sequence: seq, Status: "running", StartedAt: &start,
-			}
-			if err := s.db.WithContext(ctx).Create(&step).Error; err != nil {
-				return err
-			}
-			stepID = step.ID
-			existing[seq] = &step
+		stepID, err := s.beginPipelineStep(ctx, m, seq, kind, prev, existing)
+		if err != nil {
+			return err
 		}
-		s.viewStore.PublishStep(ctx, m.ID.String(), view.EventSTEPStarted, stepID.String(), kind, seq, "running")
 		var stepErr error
 		if kind == "build" {
 			stepErr = s.executeBuildLoop(ctx, m)
@@ -399,110 +404,150 @@ func (s *Service) executePipeline(ctx context.Context, m *models.Run) error {
 	return nil
 }
 
+func (s *Service) beginPipelineStep(
+	ctx context.Context,
+	m *models.Run,
+	seq int,
+	kind string,
+	prev *models.RunStep,
+	existing map[int]*models.RunStep,
+) (uuid.UUID, error) {
+	start := time.Now()
+	if prev != nil {
+		if err := s.db.WithContext(ctx).Model(prev).Updates(map[string]any{
+			"status": "running", "started_at": start, "finished_at": nil, "output_summary": "",
+		}).Error; err != nil {
+			return uuid.Nil, err
+		}
+		s.viewStore.PublishStep(ctx, m.ID.String(), view.EventSTEPStarted, prev.ID.String(), kind, seq, "running")
+		return prev.ID, nil
+	}
+	step := models.RunStep{
+		RunID: m.ID, Kind: kind, Sequence: seq, Status: "running", StartedAt: &start,
+	}
+	if err := s.db.WithContext(ctx).Create(&step).Error; err != nil {
+		return uuid.Nil, err
+	}
+	existing[seq] = &step
+	s.viewStore.PublishStep(ctx, m.ID.String(), view.EventSTEPStarted, step.ID.String(), kind, seq, "running")
+	return step.ID, nil
+}
+
 // executeSingle 执行单阶段 Harness Run。
 func (s *Service) executeSingle(ctx context.Context, m *models.Run, kind string, stepID *uuid.UUID) error {
 	return s.runHarnessStage(ctx, m, kind, stepID, true)
 }
 
 // runHarnessStage 运行单个 Harness 阶段并持久化结果。
-func (s *Service) runHarnessStage(ctx context.Context, m *models.Run, kind string, stepID *uuid.UUID, manageSandbox bool) error {
+func (s *Service) runHarnessStage(ctx context.Context, m *models.Run, kind string, _ *uuid.UUID, manageSandbox bool) error {
 	if manageSandbox {
 		if err := s.prepareRunSandbox(ctx, m, kind); err != nil {
 			return err
 		}
 	}
-	projectCode, err := s.workspace.ProjectWorkspaceKey(ctx, m.ProjectID)
-	if err != nil {
-		return err
-	}
-	if manageSandbox && s.shouldUseSharedLock(m) {
-		unlock := s.sandboxLocks.acquire(projectCode, m.RepositoryID)
-		defer unlock()
-	}
-	modelCfg, _, err := s.runtimeCfg.AI.ResolveModel(m.ModelID)
-	if err != nil {
-		return err
-	}
-	msg := m.Title
-	sandboxDir, err := s.sandboxDir(ctx, m)
-	if err != nil {
-		return err
-	}
-	docsRoot, err := s.workspace.DocsRoot(ctx, m.ProjectID)
-	if err != nil {
-		return err
-	}
-	planFilePath := s.harnessPlanFilePath(m.ProjectID, m.FilePath, kind)
-	evalFilePath := s.resolveHarnessEvalPath(m.ProjectID, m.EvalFilePath)
-	var messages []query.Message
-	if kind == "chat" {
-		var err error
-		messages, err = s.buildChatRunMessages(ctx, m)
+	runStage := func() error {
+		req, err := s.buildRunRequest(ctx, m, kind)
 		if err != nil {
 			return err
 		}
+		logging.Agent("run: Harness 阶段就绪",
+			"run_id", m.ID, "kind", kind,
+			"message_count", len(req.Messages),
+			"sandbox_dir", req.SandboxDir,
+			"model", req.Model.Model,
+			"chat_session_id", m.ChatSessionID,
+			"chat_user_message_id", m.ChatUserMessageID,
+		)
+		if len(req.Messages) == 0 {
+			logging.Agent("run: LLM 输入消息为空", "run_id", m.ID, "kind", kind)
+		}
+		sink := s.viewStore.Sink(m.ID.String(), m.ProjectID.String())
+		onSubagent := func(snap agent.Snapshot) {
+			s.viewStore.OnSubagent(ctx, m.ID.String(), snap)
+		}
+		req.OnSubagentUpdate = onSubagent
+		req.OnSubagentDone = onSubagent
+		result, runErr := s.runtime.Run(ctx, req, sink)
+		logging.Agent("run: runtime.Run 返回",
+			"run_id", m.ID, "kind", kind,
+			"run_err", runErr != nil,
+			"result_err", result.Err,
+			"output_len", len(runOutputFromResult(result)),
+			"stop_reason", result.StopReason,
+			"turn_count", result.TurnCount,
+		)
+		if runErr == nil && result.Err == nil {
+			output := runOutputFromResult(result)
+			if output != "" {
+				_ = s.db.WithContext(ctx).Model(&models.Run{}).Where("id = ?", m.ID).
+					Update("output", output).Error
+			}
+		}
+		if runErr != nil {
+			return runErr
+		}
+		if result.Err != nil {
+			return result.Err
+		}
+		docsRoot, err := s.workspace.DocsRoot(ctx, m.ProjectID)
+		if err != nil {
+			return err
+		}
+		s.indexHarnessOutputs(ctx, m, kind, docsRoot)
+		return nil
+	}
+	if manageSandbox {
+		return s.withSharedSandboxLock(ctx, m, runStage)
+	}
+	return runStage()
+}
+
+func (s *Service) buildRunRequest(ctx context.Context, m *models.Run, kind string) (ports.RunRequest, error) {
+	projectCode, err := s.workspace.ProjectWorkspaceKey(ctx, m.ProjectID)
+	if err != nil {
+		return ports.RunRequest{}, err
+	}
+	modelCfg, _, err := s.runtimeCfg.AI.ResolveModel(m.ModelID)
+	if err != nil {
+		return ports.RunRequest{}, err
+	}
+	sandboxDir, err := s.sandboxDir(ctx, m)
+	if err != nil {
+		return ports.RunRequest{}, err
+	}
+	docsRoot, err := s.workspace.DocsRoot(ctx, m.ProjectID)
+	if err != nil {
+		return ports.RunRequest{}, err
+	}
+	planFilePath := s.harnessPlanFilePath(m.ProjectID, m.FilePath, kind)
+	evalFilePath := s.resolveHarnessDocPath(m.ProjectID, m.EvalFilePath)
+	var messages []query.Message
+	if kind == "chat" {
+		messages, err = s.buildChatRunMessages(ctx, m)
+		if err != nil {
+			return ports.RunRequest{}, err
+		}
 	} else {
-		messages = BuildHarnessMessages(kind, msg, planFilePath, evalFilePath, sandboxDir, docsRoot)
+		messages = BuildHarnessMessages(kind, m.Title, planFilePath, evalFilePath, sandboxDir, docsRoot)
 	}
-	logging.Info("run: Harness 阶段就绪",
-		"run_id", m.ID, "kind", kind,
-		"message_count", len(messages),
-		"sandbox_dir", sandboxDir,
-		"model", modelCfg.Model,
-		"chat_session_id", m.ChatSessionID,
-		"chat_user_message_id", m.ChatUserMessageID,
-	)
-	if len(messages) == 0 {
-		logging.Warn("run: LLM 输入消息为空", "run_id", m.ID, "kind", kind)
-	}
-	sessionsDir := storageProjectSessions(s.paths, projectCode)
 	docSandbox, err := s.workspace.DocSandboxDir(ctx, m.ProjectID)
 	if err != nil {
-		return err
+		return ports.RunRequest{}, err
 	}
-	sink := s.viewStore.Sink(m.ID.String(), m.ProjectID.String())
-	onSubagent := func(snap agent.Snapshot) {
-		s.viewStore.OnSubagent(ctx, m.ID.String(), snap)
-	}
-	mcpPorts := mcpConfigsToPorts(s.runtimeCfg.MCP.Servers)
-	result, runErr := s.runtime.Run(ctx, ports.RunRequest{
+	allowCommandMCP := s.runtimeCfg.AI.Security.AllowCommandMCP
+	return ports.RunRequest{
 		RunID: m.ID.String(), Kind: kind, Messages: messages,
 		SandboxDir: sandboxDir, ExtraSandboxDirs: []string{docSandbox},
-		SessionsDir: sessionsDir,
+		SessionsDir: storageProjectSessions(s.paths, projectCode),
 		Model: ports.ModelConfig{
 			BaseURL: modelCfg.BaseURL, APIKey: modelCfg.APIKey,
 			Model: modelCfg.Model, MaxTokens: modelCfg.MaxTokens,
 		},
-		MCP: mcpPorts,
+		MCP: mcpConfigsToPorts(s.runtimeCfg.MCP.Servers, allowCommandMCP),
 		Policy: ports.RuntimePolicy{
-			AllowShell: s.runtimeCfg.AI.Security.AllowShell, AllowCommandMCP: s.runtimeCfg.AI.Security.AllowCommandMCP,
+			AllowShell: s.runtimeCfg.AI.Security.AllowShell, AllowCommandMCP: allowCommandMCP,
 		},
-		OnSubagentUpdate: onSubagent,
-		OnSubagentDone:   onSubagent,
-	}, sink)
-	logging.Info("run: runtime.Run 返回",
-		"run_id", m.ID, "kind", kind,
-		"run_err", runErr != nil,
-		"result_err", result.Err,
-		"output_len", len(runOutputFromResult(result)),
-		"stop_reason", result.StopReason,
-		"turn_count", result.TurnCount,
-	)
-	if runErr == nil && result.Err == nil {
-		output := runOutputFromResult(result)
-		if output != "" {
-			_ = s.db.WithContext(ctx).Model(&models.Run{}).Where("id = ?", m.ID).
-				Update("output", output).Error
-		}
-	}
-	if runErr != nil {
-		return runErr
-	}
-	if result.Err != nil {
-		return result.Err
-	}
-	s.indexHarnessOutputs(ctx, m, kind, docsRoot)
-	return nil
+	}, nil
 }
 
 // resolveHarnessDocPath 解析 Harness 文档逻辑路径为绝对路径。
@@ -516,11 +561,6 @@ func (s *Service) resolveHarnessDocPath(projectID uuid.UUID, filePath string) st
 		return ""
 	}
 	return abs
-}
-
-// resolveHarnessEvalPath 解析 Harness 评测文档路径。
-func (s *Service) resolveHarnessEvalPath(projectID uuid.UUID, filePath string) string {
-	return s.resolveHarnessDocPath(projectID, filePath)
 }
 
 // harnessPlanFilePath 解析 Harness 计划文件绝对路径。
@@ -538,7 +578,7 @@ func (s *Service) harnessPlanFilePath(projectID uuid.UUID, filePath, kind string
 	return ""
 }
 
-// shouldNotifyRun 判断 Run 状态变更是否应发送通知。
+// shouldNotifyRun 判断 Run 状态变更是否应发送通知，也是 UI 阶段列表的 kind 白名单。
 func shouldNotifyRun(kind string) bool {
 	switch kind {
 	case "plan", "implement", "verify", "build":
@@ -546,11 +586,6 @@ func shouldNotifyRun(kind string) bool {
 	default:
 		return false
 	}
-}
-
-// IsStageKind 报告 kind 是否为 UI 中展示的 Harness 工作流阶段。
-func IsStageKind(kind string) bool {
-	return shouldNotifyRun(kind)
 }
 
 // indexHarnessOutputs 将 Harness 产出索引到 plans/artifacts 表。

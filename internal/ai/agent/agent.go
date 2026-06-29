@@ -118,18 +118,10 @@ func ToSnapshot(rec *Record) Snapshot {
 	if rec.Result != nil {
 		s.TurnCount = rec.Result.TurnCount
 		if rec.Result.Answer != "" {
-			s.AnswerPreview = truncateRunes(rec.Result.Answer, 400)
+			s.AnswerPreview = query.TruncateRunes(rec.Result.Answer, 400)
 		}
 	}
 	return s
-}
-
-// truncateRunes 按 Unicode rune 截断字符串。
-func truncateRunes(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "…"
 }
 
 // Update 通过回调函数修改已有 Agent 记录的字段；记录不存在时返回 false。

@@ -46,9 +46,9 @@ func (s *Store) BeginRun(ctx context.Context, runID, projectID, kind, phase stri
 	proj.state.Seq = 1
 	s.runs[runID] = &runSession{projector: proj, projectID: projectID, seq: 1}
 	s.mu.Unlock()
-	logging.Info("run-view: 视图已开始", "run_id", runID, "kind", kind)
+	logging.Agent("run-view: 视图已开始", "run_id", runID, "kind", kind)
 	if err := s.persist(ctx, runID); err != nil {
-		logging.Warn("run-view: 持久化失败", "run_id", runID, "phase", "begin", "error", err.Error())
+		logging.Agent("run-view: 持久化失败", "run_id", runID, "phase", "begin", "error", err.Error())
 		return err
 	}
 	return nil
@@ -74,7 +74,7 @@ func (s *Store) FinishRun(ctx context.Context, runID, status, output, errMsg, me
 	delete(s.runs, runID)
 	s.mu.Unlock()
 
-	logging.Info("run-view: 视图已结束",
+	logging.Agent("run-view: 视图已结束",
 		"run_id", runID, "status", status, "output_len", len(output),
 	)
 	if persistRow.RunID == uuid.Nil && s.db != nil {
@@ -95,7 +95,7 @@ func (s *Store) FinishRun(ctx context.Context, runID, status, output, errMsg, me
 	}
 	if persistRow.RunID != uuid.Nil {
 		if err := s.db.WithContext(ctx).Save(&persistRow).Error; err != nil {
-			logging.Warn("run-view: 持久化失败", "run_id", runID, "phase", "finish", "error", err.Error())
+			logging.Agent("run-view: 持久化失败", "run_id", runID, "phase", "finish", "error", err.Error())
 			return err
 		}
 	}

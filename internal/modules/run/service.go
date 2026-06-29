@@ -183,7 +183,7 @@ type RunDTO struct {
 func (s *Service) List(ctx context.Context, projectID uuid.UUID, kind string) ([]RunDTO, error) {
 	q := s.db.WithContext(ctx).Where("project_id = ?", projectID)
 	if kind != "" {
-		if !IsStageKind(kind) {
+		if !shouldNotifyRun(kind) {
 			return []RunDTO{}, nil
 		}
 		q = q.Where("kind = ?", kind)
@@ -295,32 +295,35 @@ func (s *Service) Start(ctx context.Context, projectID, userID uuid.UUID, in Sta
 	}
 	execCtx := s.runCtx()
 	if in.Sync {
-		logging.Info("run: 同步派发", "run_id", runID, "kind", kind)
+		logging.Agent("run: 同步派发", "run_id", runID, "kind", kind)
 		go func() { _ = s.ExecuteRun(execCtx, runID) }()
 	} else if s.jobs != nil {
 		if err := s.jobs.Enqueue(ctx, runID); err != nil {
 			return nil, err
 		}
-		logging.Info("run: 已入队等待执行",
+		logging.Agent("run: 已入队等待执行",
 			"run_id", runID, "kind", kind,
 			"chat_session_id", in.ChatSessionID,
 			"chat_user_message_id", in.ChatUserMessageID,
 		)
 	} else {
-		logging.Info("run: 进程内直接执行", "run_id", runID, "kind", kind)
+		logging.Agent("run: 进程内直接执行", "run_id", runID, "kind", kind)
 		go func() { _ = s.ExecuteRun(execCtx, runID) }()
 	}
 	return new(toRunDTO(&m)), nil
 }
 
 // mcpConfigsToPorts 将 MCP YAML 配置转换为运行时端口配置。
-func mcpConfigsToPorts(servers map[string]config.MCPServerConfig) []ports.MCPServerConfig {
+func mcpConfigsToPorts(servers map[string]config.MCPServerConfig, allowCommandMCP bool) []ports.MCPServerConfig {
 	if len(servers) == 0 {
 		return nil
 	}
 	out := make([]ports.MCPServerConfig, 0, len(servers))
 	for name, s := range servers {
 		if s.Disabled {
+			continue
+		}
+		if !allowCommandMCP && s.Command != "" {
 			continue
 		}
 		out = append(out, ports.MCPServerConfig{
