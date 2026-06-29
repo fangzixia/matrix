@@ -144,7 +144,7 @@ matrix/
 | 段 | 说明 |
 |----|------|
 | `storage` | 系统数据、工作区、审计、日志目录 |
-| `logging` | 四类按天归档日志（system / api / llm / agent），见 `logging.categories` |
+| `logging` | 四类按天归档日志（`logs/system`、`api`、`llm`、`agent`） |
 | `database` | PostgreSQL DSN，启动时 AutoMigrate |
 | `auth` | Session Cookie、Bootstrap admin |
 

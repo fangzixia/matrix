@@ -12,6 +12,8 @@ type Fields map[string]string
 const (
 	// FieldSessionID 是会话 ID 日志字段名。
 	FieldSessionID = "session_id"
+	// FieldRunID 是 Run ID 日志字段名（与 session_id 相同，便于 agent 日志关联）。
+	FieldRunID = "run_id"
 	// FieldComponent 是组件名日志字段名。
 	FieldComponent = "component"
 	// FieldTurn 是对话轮次日志字段名。

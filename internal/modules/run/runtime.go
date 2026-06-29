@@ -91,6 +91,10 @@ func validateRunRequest(req ports.RunRequest) error {
 
 func (r *Runtime) attachRunCancel(ctx context.Context, runID, sandboxDir string, extraSandbox []string, matrixDir string) (context.Context, func()) {
 	runCtx, cancel := context.WithCancel(ctx)
+	runCtx = logging.With(runCtx, logging.Fields{
+		logging.FieldRunID:     runID,
+		logging.FieldSessionID: runID,
+	})
 	runCtx = tools.WithSandbox(runCtx, sandboxDir)
 	if len(extraSandbox) > 0 {
 		runCtx = tools.WithExtraSandboxRoots(runCtx, extraSandbox)
@@ -132,6 +136,7 @@ func (r *Runtime) runTAORSession(ctx context.Context, req ports.RunRequest, runI
 	)
 	hub.Audit = auditWriter
 	client := llm.NewClient(req.Model.BaseURL, req.Model.APIKey)
+	client.ModelName = req.Model.Name
 	cfg, err := r.buildQueryConfig(client, req, mcpMgr, registry, coordAsync, workerRun, hub, auditWriter, runID)
 	if err != nil {
 		return ports.RunResult{}, err
@@ -151,20 +156,27 @@ func (r *Runtime) runTAORSession(ctx context.Context, req ports.RunRequest, runI
 		Err:        result.Err,
 		Messages:   result.Messages,
 	}
-	if result.Err != nil {
-		return out, result.Err
-	}
 	if len(result.Messages) > 0 {
 		out.Output = result.Messages[len(result.Messages)-1].Content
 	}
+	durationMs := time.Since(start).Milliseconds()
 	logging.Agent("run: runtime.Run 结束",
 		"run_id", runID,
 		"stop_reason", out.StopReason,
 		"turn_count", out.TurnCount,
 		"output_len", len(out.Output),
-		"duration_ms", time.Since(start).Milliseconds(),
+		"duration_ms", durationMs,
 		"has_error", result.Err != nil,
 	)
+	if result.Err != nil {
+		logging.Agent("run: LLM 调用失败",
+			"run_id", runID,
+			"stop_reason", out.StopReason,
+			"error", result.Err.Error(),
+			"duration_ms", durationMs,
+		)
+		return out, result.Err
+	}
 	return out, nil
 }
 

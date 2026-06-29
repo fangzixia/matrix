@@ -17,15 +17,19 @@ type Paths struct {
 	AuditDir      string
 	ExportsDir    string
 	LogDir        string
-	LogCategories LogCategories
 }
 
-// LogCategories 是各类别日志子目录名（实际文件为 {dir}/{category}/{YYYY-MM-DD}.log）。
-type LogCategories struct {
-	System string
-	API    string
-	LLM    string
-	Agent  string
+// 日志子目录名（硬编码，对应 logs/{category}/{YYYY-MM-DD}.log）。
+const (
+	LogCategorySystem = "system"
+	LogCategoryAPI    = "api"
+	LogCategoryLLM    = "llm"
+	LogCategoryAgent  = "agent"
+)
+
+// LogCategoryDirs 返回全部日志类别子目录名。
+func LogCategoryDirs() []string {
+	return []string{LogCategorySystem, LogCategoryAPI, LogCategoryLLM, LogCategoryAgent}
 }
 
 // LogPath 返回指定类别与日期的日志文件绝对路径。
@@ -43,12 +47,6 @@ func Resolve(cfg *config.Config) (Paths, error) {
 		AuditDir:      config.ResolvePath(data, cfg.Storage.AuditDir),
 		ExportsDir:    config.ResolvePath(data, cfg.Storage.ExportsDir),
 		LogDir:        config.ResolvePath(".", cfg.Logging.Dir),
-		LogCategories: LogCategories{
-			System: cfg.Logging.Categories.System,
-			API:    cfg.Logging.Categories.API,
-			LLM:    cfg.Logging.Categories.LLM,
-			Agent:  cfg.Logging.Categories.Agent,
-		},
 	}
 	if err := validateAllowedRoots(cfg.Storage.AllowedRoots, p); err != nil {
 		return Paths{}, err
@@ -97,7 +95,7 @@ func underAllowedRoot(path string, allowed []string) bool {
 // EnsureLayout 创建 DataDir、WorkspacesDir 等必要目录。
 func EnsureLayout(p Paths) error {
 	dirs := []string{p.DataDir, p.WorkspacesDir, p.AuditDir, p.ExportsDir, p.LogDir}
-	for _, cat := range []string{p.LogCategories.System, p.LogCategories.API, p.LogCategories.LLM, p.LogCategories.Agent} {
+	for _, cat := range LogCategoryDirs() {
 		if cat != "" {
 			dirs = append(dirs, filepath.Join(p.LogDir, cat))
 		}

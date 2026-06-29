@@ -245,12 +245,20 @@ func (s *Service) finalizeRun(ctx context.Context, runID uuid.UUID, m models.Run
 			"run_id", runID, "status", status, "error", err.Error(),
 		)
 	}
+	durationMs := time.Since(runStart).Milliseconds()
 	logging.Agent("run: 执行结束",
 		"run_id", runID, "kind", m.Kind, "status", status,
 		"output_len", len(finished.Output),
 		"error_message", errMsg,
-		"duration_ms", time.Since(runStart).Milliseconds(),
+		"duration_ms", durationMs,
 	)
+	if status == "failed" && strings.Contains(errMsg, "llm: 服务端返回") {
+		logging.Agent("run: LLM 端点拒绝",
+			"run_id", runID, "kind", m.Kind,
+			"error_message", errMsg,
+			"duration_ms", durationMs,
+		)
+	}
 	return runErr
 }
 
@@ -535,7 +543,7 @@ func (s *Service) buildRunRequest(ctx context.Context, m *models.Run, kind strin
 	if err != nil {
 		return ports.RunRequest{}, err
 	}
-	modelCfg, _, err := s.runtimeCfg.AI.ResolveModel(m.ModelID)
+	modelCfg, profile, err := s.runtimeCfg.AI.ResolveModel(m.ModelID)
 	if err != nil {
 		return ports.RunRequest{}, err
 	}
@@ -573,7 +581,7 @@ func (s *Service) buildRunRequest(ctx context.Context, m *models.Run, kind strin
 		SessionsDir: storageProjectSessions(s.paths, projectCode),
 		Model: ports.ModelConfig{
 			BaseURL: modelCfg.BaseURL, APIKey: modelCfg.APIKey,
-			Model: modelCfg.Model, MaxTokens: modelCfg.MaxTokens,
+			Model: modelCfg.Model, Name: profile.Name, MaxTokens: modelCfg.MaxTokens,
 		},
 		MCP: mcpConfigsToPorts(s.runtimeCfg.MCP.Servers, allowCommandMCP),
 		Policy: ports.RuntimePolicy{

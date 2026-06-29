@@ -16,7 +16,7 @@ import type {
   ToolView,
   TurnView,
 } from "@/types/runView";
-import { formatAgentProgress, formatTurnLabel } from "@/utils/agentProgress";
+import { formatAgentProgress, deriveTurnTitle } from "@/utils/agentProgress";
 import { getToolLog } from "@/api/runView";
 
 export interface RunActivityPanelProps {
@@ -106,7 +106,7 @@ function workerTurnsToChainItems(
 ): ThoughtChainItemType[] {
   return turns.map((wt) => ({
     key: wt.key,
-    title: formatTurnLabel(wt.turn, wt.summary) || `子 Agent 第 ${wt.turn} 轮`,
+    title: deriveTurnTitle(wt) || `子 Agent ${wt.turn}`,
     icon: <RobotOutlined />,
     status: workerTurnStatus(wt),
     blink: running && workerTurnStatus(wt) === "loading",
@@ -266,19 +266,6 @@ function subagentProgressLine(snap: SubagentView): string {
   return snap.description || snap.id;
 }
 
-function findParentAgentTool(
-  turns: TurnView[],
-  parentToolUseId?: string,
-): ToolView | undefined {
-  if (!parentToolUseId) return undefined;
-  for (const turn of turns) {
-    for (const tool of turn.tools ?? []) {
-      if (tool.toolCallId === parentToolUseId) return tool;
-    }
-  }
-  return undefined;
-}
-
 function turnHasActiveTools(turn: TurnView): boolean {
   const visit = (tools: ToolView[]): boolean =>
     tools.some(
@@ -323,44 +310,13 @@ function selectCompactTurns(
   return picked.sort((a, b) => a.turn - b.turn);
 }
 
-function subagentToChainItem(
-  snap: SubagentView,
-  turns: TurnView[],
-  running?: boolean,
-  projectId?: string,
-  runId?: string,
-): ThoughtChainItemType {
-  const parentTool = findParentAgentTool(turns, snap.parent_tool_use_id);
-  const workerItems =
-    parentTool?.workerTurns && parentTool.workerTurns.length > 0
-      ? workerTurnsToChainItems(parentTool.workerTurns, running, projectId, runId)
-      : undefined;
-  return {
-    key: snap.id,
-    title: snap.description || `子 Agent ${snap.id.slice(0, 8)}`,
-    icon: <RobotOutlined />,
-    status:
-      snap.status === "running"
-        ? ("loading" as const)
-        : snap.status === "failed"
-          ? ("error" as const)
-          : ("success" as const),
-    description: subagentProgressLine(snap),
-    blink: running && snap.status === "running",
-    collapsible: Boolean(workerItems?.length),
-    content: workerItems ? (
-      <ThoughtChain line items={workerItems} />
-    ) : undefined,
-  };
-}
-
 function turnHeader(turn: TurnView) {
   return (
     <Space size="small">
       <Tag color={turn.scope === "worker" ? "purple" : "blue"}>
         {turn.scope === "worker" ? "子 Agent" : "主 Agent"}
       </Tag>
-      <span>{formatTurnLabel(turn.turn, turn.summary)}</span>
+      <span>{deriveTurnTitle(turn)}</span>
     </Space>
   );
 }
@@ -405,10 +361,20 @@ export default function RunActivityPanel({
   );
   const subagentItems = useMemo(
     () =>
-      subagentList.map((snap) =>
-        subagentToChainItem(snap, turns, running, projectId, state.runId),
-      ),
-    [subagentList, turns, running, projectId, state.runId],
+      subagentList.map((snap) => ({
+        key: snap.id,
+        title: snap.description || `子 Agent ${snap.id.slice(0, 8)}`,
+        icon: <RobotOutlined />,
+        status:
+          snap.status === "running"
+            ? ("loading" as const)
+            : snap.status === "failed"
+              ? ("error" as const)
+              : ("success" as const),
+        description: subagentProgressLine(snap),
+        blink: running && snap.status === "running",
+      })),
+    [subagentList, running],
   );
   if (!visibleTurns.length && !result?.output && !subagentList.length) {
     if (running) {

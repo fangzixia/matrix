@@ -17,18 +17,14 @@ logging:
   access_format: combined
   structured_format: json
   retention_days: 30     # 每类日志保留天数
-  categories:
-    system: system
-    api: api
-    llm: llm
-    agent: agent
 
 server:
   addr: ":8080"          # HTTP 监听地址
   read_timeout: 30s
 
 database:
-  dsn: postgres://matrix:matrix@localhost:5432/matrix?sslmode=disable
+  # URI 格式；TimeZone 直接写 Asia/Shanghai，勿用 Asia%2FShanghai
+  dsn: postgres://matrix:matrix@localhost:5432/matrix?sslmode=disable&TimeZone=Asia/Shanghai
   max_open_conns: 25
   auto_migrate: true     # GORM 自动建表
   sql_migrate: true      # 执行内嵌 SQL 版本化迁移

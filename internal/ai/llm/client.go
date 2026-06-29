@@ -19,19 +19,23 @@ type Client struct {
 	BaseURL string
 	// APIKey 为 Bearer Token；本地无鉴权端点可留空。
 	APIKey string
+	// ModelName 为配置中的展示名，仅用于日志。
+	ModelName string
 	// HTTPClient 可替换为自定义实现，常用于测试。
 	HTTPClient *http.Client
 }
 
 // NewClient 创建一个使用合理默认值的 Client。
 func NewClient(baseURL, apiKey string) *Client {
-	return &Client{
+	c := &Client{
 		BaseURL: strings.TrimRight(baseURL, "/"),
 		APIKey:  apiKey,
-		HTTPClient: &http.Client{
-			Timeout: 10 * time.Minute,
-		},
 	}
+	c.HTTPClient = &http.Client{
+		Timeout:   10 * time.Minute,
+		Transport: newLoggingTransport(http.DefaultTransport, c),
+	}
+	return c
 }
 
 // Stream 发送流式对话补全请求，将 [StreamEvent] 写入返回的只读 channel。
@@ -44,15 +48,13 @@ func (c *Client) Stream(ctx context.Context, req ChatRequest) <-chan StreamEvent
 	req.Stream = true
 	go func() {
 		defer close(ch)
-		start := time.Now()
 		defer func() {
 			if r := recover(); r != nil {
-				err := fmt.Errorf("llm: panic: %v", r)
-				c.failLLM(ctx, start, err, 0, "")
+				err := c.clientErr(ctx, req.Model, fmt.Errorf("llm: panic: %v", r))
 				ch <- StreamEvent{Err: err}
 			}
 		}()
-		if err := c.stream(ctx, req, ch, start); err != nil {
+		if err := c.stream(ctx, req, ch); err != nil {
 			ch <- StreamEvent{Err: err}
 		}
 	}()
@@ -62,7 +64,6 @@ func (c *Client) Stream(ctx context.Context, req ChatRequest) <-chan StreamEvent
 // Context 通过流式对话补全收束为完整文本，返回助手内容。
 // 用于会话摘要等无需工具调用的单次生成场景。
 func (c *Client) Context(ctx context.Context, req ChatRequest) (string, error) {
-	start := time.Now()
 	var finalTurn *AssistantTurn
 	for ev := range c.Stream(ctx, req) {
 		if ev.Err != nil {
@@ -73,70 +74,70 @@ func (c *Client) Context(ctx context.Context, req ChatRequest) (string, error) {
 		}
 	}
 	if finalTurn == nil {
-		err := fmt.Errorf("llm: 流结束但未收到完整 turn")
-		c.failLLM(ctx, start, err, 0, "")
-		return "", err
+		return "", c.clientErr(ctx, req.Model, fmt.Errorf("llm: 流结束但未收到完整 turn"))
 	}
 	text := finalTurn.Content
 	if text == "" {
 		text = finalTurn.Thinking
 	}
 	if text == "" {
-		err := fmt.Errorf("llm: 响应内容为空")
-		c.failLLM(ctx, start, err, 0, "")
-		return "", err
+		return "", c.clientErr(ctx, req.Model, fmt.Errorf("llm: 响应内容为空"))
 	}
 	return text, nil
 }
 
-func (c *Client) failLLM(ctx context.Context, start time.Time, err error, status int, body string) error {
-	logging.LogLLMError(ctx, err, status, body, time.Since(start))
-	return err
+func (c *Client) chatCompletionsURL() string {
+	return strings.TrimRight(c.BaseURL, "/") + "/v1/chat/completions"
 }
 
-func (c *Client) succeedLLM(ctx context.Context, start time.Time, turn *AssistantTurn) {
-	logging.LogLLMResponse(ctx, turn.Content, turn.Thinking, turn.ToolCalls, turn.FinishReason, time.Since(start))
+func (c *Client) clientErr(ctx context.Context, model string, err error) error {
+	return logging.LogLLMClientError(
+		ctx, model, c.ModelName, strings.TrimRight(c.BaseURL, "/"), c.chatCompletionsURL(), err,
+	)
 }
 
 // stream 为 Stream 的内部阻塞实现，负责 HTTP 请求和 SSE 解析。
-func (c *Client) stream(ctx context.Context, req ChatRequest, ch chan<- StreamEvent, start time.Time) error {
-	logging.LogLLMRequest(ctx, req.Model, req.Messages, req.Tools, req.MaxTokens)
-
+func (c *Client) stream(ctx context.Context, req ChatRequest, ch chan<- StreamEvent) error {
 	body, err := json.Marshal(req)
 	if err != nil {
-		return c.failLLM(ctx, start, fmt.Errorf("llm: 序列化请求失败: %w", err), 0, "")
+		return c.clientErr(ctx, req.Model, fmt.Errorf("llm: 序列化请求失败: %w", err))
 	}
 	httpReq, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
-		c.BaseURL+"/v1/chat/completions",
+		c.chatCompletionsURL(),
 		bytes.NewReader(body),
 	)
 	if err != nil {
-		return c.failLLM(ctx, start, fmt.Errorf("llm: 构建 HTTP 请求失败: %w", err), 0, "")
+		return c.clientErr(ctx, req.Model, fmt.Errorf("llm: 构建 HTTP 请求失败: %w", err))
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
 	if c.APIKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
 	}
+
 	resp, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
-		return c.failLLM(ctx, start, fmt.Errorf("llm: HTTP 请求失败: %w", err), 0, "")
+		return c.clientErr(ctx, req.Model, fmt.Errorf("llm: HTTP 请求失败: %w", err))
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
-		return c.failLLM(ctx, start, fmt.Errorf("llm: 服务端返回 %d: %s", resp.StatusCode, raw), resp.StatusCode, string(raw))
+		return c.clientErr(ctx, req.Model, fmt.Errorf("llm: 服务端返回 %d: %s", resp.StatusCode, raw))
 	}
+
 	turn, err := c.parseSSE(ctx, resp.Body, ch)
 	if err != nil {
-		return c.failLLM(ctx, start, err, resp.StatusCode, "")
+		if ctx.Err() != nil {
+			return err
+		}
+		return c.clientErr(ctx, req.Model, err)
 	}
 	if turn == nil {
-		return c.failLLM(ctx, start, fmt.Errorf("llm: 流结束但未收到完整 turn"), resp.StatusCode, "")
+		return c.clientErr(ctx, req.Model, fmt.Errorf("llm: 流结束但未收到完整 turn"))
 	}
-	c.succeedLLM(ctx, start, turn)
 	return nil
 }
 

@@ -11,6 +11,7 @@ type ModelConfig struct {
 	BaseURL   string
 	APIKey    string
 	Model     string
+	Name      string // 配置展示名，用于日志
 	MaxTokens int
 }
 

@@ -311,6 +311,7 @@ func think(
 	pendingToolIDs := make(map[int]string)
 	for ev := range cfg.LLM.Stream(ctx, req) {
 		if ev.Err != nil {
+			logging.AgentCtx(ctx, "loop: 模型错误", "error", ev.Err.Error())
 			return nil, fmt.Errorf("loop: 模型错误: %w", ev.Err)
 		}
 		if ev.TextDelta != "" {

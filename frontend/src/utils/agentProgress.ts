@@ -1,5 +1,7 @@
 /** 子 Agent / Run 活动进度文案（方案 B：活动导向） */
 
+import type { ToolView, TurnView } from "@/types/runView";
+
 function isActiveToolActivity(lastActivity: string, currentTool: string): boolean {
   if (!currentTool) return false;
   return (
@@ -58,12 +60,192 @@ export function formatAgentProgress(
   return "";
 }
 
-/** 轮次标题：优先使用后端 summary，否则回退轮次号。 */
-export function formatTurnLabel(
-  turn: number,
-  summary?: string,
-): string {
-  if (summary && !summary.includes("跃迁:")) {
+const GENERIC_TURN_SUMMARY = /^第 \d+ 轮$/;
+
+/** 识别无意义的占位 summary。 */
+export function isGenericTurnSummary(summary?: string): boolean {
+  if (!summary?.trim()) return true;
+  if (summary.includes("跃迁:")) return true;
+  return GENERIC_TURN_SUMMARY.test(summary.trim());
+}
+
+function firstLine(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return "";
+  const idx = trimmed.search(/\r?\n/);
+  return (idx >= 0 ? trimmed.slice(0, idx) : trimmed).trim();
+}
+
+function truncateRunes(text: string, max: number): string {
+  const runes = [...text];
+  if (runes.length <= max) return text;
+  return runes.slice(0, max).join("") + "…";
+}
+
+function stringArg(args: Record<string, unknown>, key: string): string {
+  const v = args[key];
+  if (v == null) return "";
+  return String(v).trim();
+}
+
+function formatPathIntent(toolName: string, path: string): string {
+  const p = truncateRunes(path, 60);
+  switch (toolName) {
+    case "read_file":
+      return `读取 ${p}`;
+    case "write_file":
+      return `写入 ${p}`;
+    case "list_dir":
+      return `列出 ${p}`;
+    case "str_replace_editor":
+      return `编辑 ${p}`;
+    default:
+      return p;
+  }
+}
+
+function intentFromLiveOutput(liveOutput: string): string {
+  let line = firstLine(liveOutput);
+  if (!line) return "";
+  line = line.replace(/…$/, "").trim();
+  if (!line) return "";
+
+  if (
+    line.startsWith("读取 ") ||
+    line.startsWith("写入 ") ||
+    line.startsWith("编辑 ") ||
+    line.startsWith("列出 ") ||
+    line.startsWith("获取 ")
+  ) {
+    return line;
+  }
+  if (line.startsWith("搜索:") || line.startsWith("搜索：")) {
+    return line.replace(/^搜索[:：]\s*/, "").trim();
+  }
+  if (line.startsWith("子 Agent:") || line.startsWith("子 Agent：")) {
+    return line.replace(/^子 Agent[:：]\s*/, "").trim();
+  }
+  if (
+    line.startsWith("$ ") ||
+    line.startsWith("PS> ") ||
+    line.startsWith("grep ") ||
+    line.startsWith("glob ") ||
+    line.startsWith("MCP ")
+  ) {
+    return truncateRunes(line, 80);
+  }
+  return "";
+}
+
+function intentFromPartialJSON(name: string, preview: string): string {
+  const keys = [
+    "description",
+    "target_path",
+    "path",
+    "file_path",
+    "pattern",
+    "query",
+    "command",
+    "url",
+    "prompt",
+  ] as const;
+  for (const key of keys) {
+    const re = new RegExp(`"${key}"\\s*:\\s*"([^"]*)"`);
+    const m = preview.match(re);
+    if (!m?.[1]) continue;
+    const val = m[1];
+    switch (key) {
+      case "description":
+      case "query":
+      case "prompt":
+        return truncateRunes(val, 80);
+      case "target_path":
+      case "path":
+      case "file_path":
+        return formatPathIntent(name, val);
+      case "pattern":
+        return `${name} ${truncateRunes(val, 60)}`;
+      case "command":
+        return truncateRunes(val, 80);
+      case "url":
+        return `获取 ${truncateRunes(val, 60)}`;
+    }
+  }
+  return "";
+}
+
+function intentFromPreview(name: string, preview: string): string {
+  if (!preview) return "";
+  try {
+    const args = JSON.parse(preview) as Record<string, unknown>;
+    const desc = stringArg(args, "description");
+    if (desc) return truncateRunes(desc, 80);
+
+    const path = [stringArg(args, "target_path"), stringArg(args, "path"), stringArg(args, "file_path")].find(Boolean);
+    if (
+      path &&
+      ["read_file", "write_file", "list_dir", "str_replace_editor"].includes(name)
+    ) {
+      return formatPathIntent(name, path);
+    }
+    if (["grep", "glob"].includes(name)) {
+      const pattern = stringArg(args, "pattern");
+      if (pattern) return `${name} ${truncateRunes(pattern, 60)}`;
+    }
+    if (name === "bash" || name === "powershell") {
+      const cmd = stringArg(args, "command");
+      if (cmd) return truncateRunes(cmd, 80);
+    }
+    if (name === "web_search") {
+      const q = stringArg(args, "query");
+      if (q) return `搜索: ${truncateRunes(q, 60)}`;
+    }
+    if (name === "web_fetch") {
+      const u = stringArg(args, "url");
+      if (u) return `获取 ${truncateRunes(u, 60)}`;
+    }
+    if (name === "agent") {
+      const prompt = stringArg(args, "prompt");
+      if (prompt) return truncateRunes(prompt, 80);
+    }
+    const query = stringArg(args, "query");
+    if (query) return truncateRunes(query, 80);
+  } catch {
+    return intentFromPartialJSON(name, preview);
+  }
+  return "";
+}
+
+function extractToolIntent(tool: ToolView): string {
+  const name = tool.toolCallName || "tool";
+  const fromLive = intentFromLiveOutput(tool.liveOutput ?? "");
+  if (fromLive) return fromLive;
+  const fromPreview = intentFromPreview(name, tool.preview ?? "");
+  if (fromPreview) return fromPreview;
+  if (name !== "tool") return name;
+  return "";
+}
+
+/** 从轮次实际活动推导用户可见标题（与后端 DeriveTurnSummary 对齐）。 */
+export function deriveTurnTitle(turn: TurnView): string {
+  if (turn.summary && !isGenericTurnSummary(turn.summary)) {
+    return turn.summary;
+  }
+  const tools = turn.tools ?? [];
+  const parts = tools.map(extractToolIntent).filter(Boolean);
+  if (parts.length > 0) {
+    return truncateRunes(parts.join(" · "), 120);
+  }
+  const messageLine = firstLine(turn.message ?? "");
+  if (messageLine) return truncateRunes(messageLine, 80);
+  if ((turn.thinking ?? "").trim()) return "思考中…";
+  if (turn.turn > 0) return `第 ${turn.turn} 轮`;
+  return "进行中";
+}
+
+/** @deprecated 请使用 deriveTurnTitle(turn) */
+export function formatTurnLabel(turn: number, summary?: string): string {
+  if (summary && !isGenericTurnSummary(summary)) {
     return summary;
   }
   if (turn > 0) return `第 ${turn} 轮`;

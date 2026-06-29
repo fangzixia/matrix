@@ -2,6 +2,7 @@
 package logging
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"matrix/internal/platform/config"
@@ -23,24 +24,23 @@ func Init(cfg config.LoggingConfig, paths storage.Paths, dev bool) (*Loggers, er
 		return nil, err
 	}
 	retention := cfg.RetentionDays
-	cats := paths.LogCategories
 
-	systemW, err := openDailyWriter(paths.LogDir, cats.System, retention)
+	systemW, err := openDailyWriter(paths.LogDir, storage.LogCategorySystem, retention)
 	if err != nil {
 		return nil, err
 	}
-	apiW, err := openDailyWriter(paths.LogDir, cats.API, retention)
+	apiW, err := openDailyWriter(paths.LogDir, storage.LogCategoryAPI, retention)
 	if err != nil {
 		_ = systemW.Close()
 		return nil, err
 	}
-	llmW, err := openDailyWriter(paths.LogDir, cats.LLM, retention)
+	llmW, err := openDailyWriter(paths.LogDir, storage.LogCategoryLLM, retention)
 	if err != nil {
 		_ = systemW.Close()
 		_ = apiW.Close()
 		return nil, err
 	}
-	agentW, err := openDailyWriter(paths.LogDir, cats.Agent, retention)
+	agentW, err := openDailyWriter(paths.LogDir, storage.LogCategoryAgent, retention)
 	if err != nil {
 		_ = systemW.Close()
 		_ = apiW.Close()
@@ -110,3 +110,19 @@ func Info(msg string, args ...any) { slog.Info(msg, args...) }
 
 // Warn 写入 system 日志。
 func Warn(msg string, args ...any) { slog.Warn(msg, args...) }
+
+// LogLLMClientError 记录 LLM 客户端错误到 system 日志并返回 err（log once at origin）。
+func LogLLMClientError(ctx context.Context, model, modelName, baseURL, url string, err error) error {
+	if err == nil {
+		return err
+	}
+	args := []any{"error", err.Error(), "model", model, "base_url", baseURL, "url", url}
+	if modelName != "" {
+		args = append(args, "model_name", modelName)
+	}
+	if ctx != nil {
+		args = append(args, fieldsFrom(ctx)...)
+	}
+	Warn("llm: 客户端错误", args...)
+	return err
+}

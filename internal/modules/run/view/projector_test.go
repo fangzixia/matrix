@@ -2,6 +2,7 @@ package view
 
 import (
 	"context"
+	"matrix/internal/ai/activity"
 	"matrix/internal/ai/stream"
 	"testing"
 )
@@ -40,6 +41,18 @@ func TestProjectorTurnProgress(t *testing.T) {
 		t.Fatalf("turn num = %d", p.state.Turns[0].Turn)
 	}
 	_ = envs
+}
+
+func TestProjectorTurnSummaryFromTools(t *testing.T) {
+	p := NewProjector("run-1", "proj-1")
+	p.Apply(msgProgress(1, "第 1 轮"))
+	p.Apply(stream.ToolStarted("run-1", "tool-1", "read_file", `{"target_path":"internal/foo.go"}`))
+	if activity.IsGenericTurnSummary(p.state.Turns[0].Summary) {
+		t.Fatalf("expected derived summary after tool start, got %q", p.state.Turns[0].Summary)
+	}
+	if p.state.Turns[0].Summary != "读取 internal/foo.go" {
+		t.Fatalf("summary = %q", p.state.Turns[0].Summary)
+	}
 }
 
 func TestProjectorTextDelta(t *testing.T) {

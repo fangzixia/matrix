@@ -116,6 +116,7 @@ func (p *Projector) applyProgress(msg stream.Message, now int64) []Envelope {
 		}
 		if turn != nil {
 			p.appendToolOutputDelta(turn, msg.ToolUseID, data.ToolName, data.Delta)
+			p.refreshTurnSummary(turn)
 		}
 		if data.ToolName != "" {
 			p.state.StatusLabel = activity.ToolActivityLabel(data.ToolName, "streaming")
@@ -141,6 +142,7 @@ func (p *Projector) applyProgress(msg stream.Message, now int64) []Envelope {
 			if tool != nil {
 				tool.Preview = tool.Preview + data.Delta
 			}
+			p.refreshTurnSummary(turn)
 			out = append(out, Envelope{
 				Type: EventTOOLCallArgs, RunID: p.runID, Timestamp: now,
 				Payload: ToolCallArgsPayload{ToolCallID: toolUseID, Delta: data.Delta},
@@ -159,6 +161,7 @@ func (p *Projector) applyProgress(msg stream.Message, now int64) []Envelope {
 			}
 			p.reconcileProvisionalTools(turn, data.ToolName, toolUseID)
 			p.upsertToolInTurn(turn, toolUseID, data.ToolName, "loading", data.ServerName, data.Message, 0)
+			p.refreshTurnSummary(turn)
 			p.rememberCoordinatorToolTurn(msg, toolUseID)
 			p.state.StatusLabel = activity.ToolActivityLabel(data.ToolName, "started")
 			out = append(out, Envelope{
@@ -190,6 +193,7 @@ func (p *Projector) applyProgress(msg stream.Message, now int64) []Envelope {
 			if tool != nil {
 				tool.OutputStreaming = false
 			}
+			p.refreshTurnSummary(turn)
 			p.lastSnap = time.Time{} // 工具终态立即触发快照，避免 500ms 节流 + SSE 轮询延迟
 			if toolUseID != "" {
 				out = append(out,
@@ -257,6 +261,7 @@ func (p *Projector) applyStreamEvent(msg stream.Message, now int64) []Envelope {
 		}
 		if ev.Delta.Type == stream.DeltaThinking && ev.Delta.Thinking != "" {
 			turn.Thinking += ev.Delta.Thinking
+			p.refreshTurnSummary(turn)
 			out = append(out, Envelope{
 				Type: EventREASONINGMessageContent, RunID: p.runID, Timestamp: now,
 				Payload: TextDeltaPayload{MessageID: mid, Delta: ev.Delta.Thinking},
@@ -264,6 +269,7 @@ func (p *Projector) applyStreamEvent(msg stream.Message, now int64) []Envelope {
 		}
 		if ev.Delta.Type == stream.DeltaText && ev.Delta.Text != "" {
 			turn.Message += ev.Delta.Text
+			p.refreshTurnSummary(turn)
 			out = append(out, Envelope{
 				Type: EventTEXTMessageContent, RunID: p.runID, Timestamp: now,
 				Payload: TextDeltaPayload{MessageID: mid, Delta: ev.Delta.Text},
@@ -298,6 +304,7 @@ func (p *Projector) applyAssistant(msg stream.Message) []Envelope {
 	}
 	turn.ThinkingStreaming = false
 	turn.MessageStreaming = false
+	p.refreshTurnSummary(turn)
 	return nil
 }
 
@@ -753,6 +760,28 @@ func countFinishedTools(tools []ToolView) int {
 		}
 	}
 	return n
+}
+
+func (p *Projector) refreshTurnSummary(turn *TurnView) {
+	if turn == nil {
+		return
+	}
+	turn.Summary = activity.DeriveTurnSummary(turn.Turn, toolSummaryInputs(turn.Tools), turn.Message, turn.Thinking)
+}
+
+func toolSummaryInputs(tools []ToolView) []activity.ToolSummaryInput {
+	if len(tools) == 0 {
+		return nil
+	}
+	out := make([]activity.ToolSummaryInput, 0, len(tools))
+	for _, t := range tools {
+		out = append(out, activity.ToolSummaryInput{
+			Name:       t.ToolCallName,
+			Preview:    t.Preview,
+			LiveOutput: t.LiveOutput,
+		})
+	}
+	return out
 }
 
 func subagentStatusLabel(snap agent.Snapshot) string {

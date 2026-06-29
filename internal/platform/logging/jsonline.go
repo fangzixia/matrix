@@ -26,6 +26,7 @@ func (j *jsonLineWriter) writeRecord(record map[string]any) {
 	}
 	b, err := json.Marshal(record)
 	if err != nil {
+		logWriteFallback("logging: JSON 行序列化失败", err)
 		return
 	}
 	j.mu.Lock()

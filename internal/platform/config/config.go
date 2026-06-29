@@ -38,21 +38,12 @@ type StorageConfig struct {
 
 // LoggingConfig 是日志输出选项。
 type LoggingConfig struct {
-	Dir              string                  `yaml:"dir"`
-	Level            string                  `yaml:"level"`
-	Format           string                  `yaml:"format"`
-	AccessFormat     string                  `yaml:"access_format"`
-	StructuredFormat string                  `yaml:"structured_format"`
-	RetentionDays    int                     `yaml:"retention_days"`
-	Categories       LoggingCategoriesConfig `yaml:"categories"`
-}
-
-// LoggingCategoriesConfig 是各类别日志子目录名。
-type LoggingCategoriesConfig struct {
-	System string `yaml:"system"`
-	API    string `yaml:"api"`
-	LLM    string `yaml:"llm"`
-	Agent  string `yaml:"agent"`
+	Dir              string `yaml:"dir"`
+	Level            string `yaml:"level"`
+	Format           string `yaml:"format"`
+	AccessFormat     string `yaml:"access_format"`
+	StructuredFormat string `yaml:"structured_format"`
+	RetentionDays    int    `yaml:"retention_days"`
 }
 
 // ServerConfig 是 HTTP 服务监听参数。
@@ -121,18 +112,6 @@ func normalizeLogging(cfg *LoggingConfig) {
 	}
 	if strings.TrimSpace(cfg.StructuredFormat) == "" {
 		cfg.StructuredFormat = "json"
-	}
-	if strings.TrimSpace(cfg.Categories.System) == "" {
-		cfg.Categories.System = "system"
-	}
-	if strings.TrimSpace(cfg.Categories.API) == "" {
-		cfg.Categories.API = "api"
-	}
-	if strings.TrimSpace(cfg.Categories.LLM) == "" {
-		cfg.Categories.LLM = "llm"
-	}
-	if strings.TrimSpace(cfg.Categories.Agent) == "" {
-		cfg.Categories.Agent = "agent"
 	}
 }
 
