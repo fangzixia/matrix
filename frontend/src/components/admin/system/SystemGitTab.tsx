@@ -69,7 +69,6 @@ export default function SystemGitTab() {
     setGitTestMsg("");
     setGitTesting(true);
     try {
-      await saveGitSettings(form);
       const res = await testGitAccess(gitTestUrl.trim());
       setGitTestMsg(res.message);
     } catch (e) {
@@ -178,7 +177,7 @@ export default function SystemGitTab() {
           {gitTestError && <Alert type="error" message={gitTestError} />}
           {gitTestMsg && <Alert type="success" message={gitTestMsg} />}
           <Typography.Text type="secondary">
-            测试前会先保存当前 Git 配置。
+            测试会使用当前已保存的 Git 配置；如修改了 SSH 私钥路径，请先保存配置。
           </Typography.Text>
         </Space>
       </Card>

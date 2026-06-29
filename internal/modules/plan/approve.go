@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"matrix/internal/modules/docmeta"
 	"matrix/internal/modules/workspace"
 	"matrix/internal/platform/db/models"
 	"os"
@@ -88,7 +89,7 @@ func (s *Service) Approve(ctx context.Context, projectID uuid.UUID, in ConfirmIn
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		row = models.Plan{
 			ID: uuid.New(), ProjectID: projectID, Path: path,
-			Title:     titleOrFromContent(path, string(content)),
+			Title:     docmeta.TitleOrFallback(path, string(content)),
 			Status:    StatusApproved,
 			CreatedAt: now, UpdatedAt: now,
 		}
@@ -103,7 +104,7 @@ func (s *Service) Approve(ctx context.Context, projectID uuid.UUID, in ConfirmIn
 	row.Status = StatusApproved
 	row.UpdatedAt = now
 	if row.Title == "" {
-		row.Title = titleOrFromContent(path, string(content))
+		row.Title = docmeta.TitleOrFallback(path, string(content))
 	}
 	if err := s.db.WithContext(ctx).Save(&row).Error; err != nil {
 		return err

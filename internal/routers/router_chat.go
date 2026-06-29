@@ -82,7 +82,11 @@ func toChatModelDTO(p config.ModelProfile) chatModelDTO {
 
 func listChat(c *gin.Context, d *app.Deps) {
 	pid := auth.ProjectID(c)
-	sessions, _ := d.Runs.ListChatSessions(c.Request.Context(), pid)
+	sessions, err := d.Runs.ListChatSessions(c.Request.Context(), pid)
+	if err != nil {
+		platformhttp.JSONError(c, 500, "internal", err.Error())
+		return
+	}
 	c.JSON(200, gin.H{"sessions": sessions})
 }
 

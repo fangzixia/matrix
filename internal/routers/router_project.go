@@ -59,8 +59,16 @@ func createProject(c *gin.Context, d *app.Deps) {
 		platformhttp.JSONError(c, 400, "bad_request", err.Error())
 		return
 	}
-	_ = d.Repositories.SeedDefault(c.Request.Context(), p.ID, p.GitURL, p.GitBranch)
-	_ = d.Workspace.EnsureClone(c.Request.Context(), p.ID, p.GitURL, p.GitBranch)
+	if err := d.Repositories.SeedDefault(c.Request.Context(), p.ID, p.GitURL, p.GitBranch); err != nil {
+		_ = d.Projects.Delete(c.Request.Context(), p.ID)
+		platformhttp.JSONError(c, 500, "internal", err.Error())
+		return
+	}
+	if err := d.Workspace.EnsureClone(c.Request.Context(), p.ID, p.GitURL, p.GitBranch); err != nil {
+		_ = d.Projects.Delete(c.Request.Context(), p.ID)
+		platformhttp.JSONError(c, 500, "internal", err.Error())
+		return
+	}
 	c.JSON(201, p)
 }
 
@@ -87,7 +95,9 @@ func updateProject(c *gin.Context, d *app.Deps) {
 		Visibility *string    `json:"visibility"`
 		GroupID    *uuid.UUID `json:"group_id"`
 	}
-	_ = c.BindJSON(&body)
+	if !bindJSON(c, &body) {
+		return
+	}
 	p, err := d.Projects.Update(c.Request.Context(), pid, body.Name, body.Path, body.GitURL, body.GitBranch, body.Visibility, body.GroupID)
 	if err != nil {
 		platformhttp.JSONError(c, 400, "bad_request", err.Error())
@@ -153,11 +163,16 @@ func addMember(c *gin.Context, d *app.Deps) {
 // updateMember 更新Member。
 func updateMember(c *gin.Context, d *app.Deps) {
 	pid := auth.ProjectID(c)
-	uid, _ := uuid.Parse(c.Param("uid"))
+	uid, ok := paramUUID(c, "uid")
+	if !ok {
+		return
+	}
 	var body struct {
 		Role iam.Role `json:"role"`
 	}
-	_ = c.BindJSON(&body)
+	if !bindJSON(c, &body) {
+		return
+	}
 	if err := d.Members.UpdateRole(c.Request.Context(), pid, uid, body.Role); err != nil {
 		platformhttp.JSONError(c, 400, "bad_request", err.Error())
 		return
@@ -168,7 +183,13 @@ func updateMember(c *gin.Context, d *app.Deps) {
 // removeMember 移除Member。
 func removeMember(c *gin.Context, d *app.Deps) {
 	pid := auth.ProjectID(c)
-	uid, _ := uuid.Parse(c.Param("uid"))
-	_ = d.Members.Remove(c.Request.Context(), pid, uid)
+	uid, ok := paramUUID(c, "uid")
+	if !ok {
+		return
+	}
+	if err := d.Members.Remove(c.Request.Context(), pid, uid); err != nil {
+		platformhttp.JSONError(c, 400, "bad_request", err.Error())
+		return
+	}
 	c.JSON(200, gin.H{"ok": true})
 }

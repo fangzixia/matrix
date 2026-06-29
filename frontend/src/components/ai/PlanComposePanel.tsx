@@ -74,9 +74,14 @@ export default function PlanComposePanel({
         onResendUserMessage={resendUserMessage}
         onToggleMessageActivity={toggleMessageActivity}
         activitySlot={
-          loading && activityState ? (
-            <div style={{ margin: "0 24px 12px" }}>
-              <RunActivityPanel state={activityState} running compact />
+          activityState ? (
+            <div aria-live="polite" style={{ margin: "0 24px 12px" }}>
+              <RunActivityPanel
+                state={activityState}
+                running={loading}
+                compact
+                projectId={projectId}
+              />
             </div>
           ) : null
         }

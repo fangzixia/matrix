@@ -24,9 +24,10 @@ type Projector struct {
 }
 
 type parserState struct {
-	coordinatorTurn    *TurnView
-	workerCurrentTurn  map[string]*TurnView
-	workerParentToolID map[string]string // agentID → 触发 agent 工具的 tool_use id
+	coordinatorTurn           *TurnView
+	workerCurrentTurn         map[string]*TurnView
+	workerParentToolID        map[string]string // agentID → 触发 agent 工具的 tool_use id
+	parentToolCoordinatorTurn map[string]int    // parentToolUseID → 协调者轮次号
 }
 
 // NewProjector 创建 Run 视图投影器。
@@ -37,8 +38,9 @@ func NewProjector(runID, projectID string) *Projector {
 		projectID: projectID,
 		state:     s,
 		parse: parserState{
-			workerCurrentTurn:  make(map[string]*TurnView),
-			workerParentToolID: make(map[string]string),
+			workerCurrentTurn:         make(map[string]*TurnView),
+			workerParentToolID:        make(map[string]string),
+			parentToolCoordinatorTurn: make(map[string]int),
 		},
 	}
 }
@@ -108,7 +110,11 @@ func (p *Projector) applyProgress(msg stream.Message, now int64) []Envelope {
 		out = append(out, p.emitActivitySnapshot(now))
 
 	case stream.DataToolOutputDelta:
-		if turn := p.activeTurn(msg); turn != nil {
+		turn := p.resolveToolTurn(msg, msg.ToolUseID)
+		if turn == nil {
+			turn = p.activeTurn(msg)
+		}
+		if turn != nil {
 			p.appendToolOutputDelta(turn, msg.ToolUseID, data.ToolName, data.Delta)
 		}
 		if data.ToolName != "" {
@@ -117,13 +123,16 @@ func (p *Projector) applyProgress(msg stream.Message, now int64) []Envelope {
 
 	case stream.DataToolProgress, stream.DataMCPProgress:
 		if data.Status == "input_streaming" && data.Delta != "" {
-			turn := p.activeTurn(msg)
-			if turn == nil {
-				return out
-			}
 			toolUseID := msg.ToolUseID
 			if toolUseID == "" {
 				toolUseID = fmt.Sprintf("input-%s", data.ToolName)
+			}
+			turn := p.resolveToolTurn(msg, toolUseID)
+			if turn == nil {
+				turn = p.activeTurn(msg)
+			}
+			if turn == nil {
+				return out
 			}
 			if !isProvisionalToolID(toolUseID) {
 				p.reconcileProvisionalTools(turn, data.ToolName, toolUseID)
@@ -137,16 +146,20 @@ func (p *Projector) applyProgress(msg stream.Message, now int64) []Envelope {
 				Payload: ToolCallArgsPayload{ToolCallID: toolUseID, Delta: data.Delta},
 			})
 		} else if data.Status == "started" {
-			turn := p.activeTurn(msg)
-			if turn == nil {
-				return out
-			}
 			toolUseID := msg.ToolUseID
 			if toolUseID == "" {
 				return out
 			}
+			turn := p.resolveToolTurn(msg, toolUseID)
+			if turn == nil {
+				turn = p.activeTurn(msg)
+			}
+			if turn == nil {
+				return out
+			}
 			p.reconcileProvisionalTools(turn, data.ToolName, toolUseID)
 			p.upsertToolInTurn(turn, toolUseID, data.ToolName, "loading", data.ServerName, data.Message, 0)
+			p.rememberCoordinatorToolTurn(msg, toolUseID)
 			p.state.StatusLabel = activity.ToolActivityLabel(data.ToolName, "started")
 			out = append(out, Envelope{
 				Type: EventTOOLCallStart, RunID: p.runID, Timestamp: now,
@@ -155,17 +168,29 @@ func (p *Projector) applyProgress(msg stream.Message, now int64) []Envelope {
 				},
 			})
 		} else if data.Status == "completed" || data.Status == "failed" {
-			turn := p.activeTurn(msg)
+			toolUseID := msg.ToolUseID
+			if toolUseID == "" {
+				return out
+			}
+			turn := p.resolveToolTurn(msg, toolUseID)
+			if turn == nil {
+				turn = p.activeTurn(msg)
+			}
 			if turn == nil {
 				return out
 			}
-			toolUseID := msg.ToolUseID
 			status := mapToolStatus(data.Status)
+			if data.ToolName == "" {
+				if existing, _ := p.findToolGlobal(toolUseID); existing != nil {
+					data.ToolName = existing.ToolCallName
+				}
+			}
 			p.reconcileProvisionalTools(turn, data.ToolName, toolUseID)
 			tool := p.upsertToolInTurn(turn, toolUseID, data.ToolName, status, data.ServerName, data.Message, data.ElapsedTimeMs)
 			if tool != nil {
 				tool.OutputStreaming = false
 			}
+			p.lastSnap = time.Time{} // 工具终态立即触发快照，避免 500ms 节流 + SSE 轮询延迟
 			if toolUseID != "" {
 				out = append(out,
 					Envelope{Type: EventTOOLCallEnd, RunID: p.runID, Timestamp: now,
@@ -296,6 +321,29 @@ func (p *Projector) applyResult(msg stream.Message) {
 	} else if p.state.Result == nil {
 		p.state.Result = result
 	}
+	p.finalizeStaleTools(!msg.IsError && msg.Subtype != stream.ResultError && msg.Subtype != stream.ResultErrorMaxTurns)
+}
+
+// finalizeStaleTools 在 Run 结束时清理仍卡在 loading 的工具条目（投影遗漏时的兜底）。
+func (p *Projector) finalizeStaleTools(runSucceeded bool) {
+	var walk func(turn *TurnView)
+	walk = func(turn *TurnView) {
+		for i := range turn.Tools {
+			t := &turn.Tools[i]
+			if t.Status == "loading" {
+				t.OutputStreaming = false
+				if runSucceeded {
+					t.Status = "success"
+				}
+			}
+			for j := range t.WorkerTurns {
+				walk(&t.WorkerTurns[j])
+			}
+		}
+	}
+	for i := range p.state.Turns {
+		walk(&p.state.Turns[i])
+	}
 }
 
 func (p *Projector) applySubagentSnapshot(snapshot any) {
@@ -333,6 +381,9 @@ func (p *Projector) setSubagentFromSnapshot(snap agent.Snapshot) {
 	}
 	if snap.ParentToolUseID != "" {
 		p.parse.workerParentToolID[snap.ID] = snap.ParentToolUseID
+		if p.parse.coordinatorTurn != nil {
+			p.parse.parentToolCoordinatorTurn[snap.ParentToolUseID] = p.parse.coordinatorTurn.Turn
+		}
 	}
 }
 
@@ -356,6 +407,12 @@ func (p *Projector) setSubagentFromMap(m map[string]any) {
 	}
 	if v, ok := m["parent_tool_use_id"].(string); ok {
 		sv.ParentToolUseID = v
+	}
+	if sv.ParentToolUseID != "" {
+		p.parse.workerParentToolID[id] = sv.ParentToolUseID
+		if p.parse.coordinatorTurn != nil {
+			p.parse.parentToolCoordinatorTurn[sv.ParentToolUseID] = p.parse.coordinatorTurn.Turn
+		}
 	}
 	if v, ok := m["progress"].(map[string]any); ok {
 		sv.Progress = v
@@ -426,16 +483,20 @@ func (p *Projector) ensureWorkerTurn(msg stream.Message, turnNum int, summary st
 	tool := p.findTool(parentID)
 	wk := p.workerMapKeyFrom(msg)
 	if tool == nil {
-		if wk != "" {
-			if existing, ok := p.parse.workerCurrentTurn[wk]; ok {
-				if summary != "" {
-					existing.Summary = summary
-				}
-				return existing
-			}
+		if parentID != "" {
+			tool = p.ensureParentAgentToolPlaceholder(parentID)
 		}
-		// 父 agent 工具尚未投影：不要把 Worker 工具挂到主 Agent 轮次。
-		return nil
+		if tool == nil {
+			if wk != "" {
+				if existing, ok := p.parse.workerCurrentTurn[wk]; ok {
+					if summary != "" {
+						existing.Summary = summary
+					}
+					return existing
+				}
+			}
+			return nil
+		}
 	}
 	if wk == "" {
 		return nil
@@ -486,15 +547,40 @@ func (p *Projector) findToolInTurn(turn *TurnView, toolUseID string) *ToolView {
 }
 
 func (p *Projector) findTool(toolUseID string) *ToolView {
+	tool, _ := p.findToolGlobal(toolUseID)
+	return tool
+}
+
+// findToolGlobal 在协调者轮次及嵌套 Worker 轮次中定位工具条目。
+func (p *Projector) findToolGlobal(toolUseID string) (*ToolView, *TurnView) {
 	if toolUseID == "" {
-		return nil
+		return nil, nil
 	}
 	for i := range p.state.Turns {
-		if t := p.findToolInTurn(&p.state.Turns[i], toolUseID); t != nil {
-			return t
+		coord := &p.state.Turns[i]
+		if t := p.findToolInTurn(coord, toolUseID); t != nil {
+			return t, coord
+		}
+		for j := range coord.Tools {
+			for k := range coord.Tools[j].WorkerTurns {
+				wt := &coord.Tools[j].WorkerTurns[k]
+				if t := p.findToolInTurn(wt, toolUseID); t != nil {
+					return t, wt
+				}
+			}
 		}
 	}
-	return nil
+	return nil, nil
+}
+
+// resolveToolTurn 优先在已有工具条目所在轮次更新，避免 activeTurn 漂移导致完成态丢失。
+func (p *Projector) resolveToolTurn(msg stream.Message, toolUseID string) *TurnView {
+	if toolUseID != "" {
+		if _, turn := p.findToolGlobal(toolUseID); turn != nil {
+			return turn
+		}
+	}
+	return p.activeTurn(msg)
 }
 
 func (p *Projector) upsertToolInTurn(turn *TurnView, toolUseID, toolName, status, serverName, message string, elapsed int64) *ToolView {
@@ -512,7 +598,7 @@ func (p *Projector) upsertToolInTurn(turn *TurnView, toolUseID, toolName, status
 	if tool == nil {
 		turn.Tools = append(turn.Tools, ToolView{
 			ToolCallID: toolUseID, ToolCallName: name, Status: status,
-			ServerName: serverName, Preview: message, ElapsedMs: elapsed,
+			ServerName: serverName, Preview: message, ElapsedMs: elapsed, LogURL: p.toolLogURL(toolUseID),
 		})
 		return &turn.Tools[len(turn.Tools)-1]
 	}
@@ -526,6 +612,9 @@ func (p *Projector) upsertToolInTurn(turn *TurnView, toolUseID, toolName, status
 	}
 	if elapsed > 0 {
 		tool.ElapsedMs = elapsed
+	}
+	if tool.LogURL == "" {
+		tool.LogURL = p.toolLogURL(toolUseID)
 	}
 	return tool
 }
@@ -545,7 +634,7 @@ func (p *Projector) appendToolOutputDelta(turn *TurnView, toolUseID, toolName, d
 	if tool == nil {
 		turn.Tools = append(turn.Tools, ToolView{
 			ToolCallID: toolUseID, ToolCallName: name, Status: "loading",
-			LiveOutput: "", OutputStreaming: true,
+			LiveOutput: "", OutputStreaming: true, LogURL: p.toolLogURL(toolUseID),
 		})
 		tool = &turn.Tools[len(turn.Tools)-1]
 	}
@@ -553,6 +642,9 @@ func (p *Projector) appendToolOutputDelta(turn *TurnView, toolUseID, toolName, d
 	tool.OutputStreaming = true
 	if toolName != "" {
 		tool.ToolCallName = toolName
+	}
+	if tool.LogURL == "" {
+		tool.LogURL = p.toolLogURL(toolUseID)
 	}
 	tool.LiveOutput += delta
 	if len([]rune(tool.LiveOutput)) > maxLiveOutputRunes {
@@ -577,6 +669,34 @@ func (p *Projector) workerMapKeyFrom(msg stream.Message) string {
 		return ""
 	}
 	return parentID + ":" + msg.AgentID
+}
+
+func (p *Projector) rememberCoordinatorToolTurn(msg stream.Message, toolUseID string) {
+	if msg.Scope == stream.ScopeWorker || toolUseID == "" || p.parse.coordinatorTurn == nil {
+		return
+	}
+	p.parse.parentToolCoordinatorTurn[toolUseID] = p.parse.coordinatorTurn.Turn
+}
+
+// ensureParentAgentToolPlaceholder 在 Worker 事件早于父 agent 工具投影时创建占位条目。
+func (p *Projector) ensureParentAgentToolPlaceholder(parentID string) *ToolView {
+	if parentID == "" {
+		return nil
+	}
+	if t := p.findTool(parentID); t != nil {
+		return t
+	}
+	turnNum := 1
+	if n, ok := p.parse.parentToolCoordinatorTurn[parentID]; ok && n > 0 {
+		turnNum = n
+	} else if p.parse.coordinatorTurn != nil {
+		turnNum = p.parse.coordinatorTurn.Turn
+	}
+	coord := p.ensureCoordinatorTurn(turnNum, "")
+	coord.Tools = append(coord.Tools, ToolView{
+		ToolCallID: parentID, ToolCallName: "agent", Status: "loading",
+	})
+	return &coord.Tools[len(coord.Tools)-1]
 }
 
 func isProvisionalToolID(id string) bool {

@@ -12,10 +12,10 @@ import (
 	"matrix/internal/platform/logging"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -58,7 +58,9 @@ func startRun(c *gin.Context, d *app.Deps) {
 		FilePath     string `json:"file_path"`
 		EvalFilePath string `json:"eval_file_path"`
 	}
-	_ = c.BindJSON(&body)
+	if !bindJSON(c, &body) {
+		return
+	}
 	if body.Kind == "" {
 		body.Kind = "task"
 	}
@@ -76,16 +78,17 @@ func startRun(c *gin.Context, d *app.Deps) {
 
 // streamRun 通过 SSE 推送 Run 视图事件；只读 DB 轮询，不依赖进程内 Hub。
 func streamRun(c *gin.Context, d *app.Deps) {
-	runID := c.Param("runId")
-	rid, err := uuid.Parse(runID)
-	if err != nil {
-		platformhttp.JSONError(c, 400, "bad_request", "无效的 Run ID")
+	pid := auth.ProjectID(c)
+	rid, ok := paramUUID(c, "runId")
+	if !ok {
 		return
 	}
+	runID := rid.String()
 	mode := view.Mode(c.Query("mode"))
 	if mode != view.ModeChat {
 		mode = view.ModeDetail
 	}
+	lastSeq := parseRunViewAfterSeq(c)
 
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -98,11 +101,10 @@ func streamRun(c *gin.Context, d *app.Deps) {
 	}
 
 	const pollInterval = 2 * time.Second
-	lastSeq := int64(0)
 	first := true
 
 	for {
-		envs, done, maxSeq, err := d.Runs.StreamCatchUpSince(c.Request.Context(), rid, mode, lastSeq)
+		envs, done, maxSeq, err := d.Runs.StreamCatchUpSinceForProject(c.Request.Context(), pid, rid, mode, lastSeq)
 		if err != nil {
 			if first {
 				if err == gorm.ErrRecordNotFound {
@@ -115,7 +117,7 @@ func streamRun(c *gin.Context, d *app.Deps) {
 		} else {
 			if first {
 				logging.Agent("run-view: SSE 已连接",
-					"run_id", runID, "mode", mode, "catchup_events", len(envs),
+					"run_id", runID, "mode", mode, "after_seq", lastSeq, "catchup_events", len(envs),
 				)
 				first = false
 			}
@@ -143,17 +145,32 @@ func streamRun(c *gin.Context, d *app.Deps) {
 
 func writeRunViewSSE(w http.ResponseWriter, env view.Envelope) {
 	b, _ := json.Marshal(env)
-	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", sseEventRunView, b)
+	fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", env.Seq, sseEventRunView, b)
+}
+
+func parseRunViewAfterSeq(c *gin.Context) int64 {
+	raw := c.Query("afterSeq")
+	if raw == "" {
+		raw = c.GetHeader("Last-Event-ID")
+	}
+	if raw == "" {
+		return 0
+	}
+	seq, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || seq < 0 {
+		return 0
+	}
+	return seq
 }
 
 // getRunView 返回 Run 活动视图快照。
 func getRunView(c *gin.Context, d *app.Deps) {
-	rid, err := uuid.Parse(c.Param("runId"))
-	if err != nil {
-		platformhttp.JSONError(c, 400, "bad_request", "无效的 Run ID")
+	pid := auth.ProjectID(c)
+	rid, ok := paramUUID(c, "runId")
+	if !ok {
 		return
 	}
-	st, err := d.Runs.GetRunView(c.Request.Context(), rid)
+	st, err := d.Runs.GetRunViewForProject(c.Request.Context(), pid, rid)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			platformhttp.JSONError(c, 404, "not_found", "Run 不存在")
@@ -167,13 +184,13 @@ func getRunView(c *gin.Context, d *app.Deps) {
 
 // getToolLog 返回工具 spill 日志。
 func getToolLog(c *gin.Context, d *app.Deps) {
-	rid, err := uuid.Parse(c.Param("runId"))
-	if err != nil {
-		platformhttp.JSONError(c, 400, "bad_request", "无效的 Run ID")
+	pid := auth.ProjectID(c)
+	rid, ok := paramUUID(c, "runId")
+	if !ok {
 		return
 	}
 	toolUseID := c.Param("toolUseId")
-	content, err := d.Runs.GetToolLog(c.Request.Context(), rid, toolUseID)
+	content, err := d.Runs.GetToolLogForProject(c.Request.Context(), pid, rid, toolUseID)
 	if err != nil {
 		if os.IsNotExist(err) {
 			platformhttp.JSONError(c, 404, "not_found", "工具日志不存在")
@@ -187,18 +204,32 @@ func getToolLog(c *gin.Context, d *app.Deps) {
 
 // cancelRun 取消Run。
 func cancelRun(c *gin.Context, d *app.Deps) {
-	rid, _ := uuid.Parse(c.Param("runId"))
-	_ = d.Runs.Cancel(c.Request.Context(), rid)
+	pid := auth.ProjectID(c)
+	rid, ok := paramUUID(c, "runId")
+	if !ok {
+		return
+	}
+	if err := d.Runs.CancelForProject(c.Request.Context(), pid, rid); err != nil {
+		platformhttp.JSONError(c, 404, "not_found", "运行不存在")
+		return
+	}
 	c.JSON(200, gin.H{"ok": true})
 }
 
 // mergeRun 合并Run。
 func mergeRun(c *gin.Context, d *app.Deps) {
-	rid, _ := uuid.Parse(c.Param("runId"))
-	rn, conflicts, err := d.Runs.MergeRun(c.Request.Context(), rid)
+	pid := auth.ProjectID(c)
+	rid, ok := paramUUID(c, "runId")
+	if !ok {
+		return
+	}
+	rn, conflicts, err := d.Runs.MergeRunForProject(c.Request.Context(), pid, rid)
 	if err != nil {
 		if len(conflicts) > 0 {
-			c.JSON(409, gin.H{"error": err.Error(), "conflicts": conflicts, "run": rn})
+			platformhttp.JSONErrorDetails(c, 409, "conflict", err.Error(), gin.H{
+				"conflicts": conflicts,
+				"run":       rn,
+			})
 			return
 		}
 		platformhttp.JSONError(c, 400, "bad_request", err.Error())
@@ -209,8 +240,12 @@ func mergeRun(c *gin.Context, d *app.Deps) {
 
 // discardRun 丢弃Run。
 func discardRun(c *gin.Context, d *app.Deps) {
-	rid, _ := uuid.Parse(c.Param("runId"))
-	rn, err := d.Runs.DiscardRun(c.Request.Context(), rid)
+	pid := auth.ProjectID(c)
+	rid, ok := paramUUID(c, "runId")
+	if !ok {
+		return
+	}
+	rn, err := d.Runs.DiscardRunForProject(c.Request.Context(), pid, rid)
 	if err != nil {
 		platformhttp.JSONError(c, 400, "bad_request", err.Error())
 		return

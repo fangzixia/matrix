@@ -18,18 +18,19 @@ import {
   Typography,
 } from "antd";
 import RunActivityPanel from "@/components/ai/RunActivityPanel";
-import { getRunView, subscribeRunViewStream, runStatusPollIntervalMs } from "@/api/runView";
+import { runStatusPollIntervalMs } from "@/api/runView";
 import * as runsApi from "@/api/runs";
 import type { RunStep } from "@/api/runs";
 import type { RunViewState } from "@/types/runView";
-import { applyEnvelope } from "@/utils/viewReducer";
 import { runStatusLabels, stageTitles } from "@/locales/zh-CN";
 import { canMergeRun, isStageKind, stageKindFromPath } from "@/utils/stage";
 import { useRunStore } from "@/stores/run";
+import { useRunActivityView } from "@/hooks/useRunActivityView";
 
 function statusColor(status: string) {
   if (status === "succeeded") return "success";
-  if (status === "failed" || status === "cancelled") return "error";
+  if (status === "failed") return "error";
+  if (status === "cancelled") return "warning";
   if (status === "running") return "processing";
   return "default";
 }
@@ -65,29 +66,34 @@ export default function StageTaskDetailPage() {
   const stageTitle = stageTitles[kind] || kind;
   const currentRun = useRunStore((s) => s.current);
   const setCurrent = useRunStore((s) => s.setCurrent);
-  const [viewState, setViewState] = useState<RunViewState | null>(null);
-  const [viewLoading, setViewLoading] = useState(true);
   const [steps, setSteps] = useState<RunStep[]>([]);
+  const [stepsError, setStepsError] = useState("");
   const [mergeError, setMergeError] = useState("");
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [acting, setActing] = useState(false);
-  const unsubscribeRef = useRef<(() => void) | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const seenSeqRef = useRef<Set<number>>(new Set());
+  const running =
+    currentRun?.status === "running" ||
+    currentRun?.status === "queued" ||
+    currentRun?.status === "pending";
+  const {
+    state: viewState,
+    loading: viewLoading,
+    disconnected: viewDisconnected,
+    reload: reloadView,
+  } = useRunActivityView(projectId, taskId, {
+    live: running,
+    mode: "detail",
+  });
 
-  async function loadView() {
-    const res = await getRunView(projectId, taskId);
-    setViewState(res.state);
-    seenSeqRef.current.clear();
-    if (res.state?.seq) seenSeqRef.current.add(res.state.seq);
-  }
 
   async function loadSteps() {
+    setStepsError("");
     try {
       const res = await runsApi.listRunSteps(projectId, taskId);
       setSteps(res.steps ?? []);
-    } catch {
-      setSteps([]);
+    } catch (e) {
+      setStepsError(e instanceof Error ? e.message : "步骤加载失败");
     }
   }
 
@@ -121,36 +127,15 @@ export default function StageTaskDetailPage() {
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      setViewLoading(true);
-      setViewState(null);
       const run = await refreshRun();
       if (cancelled) return;
-      await Promise.all([loadView(), loadSteps()]);
+      await Promise.all([reloadView(), loadSteps()]);
       if (cancelled) return;
-      setViewLoading(false);
       const active =
         run.status === "running" ||
         run.status === "queued" ||
         run.status === "pending";
       if (active) {
-        unsubscribeRef.current = subscribeRunViewStream(
-          projectId,
-          taskId,
-          "detail",
-          {
-            onEnvelope: (env) => {
-              if (seenSeqRef.current.has(env.seq)) return;
-              seenSeqRef.current.add(env.seq);
-              setViewState((prev) =>
-                applyEnvelope(prev ?? emptyView(taskId), env),
-              );
-            },
-            onDisconnect: () => {
-              stopPolling();
-              void refreshRun().then(() => loadView());
-            },
-          },
-        );
         pollTimerRef.current = setInterval(async () => {
           await loadSteps();
           const updated = await runsApi.getRun(projectId, taskId);
@@ -159,7 +144,7 @@ export default function StageTaskDetailPage() {
             !["running", "queued", "pending"].includes(updated.status)
           ) {
             stopPolling();
-            await loadView();
+            await reloadView();
           }
         }, runStatusPollIntervalMs());
       }
@@ -167,15 +152,14 @@ export default function StageTaskDetailPage() {
     load();
     return () => {
       cancelled = true;
-      unsubscribeRef.current?.();
       stopPolling();
     };
-  }, [projectId, taskId, setCurrent]);
+  }, [projectId, taskId, setCurrent, reloadView]);
 
   async function cancel() {
     await runsApi.cancelRun(projectId, taskId);
     await refreshRun();
-    await loadView();
+    await reloadView();
   }
 
   async function merge() {
@@ -205,11 +189,6 @@ export default function StageTaskDetailPage() {
     }
   }
 
-  const running =
-    currentRun?.status === "running" ||
-    currentRun?.status === "queued" ||
-    currentRun?.status === "pending";
-
   const panelState = viewState ?? emptyView(taskId);
   const canMerge = currentRun ? canMergeRun(currentRun) : false;
   const { result } = panelState;
@@ -227,6 +206,33 @@ export default function StageTaskDetailPage() {
     if (currentRun.status === "failed") return "任务执行失败";
     return runStatusLabels[currentRun.status] || currentRun.status;
   }, [currentRun]);
+  const stepProgress = useMemo(() => {
+    if (steps.length <= 1) return null;
+    const finished = steps.filter((s) => s.status === "succeeded").length;
+    return Math.round((finished / steps.length) * 100);
+  }, [steps]);
+  const runningExtra = useMemo(() => {
+    if (!running) return null;
+    if (stepProgress != null) {
+      return (
+        <Progress
+          percent={stepProgress}
+          status="active"
+          size="small"
+          style={{ width: 160 }}
+          aria-label={`阶段进度 ${stepProgress}%`}
+        />
+      );
+    }
+    return (
+      <Space size="small">
+        <Spin size="small" />
+        <Typography.Text type="secondary">
+          {panelState.statusLabel || "正在准备运行过程…"}
+        </Typography.Text>
+      </Space>
+    );
+  }, [panelState.statusLabel, running, stepProgress]);
 
   return (
     <Space direction="vertical" size="large" style={{ width: "100%" }}>
@@ -323,6 +329,7 @@ export default function StageTaskDetailPage() {
           }))}
         />
       )}
+      {stepsError && <Alert type="warning" showIcon message={stepsError} />}
       {mergeError && (
         <Alert
           type="error"
@@ -335,24 +342,27 @@ export default function StageTaskDetailPage() {
       )}
       <Card
         title="运行过程"
-        extra={
-          running ? (
-            <Progress
-              percent={99}
-              status="active"
-              showInfo={false}
-              style={{ width: 120 }}
-            />
-          ) : null
-        }
+        extra={runningExtra}
         styles={{ body: { maxHeight: "65vh", overflow: "auto" } }}
       >
+        {viewDisconnected && running ? (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="实时连接暂时中断，页面会继续轮询刷新运行状态。"
+          />
+        ) : null}
         {viewLoading && !viewState ? (
           <Spin />
         ) : !viewState && !running ? (
           <Empty description="暂无活动" />
         ) : (
-          <RunActivityPanel state={panelState} running={running} />
+          <RunActivityPanel
+            state={panelState}
+            running={running}
+            projectId={projectId}
+          />
         )}
         {result && (result.numTurns != null || result.durationMs != null) && (
           <Flex gap="large" style={{ marginTop: 24 }}>

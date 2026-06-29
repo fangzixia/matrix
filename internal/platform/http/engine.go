@@ -18,6 +18,7 @@ type ErrorBody struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
 	Code    string `json:"code,omitempty"`
+	Details any    `json:"details,omitempty"`
 }
 
 // NewEngine 创建带 Recovery、Request-ID、访问日志与 5xx 系统日志的 Gin 引擎。
@@ -97,6 +98,11 @@ func accessLogMiddleware(access *logging.AccessLog) gin.HandlerFunc {
 // JSONError 以统一格式返回 JSON 错误并中止后续 Handler。
 func JSONError(c *gin.Context, status int, code, message string) {
 	c.AbortWithStatusJSON(status, ErrorBody{Error: code, Message: message, Code: code})
+}
+
+// JSONErrorDetails 返回带结构化详情的统一 JSON 错误。
+func JSONErrorDetails(c *gin.Context, status int, code, message string, details any) {
+	c.AbortWithStatusJSON(status, ErrorBody{Error: code, Message: message, Code: code, Details: details})
 }
 
 // ServeStatic 挂载静态资源并在未匹配 GET 路由时回退到 index.html。

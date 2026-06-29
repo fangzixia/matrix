@@ -59,16 +59,21 @@ func NewService(db *gorm.DB, maxAttempts int) *Service {
 // Enqueue 将 Run 任务入队。
 func (s *Service) Enqueue(ctx context.Context, runID uuid.UUID) error {
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&models.Run{}).Where("id = ?", runID).Update("status", jobStatusQueued).Error; err != nil {
-			return err
-		}
-		job := models.RunJob{RunID: runID, Status: jobStatusQueued}
-		return tx.Create(&job).Error
+		return s.EnqueueTx(ctx, tx, runID)
 	})
 	if err == nil {
 		logging.Info("job: 任务已入队", "run_id", runID)
 	}
 	return err
+}
+
+// EnqueueTx 在调用方事务内将 Run 任务入队。
+func (s *Service) EnqueueTx(ctx context.Context, tx *gorm.DB, runID uuid.UUID) error {
+	if err := tx.WithContext(ctx).Model(&models.Run{}).Where("id = ?", runID).Update("status", jobStatusQueued).Error; err != nil {
+		return err
+	}
+	job := models.RunJob{RunID: runID, Status: jobStatusQueued}
+	return tx.WithContext(ctx).Create(&job).Error
 }
 
 // ClaimedJob 是 Worker 认领到的待执行任务。
@@ -113,8 +118,21 @@ func (s *Service) Complete(ctx context.Context, jobID uuid.UUID, success bool) e
 
 // Requeue 将失败任务重新入队。
 func (s *Service) Requeue(ctx context.Context, jobID uuid.UUID) error {
-	return s.db.WithContext(ctx).Model(&models.RunJob{}).Where("id = ?", jobID).
-		Updates(map[string]any{"status": jobStatusQueued, "locked_by": "", "locked_at": nil}).Error
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var job models.RunJob
+		if err := tx.First(&job, "id = ?", jobID).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.Run{}).Where("id = ?", job.RunID).Updates(map[string]any{
+			"status":        jobStatusQueued,
+			"error_message": "",
+			"finished_at":   nil,
+		}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&models.RunJob{}).Where("id = ?", jobID).
+			Updates(map[string]any{"status": jobStatusQueued, "locked_by": "", "locked_at": nil}).Error
+	})
 }
 
 // RunWorker 启动嵌入式任务 Worker 循环。

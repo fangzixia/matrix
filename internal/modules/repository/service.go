@@ -35,14 +35,6 @@ type CreateInput struct {
 	IsDefault bool   `json:"is_default"`
 }
 
-// UpdateInput 是更新 Git 仓库绑定时的请求参数。
-type UpdateInput struct {
-	Name      *string `json:"name"`
-	GitURL    *string `json:"git_url"`
-	GitBranch *string `json:"git_branch"`
-	IsDefault *bool   `json:"is_default"`
-}
-
 // Service 管理项目 Git 仓库绑定与默认仓库种子数据。
 type Service struct {
 	db *gorm.DB
@@ -66,10 +58,10 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID) ([]DTO, error) 
 	return out, nil
 }
 
-// Get 执行对应操作。
-func (s *Service) Get(ctx context.Context, id uuid.UUID) (*DTO, error) {
+// GetForProject 返回项目内指定仓库。
+func (s *Service) GetForProject(ctx context.Context, projectID, id uuid.UUID) (*DTO, error) {
 	var m models.ProjectRepository
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("id = ? AND project_id = ?", id, projectID).First(&m).Error; err != nil {
 		return nil, err
 	}
 	return new(toDTO(&m)), nil
@@ -101,54 +93,40 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, in CreateInpu
 	m := models.ProjectRepository{
 		ProjectID: projectID, Name: name, GitURL: in.GitURL, GitBranch: branch, IsDefault: in.IsDefault,
 	}
-	if err := s.db.WithContext(ctx).Create(&m).Error; err != nil {
-		return nil, err
-	}
-	if in.IsDefault {
-		_ = s.clearOtherDefaults(ctx, projectID, m.ID)
-	}
-	return new(toDTO(&m)), nil
-}
-
-// Update 更新记录。
-func (s *Service) Update(ctx context.Context, id uuid.UUID, in UpdateInput) (*DTO, error) {
-	var m models.ProjectRepository
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
-		return nil, err
-	}
-	if in.Name != nil {
-		m.Name = strings.TrimSpace(*in.Name)
-	}
-	if in.GitURL != nil {
-		m.GitURL = *in.GitURL
-	}
-	if in.GitBranch != nil {
-		m.GitBranch = *in.GitBranch
-	}
-	if in.IsDefault != nil && *in.IsDefault {
-		m.IsDefault = true
-		_ = s.clearOtherDefaults(ctx, m.ProjectID, m.ID)
-	}
-	if err := s.db.WithContext(ctx).Save(&m).Error; err != nil {
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&m).Error; err != nil {
+			return err
+		}
+		if in.IsDefault {
+			return clearOtherDefaultsTx(tx, projectID, m.ID)
+		}
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 	return new(toDTO(&m)), nil
 }
 
-// Delete 删除记录。
-func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
+// DeleteForProject 删除项目内指定仓库。
+func (s *Service) DeleteForProject(ctx context.Context, projectID, id uuid.UUID) error {
 	var m models.ProjectRepository
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("id = ? AND project_id = ?", id, projectID).First(&m).Error; err != nil {
 		return err
 	}
+	return s.deleteRow(ctx, &m)
+}
+
+func (s *Service) deleteRow(ctx context.Context, m *models.ProjectRepository) error {
 	if m.IsDefault {
 		var count int64
-		s.db.WithContext(ctx).Model(&models.ProjectRepository{}).Where("project_id = ?", m.ProjectID).Count(&count)
+		if err := s.db.WithContext(ctx).Model(&models.ProjectRepository{}).Where("project_id = ?", m.ProjectID).Count(&count).Error; err != nil {
+			return err
+		}
 		if count <= 1 {
 			return errors.New("不能删除唯一的默认仓库")
 		}
 	}
-	return s.db.WithContext(ctx).Delete(&m).Error
+	return s.db.WithContext(ctx).Delete(m).Error
 }
 
 // SeedDefault 为项目创建默认仓库绑定。
@@ -183,9 +161,8 @@ func (s *Service) MigrateLegacyProjects(ctx context.Context) error {
 	return nil
 }
 
-// clearOtherDefaults 清除同项目下其他仓库的默认标记。
-func (s *Service) clearOtherDefaults(ctx context.Context, projectID, keepID uuid.UUID) error {
-	return s.db.WithContext(ctx).Model(&models.ProjectRepository{}).
+func clearOtherDefaultsTx(tx *gorm.DB, projectID, keepID uuid.UUID) error {
+	return tx.Model(&models.ProjectRepository{}).
 		Where("project_id = ? AND id <> ?", projectID, keepID).
 		Update("is_default", false).Error
 }

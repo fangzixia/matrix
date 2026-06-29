@@ -7,6 +7,7 @@ import {
   Checkbox,
   Form,
   Input,
+  Modal,
   Space,
   Table,
   Tabs,
@@ -23,6 +24,7 @@ export default function SettingsRepositoriesPage() {
   const [repos, setRepos] = useState<Repository[]>([]);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [actingId, setActingId] = useState("");
   const [form] = Form.useForm();
   async function load() {
     const res = await reposApi.listRepositories(projectId);
@@ -48,18 +50,51 @@ export default function SettingsRepositoriesPage() {
     }
   }
   async function pull(r: Repository) {
+    setError("");
     setMessage("");
-    await reposApi.pullRepo(projectId, r.id);
-    setMessage(`已拉取 ${r.name}`);
+    setActingId(r.id);
+    try {
+      await reposApi.pullRepo(projectId, r.id);
+      setMessage(`已拉取 ${r.name}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "拉取失败");
+    } finally {
+      setActingId("");
+    }
   }
   async function push(r: Repository) {
+    setError("");
     setMessage("");
-    await reposApi.pushRepo(projectId, r.id);
-    setMessage(`已推送 ${r.name}`);
+    setActingId(r.id);
+    try {
+      await reposApi.pushRepo(projectId, r.id);
+      setMessage(`已推送 ${r.name}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "推送失败");
+    } finally {
+      setActingId("");
+    }
   }
   async function remove(r: Repository) {
-    await reposApi.deleteRepository(projectId, r.id);
-    await load();
+    Modal.confirm({
+      title: `删除仓库「${r.name}」？`,
+      content: "删除后将移除该项目的仓库绑定，此操作不可撤销。",
+      okText: "删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        setError("");
+        setActingId(r.id);
+        try {
+          await reposApi.deleteRepository(projectId, r.id);
+          await load();
+        } catch (e) {
+          setError(e instanceof Error ? e.message : "删除失败");
+        } finally {
+          setActingId("");
+        }
+      },
+    });
   }
   return (
     <div>
@@ -115,9 +150,13 @@ export default function SettingsRepositoriesPage() {
           title="操作"
           render={(_, row: Repository) => (
             <Space>
-              <Button onClick={() => pull(row)}>拉取</Button>
-              <Button onClick={() => push(row)}>推送</Button>
-              <Button danger onClick={() => remove(row)}>
+              <Button loading={actingId === row.id} onClick={() => pull(row)}>
+                拉取
+              </Button>
+              <Button loading={actingId === row.id} onClick={() => push(row)}>
+                推送
+              </Button>
+              <Button danger loading={actingId === row.id} onClick={() => remove(row)}>
                 删除
               </Button>
             </Space>

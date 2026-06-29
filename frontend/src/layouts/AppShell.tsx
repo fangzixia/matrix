@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Link,
   Outlet,
@@ -7,6 +7,7 @@ import {
   useParams,
 } from "react-router-dom";
 import {
+  Alert,
   Avatar,
   Badge,
   Breadcrumb,
@@ -63,6 +64,80 @@ const projectNavIcons = {
 
 type ProjectNavIcon = keyof typeof projectNavIcons;
 
+function useNotificationsMenu(user: unknown, navigate: (to: string) => void) {
+  const [notifyOpen, setNotifyOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notificationError, setNotificationError] = useState("");
+
+  const loadNotifications = useCallback(async () => {
+    if (!user) return;
+    const [countRes, listRes] = await Promise.all([
+      notificationsApi.unreadCount(),
+      notificationsApi.listNotifications(),
+    ]);
+    setNotificationError("");
+    setUnreadCount(countRes.count);
+    setNotifications(listRes.notifications);
+  }, [user]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        await loadNotifications();
+      } catch {
+        if (!cancelled) {
+          setNotificationError("通知加载失败，将保留最近一次结果。");
+        }
+      }
+    }
+    void load();
+    const timer = setInterval(load, 30000);
+    const unsubscribe = subscribeNotificationStream(() => {
+      void load();
+    });
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      unsubscribe();
+    };
+  }, [loadNotifications]);
+
+  const markAllRead = useCallback(async () => {
+    await notificationsApi.markAllRead();
+    setUnreadCount(0);
+    setNotifications((prev) =>
+      prev.map((n) => ({
+        ...n,
+        read_at: n.read_at || new Date().toISOString(),
+      })),
+    );
+  }, []);
+
+  const markRead = useCallback(
+    async (n: Notification) => {
+      if (!n.read_at) {
+        await notificationsApi.markRead(n.id);
+      }
+      if (n.link) navigate(n.link);
+      setNotifyOpen(false);
+      await loadNotifications();
+    },
+    [loadNotifications, navigate],
+  );
+
+  return {
+    notifyOpen,
+    setNotifyOpen,
+    unreadCount,
+    notifications,
+    notificationError,
+    markAllRead,
+    markRead,
+  };
+}
+
 function resolveProjectNavKey(pathname: string, projectId: string): string {
   const base = `/projects/${projectId}`;
   if (pathname === base || pathname === `${base}/`) return "overview";
@@ -88,10 +163,16 @@ export function AppShell() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
-  const [notifyOpen, setNotifyOpen] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
   const perms = useProjectPermissions(currentProject);
+  const {
+    notifyOpen,
+    setNotifyOpen,
+    unreadCount,
+    notifications,
+    notificationError,
+    markAllRead,
+    markRead,
+  } = useNotificationsMenu(user, navigate);
   const displayName = user?.name || user?.username;
   const filteredProjects = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -203,57 +284,6 @@ export function AppShell() {
     setProjectPickerOpen(false);
     setNotifyOpen(false);
   }, [location.pathname]);
-  useEffect(() => {
-    let cancelled = false;
-    async function loadNotifications() {
-      if (!user) return;
-      try {
-        const [countRes, listRes] = await Promise.all([
-          notificationsApi.unreadCount(),
-          notificationsApi.listNotifications(),
-        ]);
-        if (!cancelled) {
-          setUnreadCount(countRes.count);
-          setNotifications(listRes.notifications);
-        }
-      } catch {
-        /* ignore */
-      }
-    }
-    loadNotifications();
-    const timer = setInterval(loadNotifications, 30000);
-    const unsubscribe = subscribeNotificationStream(() => {
-      loadNotifications();
-    });
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-      unsubscribe();
-    };
-  }, [user]);
-  async function markAllRead() {
-    await notificationsApi.markAllRead();
-    setUnreadCount(0);
-    setNotifications((prev) =>
-      prev.map((n) => ({
-        ...n,
-        read_at: n.read_at || new Date().toISOString(),
-      })),
-    );
-  }
-  async function markRead(n: Notification) {
-    if (!n.read_at) {
-      await notificationsApi.markRead(n.id);
-    }
-    if (n.link) navigate(n.link);
-    setNotifyOpen(false);
-    const [countRes, listRes] = await Promise.all([
-      notificationsApi.unreadCount(),
-      notificationsApi.listNotifications(),
-    ]);
-    setUnreadCount(countRes.count);
-    setNotifications(listRes.notifications);
-  }
   const projectMenuItems = useMemo((): MenuProps["items"] => {
     const items: MenuProps["items"] = filteredProjects.map((p) => ({
       key: p.id,
@@ -378,6 +408,14 @@ export function AppShell() {
                   body: { maxHeight: 360, overflow: "auto", padding: 0 },
                 }}
               >
+                {notificationError && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message={notificationError}
+                    style={{ margin: 8 }}
+                  />
+                )}
                 {!notifications.length ? (
                   <Empty
                     image={Empty.PRESENTED_IMAGE_SIMPLE}

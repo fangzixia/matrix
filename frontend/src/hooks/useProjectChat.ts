@@ -197,8 +197,8 @@ export function useProjectChat(projectId: string) {
         try {
           const state = await refreshSession(sid);
           setItems(sessionItems(state));
-        } catch {
-          setItems([]);
+        } catch (e) {
+          setError(e instanceof Error ? e.message : "加载对话失败");
         }
         return;
       }
@@ -301,8 +301,8 @@ export function useProjectChat(projectId: string) {
           try {
             const state = await refreshSession(target.id);
             setItems(sessionItems(state));
-          } catch {
-            setItems([]);
+          } catch (e) {
+            setError(e instanceof Error ? e.message : "加载对话失败");
           }
         } else {
           setItems(sessionItems(target));

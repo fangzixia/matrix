@@ -77,7 +77,7 @@ export function sessionTitleFromBranch(
   return "新对话";
 }
 
-export function hasBranchMessages(
+function hasBranchMessages(
   nodes: ChatMessageNode[],
   activeLeafId?: string | null,
 ): boolean {

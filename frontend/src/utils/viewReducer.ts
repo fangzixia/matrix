@@ -170,18 +170,3 @@ export function extractRunFailure(
   return formatUserRunError(raw);
 }
 
-/** 合并快照与增量事件序列，按 seq 去重。 */
-export function mergeEnvelopes(
-  initial: RunViewState | null,
-  envelopes: ViewEnvelope[],
-): RunViewState | null {
-  let state = initial;
-  const seen = new Set<number>();
-  const sorted = [...envelopes].sort((a, b) => a.seq - b.seq);
-  for (const env of sorted) {
-    if (seen.has(env.seq)) continue;
-    seen.add(env.seq);
-    state = applyEnvelope(state, env);
-  }
-  return state;
-}

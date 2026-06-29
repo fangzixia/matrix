@@ -7,6 +7,7 @@ import {
   Button,
   Card,
   Form,
+  Modal,
   Select,
   Space,
   Spin,
@@ -36,6 +37,8 @@ export default function SettingsMembersPage() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [role, setRole] = useState<MemberRole>("developer");
   const [error, setError] = useState("");
+  const [actingUserId, setActingUserId] = useState("");
+  const [inviting, setInviting] = useState(false);
   const userSearch = useUserSearch(username, setUsername);
   const roleOptions = projectsApi.memberRoleOptions.map((r) => ({
     value: r.value,
@@ -53,6 +56,7 @@ export default function SettingsMembersPage() {
     setError("");
     const name = username.trim();
     if (!name) return;
+    setInviting(true);
     try {
       await projectsApi.addMember(id, { username: name, role });
       setUsername("");
@@ -60,15 +64,42 @@ export default function SettingsMembersPage() {
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "添加失败");
+    } finally {
+      setInviting(false);
     }
   }
   async function changeRole(m: ProjectMember, newRole: MemberRole) {
-    await projectsApi.updateMember(id, m.user_id, newRole);
-    await load();
+    setError("");
+    setActingUserId(m.user_id);
+    try {
+      await projectsApi.updateMember(id, m.user_id, newRole);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "更新角色失败");
+    } finally {
+      setActingUserId("");
+    }
   }
   async function remove(m: ProjectMember) {
-    await projectsApi.removeMember(id, m.user_id);
-    await load();
+    Modal.confirm({
+      title: `移除成员「${m.name || m.username}」？`,
+      content: "移除后该用户将失去当前项目权限。",
+      okText: "移除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        setError("");
+        setActingUserId(m.user_id);
+        try {
+          await projectsApi.removeMember(id, m.user_id);
+          await load();
+        } catch (e) {
+          setError(e instanceof Error ? e.message : "移除失败");
+        } finally {
+          setActingUserId("");
+        }
+      },
+    });
   }
   return (
     <>
@@ -124,7 +155,12 @@ export default function SettingsMembersPage() {
                 options={roleOptions}
               />
             </Form.Item>
-            <Button type="primary" disabled={!username.trim()} onClick={invite}>
+            <Button
+              type="primary"
+              loading={inviting}
+              disabled={!username.trim()}
+              onClick={invite}
+            >
               邀请
             </Button>
           </Space>
@@ -158,6 +194,7 @@ export default function SettingsMembersPage() {
               <Select
                 value={row.role}
                 onChange={(r) => changeRole(row, r)}
+                loading={actingUserId === row.user_id}
                 style={{ minWidth: 140 }}
                 options={projectsApi.memberRoleOptions.map((r) => ({
                   value: r.value,
@@ -180,7 +217,12 @@ export default function SettingsMembersPage() {
           <Table.Column
             title="操作"
             render={(_, row: ProjectMember) => (
-              <Button type="link" danger onClick={() => remove(row)}>
+              <Button
+                type="link"
+                danger
+                loading={actingUserId === row.user_id}
+                onClick={() => remove(row)}
+              >
                 移除
               </Button>
             )}

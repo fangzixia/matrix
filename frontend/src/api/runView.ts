@@ -19,6 +19,10 @@ export interface RunViewStreamHandlers {
   onDisconnect?: () => void;
 }
 
+export interface RunViewStreamOptions {
+  afterSeq?: number;
+}
+
 /** 获取 Run 活动视图快照。 */
 export async function getRunView(projectId: string, runId: string) {
   const res = await api<RunViewResponse>(
@@ -47,8 +51,13 @@ export function subscribeRunViewStream(
   runId: string,
   mode: StreamMode,
   handlers: RunViewStreamHandlers,
+  options: RunViewStreamOptions = {},
 ): () => void {
-  const url = `/api/projects/${projectId}/runs/${runId}/stream?mode=${mode}`;
+  const params = new URLSearchParams({ mode });
+  if (options.afterSeq && options.afterSeq > 0) {
+    params.set("afterSeq", String(options.afterSeq));
+  }
+  const url = `/api/projects/${projectId}/runs/${runId}/stream?${params.toString()}`;
   runDebug("sse.connect", { runId, projectId, mode, url });
   const es = new EventSource(url, { withCredentials: true });
 

@@ -1,6 +1,7 @@
 package view
 
 import (
+	"context"
 	"matrix/internal/ai/stream"
 	"testing"
 )
@@ -119,6 +120,9 @@ func TestProjectorToolLifecycle(t *testing.T) {
 	if p.state.Turns[0].Tools[0].Status != "success" {
 		t.Fatalf("status = %s", p.state.Turns[0].Tools[0].Status)
 	}
+	if p.state.Turns[0].Tools[0].LogURL == "" {
+		t.Fatal("expected tool log URL in snapshot")
+	}
 }
 
 func TestProjectorToolOutputDelta(t *testing.T) {
@@ -147,6 +151,40 @@ func TestProjectorReconcilesProvisionalToolID(t *testing.T) {
 	}
 	if tools[0].Status != "success" {
 		t.Fatalf("status = %q", tools[0].Status)
+	}
+}
+
+func TestProjectorCompletesStreamedToolAfterTurnAdvances(t *testing.T) {
+	p := NewProjector("run-1", "proj-1")
+	p.ensureCoordinatorTurn(1, "")
+	p.Apply(msgToolStarted("parent-agent", "agent"))
+	p.parse.workerParentToolID["agent-w"] = "parent-agent"
+
+	tag := func(msg stream.Message) stream.Message {
+		return stream.WithAgent(msg, "agent-w", "", "parent-agent")
+	}
+
+	p.Apply(tag(stream.TurnProgress("run-1", 1, "next_turn", "")))
+	p.Apply(tag(msgToolStarted("call_grep", "grep")))
+	p.Apply(tag(stream.ToolOutputDelta("run-1", "call_grep", "grep", "match line\n", 12)))
+
+	// activeTurn 已切到第 2 轮，但完成事件应回写第 1 轮中的 grep
+	p.Apply(tag(stream.TurnProgress("run-1", 2, "next_turn", "")))
+	p.Apply(tag(msgToolFinished("call_grep", "grep", "completed")))
+
+	agentTool := p.state.Turns[0].Tools[0]
+	if len(agentTool.WorkerTurns) < 1 {
+		t.Fatal("expected worker turn 1")
+	}
+	grep := agentTool.WorkerTurns[0].Tools[0]
+	if grep.Status != "success" {
+		t.Fatalf("status = %q", grep.Status)
+	}
+	if grep.OutputStreaming {
+		t.Fatal("outputStreaming should be false after completed")
+	}
+	if grep.LiveOutput == "" {
+		t.Fatal("expected streamed output preserved")
 	}
 }
 
@@ -179,6 +217,35 @@ func TestProjectorWorkerToolNotOnCoordinatorTurn(t *testing.T) {
 	}
 	if agentTool.WorkerTurns[0].Tools[0].Status != "success" {
 		t.Fatalf("worker tool status = %q", agentTool.WorkerTurns[0].Tools[0].Status)
+	}
+}
+
+func TestProjectorWorkerToolBeforeParentAgentProjected(t *testing.T) {
+	p := NewProjector("run-1", "proj-1")
+	p.ensureCoordinatorTurn(1, "")
+	p.parse.workerParentToolID["agent-worker"] = "parent-agent"
+	p.parse.parentToolCoordinatorTurn["parent-agent"] = 1
+
+	workerStarted := stream.WithAgent(
+		stream.ToolStarted("run-1", "call_w1", "grep", `{"pattern":"foo"}`),
+		"agent-worker", "", "parent-agent",
+	)
+	p.Apply(workerStarted)
+	p.Apply(stream.WithAgent(
+		stream.ToolFinished("run-1", "call_w1", "grep", "completed", 10, "matches"),
+		"agent-worker", "", "parent-agent",
+	))
+
+	if len(p.state.Turns[0].Tools) != 1 {
+		t.Fatalf("expected placeholder agent tool, got %d tools", len(p.state.Turns[0].Tools))
+	}
+	agentTool := p.state.Turns[0].Tools[0]
+	if agentTool.ToolCallID != "parent-agent" {
+		t.Fatalf("agent tool id = %q", agentTool.ToolCallID)
+	}
+	if len(agentTool.WorkerTurns) != 1 || len(agentTool.WorkerTurns[0].Tools) != 1 {
+		t.Fatalf("worker tools missing: turns=%d tools=%d",
+			len(agentTool.WorkerTurns), len(agentTool.WorkerTurns[0].Tools))
 	}
 }
 
@@ -238,6 +305,34 @@ func TestHubSeqMonotonic(t *testing.T) {
 	e2 := s.withSeq("r1", Envelope{Type: EventTEXTMessageContent})
 	if e1.Seq != 1 || e2.Seq != 2 {
 		t.Fatalf("seq %d %d", e1.Seq, e2.Seq)
+	}
+}
+
+func TestStoreApplyAdvancesSnapshotSeq(t *testing.T) {
+	s := NewStore(nil)
+	ctx := context.Background()
+	if err := s.BeginRun(ctx, "run-1", "proj-1", "chat", "chat"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.apply(ctx, "run-1", "proj-1", msgProgress(1, "第 1 轮")); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.Snapshot(ctx, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == nil || first.Seq != 2 {
+		t.Fatalf("expected seq 2 after first apply, got %+v", first)
+	}
+	if err := s.apply(ctx, "run-1", "proj-1", msgTextDelta("hello")); err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.Snapshot(ctx, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second == nil || second.Seq != 3 {
+		t.Fatalf("expected seq 3 after second apply, got %+v", second)
 	}
 }
 

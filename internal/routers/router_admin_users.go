@@ -76,7 +76,10 @@ func adminGetUser(c *gin.Context, d *app.Deps) {
 
 // adminUpdateUser 处理管理员 UpdateUser 请求。
 func adminUpdateUser(c *gin.Context, d *app.Deps) {
-	id, _ := uuid.Parse(c.Param("uid"))
+	id, ok := paramUUID(c, "uid")
+	if !ok {
+		return
+	}
 	var in identity.UpdateUserInput
 	if c.BindJSON(&in) != nil {
 		platformhttp.JSONError(c, 400, "bad_request", "无效请求")
@@ -92,7 +95,10 @@ func adminUpdateUser(c *gin.Context, d *app.Deps) {
 
 // adminDeleteUser 处理管理员 DeleteUser 请求。
 func adminDeleteUser(c *gin.Context, d *app.Deps) {
-	id, _ := uuid.Parse(c.Param("uid"))
+	id, ok := paramUUID(c, "uid")
+	if !ok {
+		return
+	}
 	if err := d.Users.Delete(c.Request.Context(), id); err != nil {
 		platformhttp.JSONError(c, 500, "internal", err.Error())
 		return

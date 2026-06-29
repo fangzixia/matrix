@@ -1,7 +1,7 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { ApiOutlined, RobotOutlined, ToolOutlined } from "@ant-design/icons";
-import { Collapse, Empty, Space, Tag, Typography } from "antd";
+import { Button, Collapse, Empty, Space, Tag, Typography } from "antd";
 import {
   Bubble,
   CodeHighlighter,
@@ -17,12 +17,14 @@ import type {
   TurnView,
 } from "@/types/runView";
 import { formatAgentProgress, formatTurnLabel } from "@/utils/agentProgress";
+import { getToolLog } from "@/api/runView";
 
 export interface RunActivityPanelProps {
   state: RunViewState;
   running?: boolean;
   /** 紧凑模式：仅展示最后一轮与当前工具链。 */
   compact?: boolean;
+  projectId?: string;
 }
 
 function formatToolMessage(message?: string): {
@@ -47,6 +49,8 @@ function renderTurnBody(
   turn: TurnView,
   isLatest: boolean,
   running?: boolean,
+  projectId?: string,
+  runId?: string,
 ) {
   const streaming = running && isLatest;
   const tools = turn.tools ?? [];
@@ -70,7 +74,9 @@ function renderTurnBody(
       {tools.length > 0 ? (
         <ThoughtChain
           line
-          items={tools.map((tool) => toolToChainItem(tool, streaming))}
+          items={tools.map((tool) =>
+            toolToChainItem(tool, streaming, projectId, runId),
+          )}
         />
       ) : null}
       {turn.message ? (
@@ -85,26 +91,109 @@ function renderTurnBody(
   );
 }
 
-function workerTurnsToChainItems(turns: TurnView[]): ThoughtChainItemType[] {
+function workerTurnStatus(turn: TurnView): ThoughtChainItemType["status"] {
+  const tools = turn.tools ?? [];
+  if (tools.some((t) => t.status === "loading")) return "loading";
+  if (tools.some((t) => t.status === "error")) return "error";
+  return "success";
+}
+
+function workerTurnsToChainItems(
+  turns: TurnView[],
+  running?: boolean,
+  projectId?: string,
+  runId?: string,
+): ThoughtChainItemType[] {
   return turns.map((wt) => ({
     key: wt.key,
     title: formatTurnLabel(wt.turn, wt.summary) || `子 Agent 第 ${wt.turn} 轮`,
     icon: <RobotOutlined />,
-    status: "success" as const,
+    status: workerTurnStatus(wt),
+    blink: running && workerTurnStatus(wt) === "loading",
     collapsible: true,
-    content: renderTurnBody(wt, false, false),
+    content: renderTurnBody(wt, false, running, projectId, runId),
   }));
+}
+
+function ToolOutputBlock({
+  tool,
+  lang,
+  content,
+  isStreaming,
+  projectId,
+  runId,
+}: {
+  tool: ToolView;
+  lang: string;
+  content: string;
+  isStreaming: boolean;
+  projectId?: string;
+  runId?: string;
+}) {
+  const [fullLog, setFullLog] = useState("");
+  const [loadingLog, setLoadingLog] = useState(false);
+  const [logError, setLogError] = useState("");
+  const canLoadLog = Boolean(projectId && runId && tool.logUrl);
+  const shown = fullLog || content;
+
+  async function loadFullLog() {
+    if (!projectId || !runId || loadingLog) return;
+    setLoadingLog(true);
+    setLogError("");
+    try {
+      const res = await getToolLog(projectId, runId, tool.toolCallId);
+      setFullLog(res.content);
+    } catch (e) {
+      setLogError(e instanceof Error ? e.message : "日志加载失败");
+    } finally {
+      setLoadingLog(false);
+    }
+  }
+
+  return (
+    <Space direction="vertical" size={4} style={{ width: "100%" }}>
+      <div style={{ maxHeight: 320, overflow: "auto" }}>
+        <CodeHighlighter lang={lang} header={false}>
+          {shown}
+        </CodeHighlighter>
+      </div>
+      {isStreaming ? (
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          输出流式更新中…
+        </Typography.Text>
+      ) : null}
+      {canLoadLog ? (
+        <Button
+          type="link"
+          size="small"
+          loading={loadingLog}
+          onClick={loadFullLog}
+          style={{ paddingInline: 0 }}
+        >
+          {fullLog ? "已加载完整日志" : "查看完整日志"}
+        </Button>
+      ) : null}
+      {logError ? (
+        <Typography.Text type="danger" style={{ fontSize: 12 }}>
+          {logError}
+        </Typography.Text>
+      ) : null}
+    </Space>
+  );
 }
 
 function toolToChainItem(
   tool: ToolView,
   running?: boolean,
+  projectId?: string,
+  runId?: string,
 ): ThoughtChainItemType {
   const displayText = tool.liveOutput || tool.preview;
   const { lang, content } = formatToolMessage(displayText);
   const isStreaming =
     running && tool.status === "loading" && Boolean(tool.outputStreaming);
   const hasWorkers = (tool.workerTurns?.length ?? 0) > 0;
+  const isAgentTool = tool.toolCallName === "agent";
   let itemContent: ReactNode = null;
   if (hasWorkers) {
     itemContent = (
@@ -115,21 +204,33 @@ function toolToChainItem(
           borderLeft: "2px solid rgba(0,0,0,0.06)",
         }}
       >
-        <ThoughtChain line items={workerTurnsToChainItems(tool.workerTurns!)} />
+        <ThoughtChain
+          line
+          items={workerTurnsToChainItems(
+            tool.workerTurns!,
+            running,
+            projectId,
+            runId,
+          )}
+        />
       </div>
     );
   } else if (content) {
     itemContent = (
-      <>
-        <CodeHighlighter lang={lang} header={false}>
-          {content}
-        </CodeHighlighter>
-        {isStreaming ? (
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            输出流式更新中…
-          </Typography.Text>
-        ) : null}
-      </>
+      <ToolOutputBlock
+        tool={tool}
+        lang={lang}
+        content={content}
+        isStreaming={Boolean(isStreaming)}
+        projectId={projectId}
+        runId={runId}
+      />
+    );
+  } else if (isAgentTool && tool.status === "loading" && !hasWorkers) {
+    itemContent = (
+      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+        子 Agent 启动中…
+      </Typography.Text>
     );
   }
   const footer = tool.elapsedMs != null ? `${tool.elapsedMs} ms` : undefined;
@@ -152,7 +253,7 @@ function toolToChainItem(
             ? ("abort" as const)
             : ("success" as const),
     blink: running && tool.status === "loading",
-    collapsible: Boolean(itemContent) || isStreaming,
+    collapsible: Boolean(itemContent) || isStreaming || isAgentTool,
     description,
     content: itemContent ?? undefined,
     footer,
@@ -163,6 +264,94 @@ function subagentProgressLine(snap: SubagentView): string {
   const line = formatAgentProgress(snap.progress, snap.status);
   if (line) return line;
   return snap.description || snap.id;
+}
+
+function findParentAgentTool(
+  turns: TurnView[],
+  parentToolUseId?: string,
+): ToolView | undefined {
+  if (!parentToolUseId) return undefined;
+  for (const turn of turns) {
+    for (const tool of turn.tools ?? []) {
+      if (tool.toolCallId === parentToolUseId) return tool;
+    }
+  }
+  return undefined;
+}
+
+function turnHasActiveTools(turn: TurnView): boolean {
+  const visit = (tools: ToolView[]): boolean =>
+    tools.some(
+      (tool) =>
+        tool.status === "loading" ||
+        (tool.workerTurns ?? []).some((wt) =>
+          (wt.tools ?? []).some((inner) => inner.status === "loading"),
+        ),
+    );
+  return visit(turn.tools ?? []);
+}
+
+function selectCompactTurns(
+  turns: TurnView[],
+  subagents: Record<string, SubagentView> | undefined,
+): TurnView[] {
+  if (!turns.length) return turns;
+  const keys = new Set<string>();
+  const picked: TurnView[] = [];
+  const push = (turn: TurnView) => {
+    if (!keys.has(turn.key)) {
+      keys.add(turn.key);
+      picked.push(turn);
+    }
+  };
+  push(turns[turns.length - 1]!);
+  for (const snap of Object.values(subagents ?? {})) {
+    if (!snap.parent_tool_use_id) continue;
+    for (const turn of turns) {
+      if (
+        (turn.tools ?? []).some(
+          (tool) => tool.toolCallId === snap.parent_tool_use_id,
+        )
+      ) {
+        push(turn);
+      }
+    }
+  }
+  for (const turn of turns) {
+    if (turnHasActiveTools(turn)) push(turn);
+  }
+  return picked.sort((a, b) => a.turn - b.turn);
+}
+
+function subagentToChainItem(
+  snap: SubagentView,
+  turns: TurnView[],
+  running?: boolean,
+  projectId?: string,
+  runId?: string,
+): ThoughtChainItemType {
+  const parentTool = findParentAgentTool(turns, snap.parent_tool_use_id);
+  const workerItems =
+    parentTool?.workerTurns && parentTool.workerTurns.length > 0
+      ? workerTurnsToChainItems(parentTool.workerTurns, running, projectId, runId)
+      : undefined;
+  return {
+    key: snap.id,
+    title: snap.description || `子 Agent ${snap.id.slice(0, 8)}`,
+    icon: <RobotOutlined />,
+    status:
+      snap.status === "running"
+        ? ("loading" as const)
+        : snap.status === "failed"
+          ? ("error" as const)
+          : ("success" as const),
+    description: subagentProgressLine(snap),
+    blink: running && snap.status === "running",
+    collapsible: Boolean(workerItems?.length),
+    content: workerItems ? (
+      <ThoughtChain line items={workerItems} />
+    ) : undefined,
+  };
 }
 
 function turnHeader(turn: TurnView) {
@@ -180,19 +369,46 @@ export default function RunActivityPanel({
   state,
   running,
   compact,
+  projectId,
 }: RunActivityPanelProps) {
   const { turns, result, subagents } = state;
-  const visibleTurns = compact && turns.length ? [turns[turns.length - 1]!] : turns;
+  const visibleTurns = useMemo(
+    () => (compact ? selectCompactTurns(turns, subagents) : turns),
+    [compact, turns, subagents],
+  );
   const latestKey = visibleTurns.at(-1)?.key;
-  const subagentList = Object.values(subagents ?? {});
+  const subagentList = useMemo(
+    () =>
+      Object.values(subagents ?? {}).sort(
+        (a, b) => (a.created_at ?? 0) - (b.created_at ?? 0),
+      ),
+    [subagents],
+  );
+  const [activeKeys, setActiveKeys] = useState<string[]>([]);
+  useEffect(() => {
+    if (latestKey) setActiveKeys([latestKey]);
+  }, [latestKey]);
   const collapseItems = useMemo(
     () =>
       visibleTurns.map((turn) => ({
         key: turn.key,
         label: turnHeader(turn),
-        children: renderTurnBody(turn, turn.key === latestKey, running),
+        children: renderTurnBody(
+          turn,
+          turn.key === latestKey,
+          running,
+          projectId,
+          state.runId,
+        ),
       })),
-    [visibleTurns, latestKey, running],
+    [visibleTurns, latestKey, running, projectId, state.runId],
+  );
+  const subagentItems = useMemo(
+    () =>
+      subagentList.map((snap) =>
+        subagentToChainItem(snap, turns, running, projectId, state.runId),
+      ),
+    [subagentList, turns, running, projectId, state.runId],
   );
   if (!visibleTurns.length && !result?.output && !subagentList.length) {
     if (running) {
@@ -212,28 +428,21 @@ export default function RunActivityPanel({
     );
   }
   return (
-    <>
+    <div aria-live="polite">
       {subagentList.length > 0 ? (
         <ThoughtChain
           line
           style={{ marginBottom: 12 }}
-          items={subagentList.map((snap) => ({
-            key: snap.id,
-            title: snap.description || `子 Agent ${snap.id.slice(0, 8)}`,
-            icon: <RobotOutlined />,
-            status:
-              snap.status === "running"
-                ? ("loading" as const)
-                : ("success" as const),
-            description: subagentProgressLine(snap),
-            blink: running && snap.status === "running",
-          }))}
+          items={subagentItems}
         />
       ) : null}
       {collapseItems.length > 0 ? (
         <Collapse
           items={collapseItems}
-          defaultActiveKey={latestKey ? [latestKey] : []}
+          activeKey={activeKeys}
+          onChange={(keys) =>
+            setActiveKeys(Array.isArray(keys) ? keys.map(String) : [String(keys)])
+          }
         />
       ) : null}
       {result?.output &&
@@ -242,6 +451,6 @@ export default function RunActivityPanel({
           <Bubble role="ai" content={result.output} />
         </div>
       ) : null}
-    </>
+    </div>
   );
 }

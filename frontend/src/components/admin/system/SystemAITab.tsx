@@ -155,7 +155,7 @@ export default function SystemAITab() {
                 />
               </Form.Item>
               <Form.Item label="API Key">
-                <Input
+                <Input.Password
                   value={row.api_key}
                   onChange={(e) => {
                     const models = [...form.models];

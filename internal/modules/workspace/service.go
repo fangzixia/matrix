@@ -7,6 +7,7 @@ import (
 	"matrix/internal/modules/repository"
 	"matrix/internal/platform/config"
 	"matrix/internal/platform/gitutil"
+	"matrix/internal/platform/pathutil"
 	"matrix/internal/platform/storage"
 	"os"
 	"os/exec"
@@ -61,12 +62,9 @@ func (s *Service) NamedRepoRoot(projectID uuid.UUID, repoName string) (string, e
 // SandboxRoot 解析 Run/API 使用的沙箱根目录（支持多仓 repository_id）。
 func (s *Service) SandboxRoot(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID) (string, error) {
 	if repositoryID != nil && s.repos != nil {
-		r, err := s.repos.Get(ctx, *repositoryID)
+		r, err := s.repos.GetForProject(ctx, projectID, *repositoryID)
 		if err != nil {
 			return "", err
-		}
-		if r.ProjectID != projectID {
-			return "", fmt.Errorf("repository does not belong to project")
 		}
 		return s.namedRepoRoot(ctx, projectID, r.Name)
 	}
@@ -174,7 +172,7 @@ func (s *Service) PullByID(ctx context.Context, projectID, repoID uuid.UUID) err
 	if s.repos == nil {
 		return s.Pull(ctx, projectID)
 	}
-	r, err := s.repos.Get(ctx, repoID)
+	r, err := s.repos.GetForProject(ctx, projectID, repoID)
 	if err != nil {
 		return err
 	}
@@ -222,7 +220,7 @@ func (s *Service) PushByID(ctx context.Context, projectID, repoID uuid.UUID, mes
 	if s.repos == nil {
 		return s.Push(ctx, projectID, message)
 	}
-	r, err := s.repos.Get(ctx, repoID)
+	r, err := s.repos.GetForProject(ctx, projectID, repoID)
 	if err != nil {
 		return err
 	}
@@ -316,7 +314,7 @@ func (s *Service) resolveFor(projectID uuid.UUID, repoName, rel string) (string,
 		return root, nil
 	}
 	full := filepath.Clean(filepath.Join(root, rel))
-	if !strings.HasPrefix(full, filepath.Clean(root)) {
+	if !pathutil.WithinRoot(full, filepath.Clean(root)) {
 		return "", fmt.Errorf("path escapes workspace")
 	}
 	return full, nil

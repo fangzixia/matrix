@@ -68,6 +68,7 @@ export function useRunViewStream() {
       let state: RunViewState | null = null;
       let lastFull = "";
       const seenKeys = new Set<string>();
+      let lastSeq = 0;
       let terminalReceived = false;
 
       function resolveTerminal(payload: RunFinishedState, source: string) {
@@ -88,6 +89,7 @@ export function useRunViewStream() {
         const key = envelopeKey(env);
         if (seenKeys.has(key)) return;
         seenKeys.add(key);
+        if (env.seq > lastSeq) lastSeq = env.seq;
         runDebug("stream.envelope", {
           runId: taskId,
           type: env.type,
@@ -166,6 +168,7 @@ export function useRunViewStream() {
         taskId,
         mode,
         handlers,
+        { afterSeq: lastSeq },
       );
       pollTimerRef.current = window.setInterval(() => {
         void pollTerminal();

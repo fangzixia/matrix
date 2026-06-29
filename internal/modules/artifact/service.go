@@ -3,6 +3,7 @@ package artifact
 
 import (
 	"context"
+	"matrix/internal/modules/docmeta"
 	"matrix/internal/modules/workspace"
 	"matrix/internal/platform/db/models"
 	"os"
@@ -61,7 +62,7 @@ func (s *Service) ListEvaluations(ctx context.Context, projectID uuid.UUID, repo
 		b, _ := os.ReadFile(full)
 		out = append(out, Item{
 			Kind: "evaluation", Path: rel,
-			Title:   titleOrFromContent(title, string(b)),
+			Title:   docmeta.TitleOrFallback(title, string(b)),
 			Content: string(b),
 		})
 	}
@@ -103,7 +104,7 @@ func (s *Service) ListEvaluations(ctx context.Context, projectID uuid.UUID, repo
 			if b, err := os.ReadFile(full); err == nil {
 				item.Content = string(b)
 				if item.Title == "" || item.Title == rel {
-					item.Title = titleOrFromContent(filepath.Base(rel), item.Content)
+					item.Title = docmeta.TitleOrFallback(filepath.Base(rel), item.Content)
 				}
 			}
 		}
@@ -134,7 +135,7 @@ func (s *Service) upsert(ctx context.Context, projectID uuid.UUID, repositoryID 
 	title := filepath.Base(evalPath)
 	if full, err := s.ws.ResolveDocPath(projectID, evalPath); err == nil {
 		if b, err := os.ReadFile(full); err == nil {
-			title = titleOrFromContent(title, string(b))
+			title = docmeta.TitleOrFallback(title, string(b))
 		}
 	}
 	var existing models.Artifact
@@ -186,15 +187,4 @@ func findLatestEvalFile(docsRoot string) string {
 		}
 	}
 	return best
-}
-
-// titleOrFromContent 从内容提取标题或使用文件名。
-func titleOrFromContent(fallback, content string) string {
-	for _, line := range strings.Split(content, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "# ") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "# "))
-		}
-	}
-	return fallback
 }

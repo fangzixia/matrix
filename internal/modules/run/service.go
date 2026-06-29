@@ -30,6 +30,11 @@ type JobEnqueuer interface {
 	Enqueue(ctx context.Context, runID uuid.UUID) error
 }
 
+// TxJobEnqueuer 支持在 Run 创建事务内入队，避免 Run 与 Job 状态不一致。
+type TxJobEnqueuer interface {
+	EnqueueTx(ctx context.Context, tx *gorm.DB, runID uuid.UUID) error
+}
+
 // RunNotifier 在 Run 状态变更时向用户发送通知。
 type RunNotifier interface {
 	NotifyRunStatus(ctx context.Context, userID uuid.UUID, projectID, runID uuid.UUID, runKind, status, title string)
@@ -200,13 +205,21 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID, kind string) ([
 	return out, nil
 }
 
-// Get 执行对应操作。
-func (s *Service) Get(ctx context.Context, id uuid.UUID) (*RunDTO, error) {
-	var m models.Run
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
+// GetForProject 返回项目内指定 Run，避免只按 run_id 访问跨项目资源。
+func (s *Service) GetForProject(ctx context.Context, projectID, id uuid.UUID) (*RunDTO, error) {
+	m, err := s.loadProjectRun(ctx, projectID, id)
+	if err != nil {
 		return nil, err
 	}
-	return new(toRunDTO(&m)), nil
+	return new(toRunDTO(m)), nil
+}
+
+func (s *Service) loadProjectRun(ctx context.Context, projectID, runID uuid.UUID) (*models.Run, error) {
+	var m models.Run
+	if err := s.db.WithContext(ctx).Where("id = ? AND project_id = ?", runID, projectID).First(&m).Error; err != nil {
+		return nil, err
+	}
+	return &m, nil
 }
 
 // Start 启动 Run。
@@ -279,29 +292,37 @@ func (s *Service) Start(ctx context.Context, projectID, userID uuid.UUID, in Sta
 		AuditPath:     storage.RunAuditFile(s.paths, projectCode, runID.String()),
 		ChatSessionID: in.ChatSessionID, ChatUserMessageID: in.ChatUserMessageID,
 	}
-	q := s.db.WithContext(ctx)
-	if err := q.Create(&m).Error; err != nil {
-		return nil, err
-	}
-	if kind == "pipeline" && s.pipeline != nil {
-		stages := s.pipeline.ResolveStages(in.Stages)
-		for i, stageKind := range stages {
-			step := models.RunStep{
-				RunID: runID, Kind: stageKind, Sequence: i + 1, Status: "pending",
-			}
-			if err := s.db.WithContext(ctx).Create(&step).Error; err != nil {
-				return nil, err
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&m).Error; err != nil {
+			return err
+		}
+		if kind == "pipeline" && s.pipeline != nil {
+			stages := s.pipeline.ResolveStages(in.Stages)
+			for i, stageKind := range stages {
+				step := models.RunStep{
+					RunID: runID, Kind: stageKind, Sequence: i + 1, Status: "pending",
+				}
+				if err := tx.Create(&step).Error; err != nil {
+					return err
+				}
 			}
 		}
+		if !in.Sync && s.jobs != nil {
+			txJobs, ok := s.jobs.(TxJobEnqueuer)
+			if !ok {
+				return errors.New("job enqueuer does not support transactional enqueue")
+			}
+			return txJobs.EnqueueTx(ctx, tx, runID)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	execCtx := s.runCtx()
 	if in.Sync {
 		logging.Agent("run: 同步派发", "run_id", runID, "kind", kind)
 		go func() { _ = s.ExecuteRun(execCtx, runID) }()
 	} else if s.jobs != nil {
-		if err := s.jobs.Enqueue(ctx, runID); err != nil {
-			return nil, err
-		}
 		logging.Agent("run: 已入队等待执行",
 			"run_id", runID, "kind", kind,
 			"chat_session_id", in.ChatSessionID,
@@ -335,49 +356,57 @@ func mcpConfigsToPorts(servers map[string]config.MCPServerConfig, allowCommandMC
 	return out
 }
 
-// Cancel 取消进行中的 Run。
-func (s *Service) Cancel(ctx context.Context, runID uuid.UUID) error {
-	var m models.Run
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", runID).Error; err != nil {
+// CancelForProject 取消项目内指定 Run。
+func (s *Service) CancelForProject(ctx context.Context, projectID, runID uuid.UUID) error {
+	m, err := s.loadProjectRun(ctx, projectID, runID)
+	if err != nil {
 		return err
 	}
-	_ = s.runtime.Cancel(runID.String())
+	return s.cancelRunModel(ctx, m)
+}
+
+func (s *Service) cancelRunModel(ctx context.Context, m *models.Run) error {
+	_ = s.runtime.Cancel(m.ID.String())
 	fin := time.Now()
-	if err := s.db.WithContext(ctx).Model(&m).Updates(map[string]any{"status": "cancelled", "finished_at": fin}).Error; err != nil {
+	if err := s.db.WithContext(ctx).Model(m).Updates(map[string]any{"status": "cancelled", "finished_at": fin}).Error; err != nil {
 		return err
 	}
-	return s.finishRunView(ctx, runID, "cancelled", "", "任务已取消", "")
+	return s.finishRunView(ctx, m.ID, "cancelled", "", "任务已取消", "")
 }
 
 // Hub 返回通知 SSE 事件 Hub（非 Run 视图流）。
 func (s *Service) Hub() *events.Hub { return s.hub }
 
-// StreamCatchUpSince 从 DB 读取 seq > afterSeq 的视图事件，供 SSE 轮询。
-func (s *Service) StreamCatchUpSince(
+// StreamCatchUpSinceForProject 从项目内 Run 读取视图事件。
+func (s *Service) StreamCatchUpSinceForProject(
 	ctx context.Context,
+	projectID uuid.UUID,
 	runID uuid.UUID,
 	mode view.Mode,
 	afterSeq int64,
 ) ([]view.Envelope, bool, int64, error) {
-	var m models.Run
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", runID).Error; err != nil {
+	m, err := s.loadProjectRun(ctx, projectID, runID)
+	if err != nil {
 		return nil, false, afterSeq, err
 	}
+	return s.catchUpRunView(ctx, m, mode, afterSeq)
+}
+
+func (s *Service) catchUpRunView(ctx context.Context, m *models.Run, mode view.Mode, afterSeq int64) ([]view.Envelope, bool, int64, error) {
 	userErr := ""
 	if m.ErrorMessage != "" {
 		userErr = view.FormatUserRunError(m.ErrorMessage)
 	}
 	envs, done, maxSeq := s.viewStore.CatchUpAfterSeq(
-		ctx, runID.String(), mode, afterSeq,
+		ctx, m.ID.String(), mode, afterSeq,
 		m.Status, m.Output, userErr, m.MergeStatus,
 	)
 	return envs, done, maxSeq, nil
 }
 
-// GetRunView 返回 Run 活动视图快照。
-func (s *Service) GetRunView(ctx context.Context, runID uuid.UUID) (*view.RunViewState, error) {
-	var m models.Run
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", runID).Error; err != nil {
+// GetRunViewForProject 返回项目内 Run 活动视图快照。
+func (s *Service) GetRunViewForProject(ctx context.Context, projectID, runID uuid.UUID) (*view.RunViewState, error) {
+	if _, err := s.loadProjectRun(ctx, projectID, runID); err != nil {
 		return nil, err
 	}
 	return s.viewStore.Snapshot(ctx, runID.String())
@@ -562,46 +591,62 @@ func toRunDTO(m *models.Run) RunDTO {
 	}
 }
 
-// MergeRun 将 Run worktree 合并到主仓库。
-func (s *Service) MergeRun(ctx context.Context, runID uuid.UUID) (*RunDTO, []string, error) {
-	var m models.Run
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", runID).Error; err != nil {
-		return nil, nil, err
-	}
+func (s *Service) mergeRunModel(ctx context.Context, m *models.Run) (*RunDTO, []string, error) {
 	if m.MergeStatus != "pending" {
 		return nil, nil, errors.New("当前 Run 不可合并")
 	}
-	conflicts, err := s.workspace.MergeRunWorktree(ctx, m.ProjectID, m.RepositoryID, runID, m.RunBranch, m.SandboxPath)
+	conflicts, err := s.workspace.MergeRunWorktree(ctx, m.ProjectID, m.RepositoryID, m.ID, m.RunBranch, m.SandboxPath)
 	if err != nil {
-		return new(toRunDTO(&m)), conflicts, err
+		return new(toRunDTO(m)), conflicts, err
 	}
-	_ = s.workspace.RemoveRunWorktree(ctx, m.ProjectID, m.RepositoryID, runID, m.RunBranch, m.SandboxPath)
-	_ = s.db.WithContext(ctx).Model(&m).Updates(map[string]any{
+	if err := s.workspace.RemoveRunWorktree(ctx, m.ProjectID, m.RepositoryID, m.ID, m.RunBranch, m.SandboxPath); err != nil {
+		return new(toRunDTO(m)), nil, err
+	}
+	if err := s.db.WithContext(ctx).Model(m).Updates(map[string]any{
 		"merge_status": "merged", "sandbox_path": "", "run_branch": "",
-	}).Error
+	}).Error; err != nil {
+		return nil, nil, err
+	}
 	m.MergeStatus = "merged"
 	m.SandboxPath = ""
 	m.RunBranch = ""
-	return new(toRunDTO(&m)), nil, nil
+	return new(toRunDTO(m)), nil, nil
 }
 
-// DiscardRun 放弃 Run worktree 变更。
-func (s *Service) DiscardRun(ctx context.Context, runID uuid.UUID) (*RunDTO, error) {
-	var m models.Run
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", runID).Error; err != nil {
-		return nil, err
+// MergeRunForProject 将项目内 Run worktree 合并到主仓库。
+func (s *Service) MergeRunForProject(ctx context.Context, projectID, runID uuid.UUID) (*RunDTO, []string, error) {
+	m, err := s.loadProjectRun(ctx, projectID, runID)
+	if err != nil {
+		return nil, nil, err
 	}
+	return s.mergeRunModel(ctx, m)
+}
+
+func (s *Service) discardRunModel(ctx context.Context, m *models.Run) (*RunDTO, error) {
 	if m.MergeStatus != "pending" {
 		return nil, errors.New("当前 Run 不可放弃")
 	}
 	if m.SandboxPath != "" {
-		_ = s.workspace.RemoveRunWorktree(ctx, m.ProjectID, m.RepositoryID, runID, m.RunBranch, m.SandboxPath)
+		if err := s.workspace.RemoveRunWorktree(ctx, m.ProjectID, m.RepositoryID, m.ID, m.RunBranch, m.SandboxPath); err != nil {
+			return nil, err
+		}
 	}
-	_ = s.db.WithContext(ctx).Model(&m).Updates(map[string]any{
+	if err := s.db.WithContext(ctx).Model(m).Updates(map[string]any{
 		"merge_status": "discarded", "sandbox_path": "", "run_branch": "",
-	}).Error
+	}).Error; err != nil {
+		return nil, err
+	}
 	m.MergeStatus = "discarded"
 	m.SandboxPath = ""
 	m.RunBranch = ""
-	return new(toRunDTO(&m)), nil
+	return new(toRunDTO(m)), nil
+}
+
+// DiscardRunForProject 放弃项目内 Run worktree 变更。
+func (s *Service) DiscardRunForProject(ctx context.Context, projectID, runID uuid.UUID) (*RunDTO, error) {
+	m, err := s.loadProjectRun(ctx, projectID, runID)
+	if err != nil {
+		return nil, err
+	}
+	return s.discardRunModel(ctx, m)
 }

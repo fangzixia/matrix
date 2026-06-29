@@ -6,7 +6,7 @@ const stageKindSet = new Set<string>(STAGE_KINDS);
 
 const worktreeKindSet = new Set<string>(["implement", "build"]);
 
-export function usesWorktreeKind(kind: string): boolean {
+function usesWorktreeKind(kind: string): boolean {
   return worktreeKindSet.has(kind);
 }
 

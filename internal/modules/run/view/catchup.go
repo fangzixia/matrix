@@ -35,6 +35,10 @@ func (s *Store) CatchUpAfterSeq(
 	}
 
 	if terminal {
+		userErr := errMsg
+		if userErr != "" {
+			userErr = FormatUserRunError(userErr)
+		}
 		finSeq := int64(2)
 		if snap != nil {
 			finSeq = snap.Seq + 1
@@ -46,7 +50,7 @@ func (s *Store) CatchUpAfterSeq(
 				Seq:       finSeq,
 				Timestamp: now,
 				Payload: RunFinishedPayload{
-					Status: status, Output: output, Error: errMsg, MergeStatus: mergeStatus,
+					Status: status, Output: output, Error: userErr, MergeStatus: mergeStatus,
 				},
 			}
 			if allowedForMode(mode, finished.Type) {

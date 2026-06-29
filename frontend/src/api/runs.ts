@@ -1,7 +1,7 @@
 /**
  * Run / 任务 API（内部执行单元，UI 层称「任务」）。
  */
-import { api } from "./client";
+import { api, HttpError } from "./client";
 
 /** AI 任务执行记录 */
 export interface Run {
@@ -69,12 +69,6 @@ export function listRunSteps(projectId: string, runId: string) {
   );
 }
 
-export function getRunAudit(projectId: string, runId: string) {
-  return api<{ content: string }>(
-    `/api/projects/${projectId}/runs/${runId}/audit`,
-  );
-}
-
 export function cancelRun(projectId: string, runId: string) {
   return api<{ ok: boolean }>(
     `/api/projects/${projectId}/runs/${runId}/cancel`,
@@ -83,22 +77,21 @@ export function cancelRun(projectId: string, runId: string) {
 }
 
 export async function mergeRun(projectId: string, runId: string) {
-  const res = await fetch(`/api/projects/${projectId}/runs/${runId}/merge`, {
-    method: "POST",
-    credentials: "include",
-  });
-  const body = (await res.json().catch(() => ({}))) as Run & {
-    error?: string;
-    conflicts?: string[];
-  };
-  if (!res.ok) {
-    const err = new Error(body.error || "合并失败") as Error & {
-      conflicts?: string[];
-    };
-    err.conflicts = body.conflicts;
-    throw err;
+  try {
+    return await api<Run>(`/api/projects/${projectId}/runs/${runId}/merge`, {
+      method: "POST",
+    });
+  } catch (e) {
+    if (e instanceof HttpError) {
+      const details = e.details as { conflicts?: string[] } | undefined;
+      const err = new Error(e.message || "合并失败") as Error & {
+        conflicts?: string[];
+      };
+      err.conflicts = details?.conflicts;
+      throw err;
+    }
+    throw e;
   }
-  return body as Run;
 }
 
 export function discardRun(projectId: string, runId: string) {

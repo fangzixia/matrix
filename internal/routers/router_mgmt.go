@@ -67,7 +67,10 @@ func registerMgmtRoutes(api *gin.RouterGroup, d *app.Deps) {
 
 // groupID 从路由参数解析用户组 ID。
 func groupID(c *gin.Context) uuid.UUID {
-	id, _ := uuid.Parse(c.Param("gid"))
+	id, err := uuid.Parse(c.Param("gid"))
+	if err != nil {
+		return uuid.Nil
+	}
 	return id
 }
 
@@ -78,6 +81,11 @@ func requireGroup(c *gin.Context, d *app.Deps, min iam.Role) bool {
 		return false
 	}
 	gid := groupID(c)
+	if gid == uuid.Nil {
+		platformhttp.JSONError(c, 400, "bad_request", "无效的 ID")
+		c.Abort()
+		return false
+	}
 	allowed, err := d.IAM.CanAccessGroup(c.Request.Context(), u.ID, gid, min, u.IsAdmin)
 	if err != nil || !allowed {
 		platformhttp.JSONError(c, 403, "forbidden", "无权访问该组")
@@ -138,7 +146,9 @@ func updateGroup(c *gin.Context, d *app.Deps) {
 	var body struct {
 		Name *string `json:"name"`
 	}
-	_ = c.BindJSON(&body)
+	if !bindJSON(c, &body) {
+		return
+	}
 	if _, err := d.Groups.Update(c.Request.Context(), gid, body.Name); err != nil {
 		platformhttp.JSONError(c, 400, "bad_request", err.Error())
 		return
@@ -201,11 +211,16 @@ func updateGroupMember(c *gin.Context, d *app.Deps) {
 	if !requireGroup(c, d, iam.RoleMaintainer) {
 		return
 	}
-	uid, _ := uuid.Parse(c.Param("uid"))
+	uid, ok := paramUUID(c, "uid")
+	if !ok {
+		return
+	}
 	var body struct {
 		Role iam.Role `json:"role"`
 	}
-	_ = c.BindJSON(&body)
+	if !bindJSON(c, &body) {
+		return
+	}
 	if err := d.Groups.UpdateMember(c.Request.Context(), groupID(c), uid, body.Role); err != nil {
 		platformhttp.JSONError(c, 400, "bad_request", err.Error())
 		return
@@ -218,8 +233,14 @@ func removeGroupMember(c *gin.Context, d *app.Deps) {
 	if !requireGroup(c, d, iam.RoleMaintainer) {
 		return
 	}
-	uid, _ := uuid.Parse(c.Param("uid"))
-	_ = d.Groups.RemoveMember(c.Request.Context(), groupID(c), uid)
+	uid, ok := paramUUID(c, "uid")
+	if !ok {
+		return
+	}
+	if err := d.Groups.RemoveMember(c.Request.Context(), groupID(c), uid); err != nil {
+		platformhttp.JSONError(c, 400, "bad_request", err.Error())
+		return
+	}
 	c.JSON(200, gin.H{"ok": true})
 }
 
@@ -247,14 +268,22 @@ func createRepository(c *gin.Context, d *app.Deps) {
 		platformhttp.JSONError(c, 400, "bad_request", err.Error())
 		return
 	}
-	_ = d.Workspace.EnsureRepo(c.Request.Context(), pid, r.Name, r.GitURL, r.GitBranch)
+	if err := d.Workspace.EnsureRepo(c.Request.Context(), pid, r.Name, r.GitURL, r.GitBranch); err != nil {
+		_ = d.Repositories.DeleteForProject(c.Request.Context(), pid, r.ID)
+		platformhttp.JSONError(c, 500, "internal", err.Error())
+		return
+	}
 	c.JSON(201, r)
 }
 
 // deleteRepository 删除Repository。
 func deleteRepository(c *gin.Context, d *app.Deps) {
-	rid, _ := uuid.Parse(c.Param("rid"))
-	if err := d.Repositories.Delete(c.Request.Context(), rid); err != nil {
+	pid := auth.ProjectID(c)
+	rid, ok := paramUUID(c, "rid")
+	if !ok {
+		return
+	}
+	if err := d.Repositories.DeleteForProject(c.Request.Context(), pid, rid); err != nil {
 		platformhttp.JSONError(c, 400, "bad_request", err.Error())
 		return
 	}
@@ -264,7 +293,10 @@ func deleteRepository(c *gin.Context, d *app.Deps) {
 // pullRepository 拉取Repository。
 func pullRepository(c *gin.Context, d *app.Deps) {
 	pid := auth.ProjectID(c)
-	rid, _ := uuid.Parse(c.Param("rid"))
+	rid, ok := paramUUID(c, "rid")
+	if !ok {
+		return
+	}
 	if err := d.Workspace.PullByID(c.Request.Context(), pid, rid); err != nil {
 		platformhttp.JSONError(c, 500, "internal", err.Error())
 		return
@@ -275,11 +307,16 @@ func pullRepository(c *gin.Context, d *app.Deps) {
 // pushRepository 推送Repository。
 func pushRepository(c *gin.Context, d *app.Deps) {
 	pid := auth.ProjectID(c)
-	rid, _ := uuid.Parse(c.Param("rid"))
+	rid, ok := paramUUID(c, "rid")
+	if !ok {
+		return
+	}
 	var body struct {
 		Message string `json:"message"`
 	}
-	_ = c.BindJSON(&body)
+	if !bindJSON(c, &body) {
+		return
+	}
 	if err := d.Workspace.PushByID(c.Request.Context(), pid, rid, body.Message); err != nil {
 		platformhttp.JSONError(c, 500, "internal", err.Error())
 		return
@@ -289,8 +326,12 @@ func pushRepository(c *gin.Context, d *app.Deps) {
 
 // getRun 获取Run。
 func getRun(c *gin.Context, d *app.Deps) {
-	rid, _ := uuid.Parse(c.Param("runId"))
-	rn, err := d.Runs.Get(c.Request.Context(), rid)
+	pid := auth.ProjectID(c)
+	rid, ok := paramUUID(c, "runId")
+	if !ok {
+		return
+	}
+	rn, err := d.Runs.GetForProject(c.Request.Context(), pid, rid)
 	if err != nil {
 		platformhttp.JSONError(c, 404, "not_found", "运行不存在")
 		return
@@ -300,8 +341,12 @@ func getRun(c *gin.Context, d *app.Deps) {
 
 // listRunSteps 列出RunSteps。
 func listRunSteps(c *gin.Context, d *app.Deps) {
-	rid, _ := uuid.Parse(c.Param("runId"))
-	steps, err := d.Runs.ListSteps(c.Request.Context(), rid)
+	pid := auth.ProjectID(c)
+	rid, ok := paramUUID(c, "runId")
+	if !ok {
+		return
+	}
+	steps, err := d.Runs.ListStepsForProject(c.Request.Context(), pid, rid)
 	if err != nil {
 		platformhttp.JSONError(c, 500, "internal", err.Error())
 		return
@@ -311,8 +356,12 @@ func listRunSteps(c *gin.Context, d *app.Deps) {
 
 // getRunAudit 获取RunAudit。
 func getRunAudit(c *gin.Context, d *app.Deps) {
-	rid, _ := uuid.Parse(c.Param("runId"))
-	content, err := d.Runs.GetAudit(c.Request.Context(), rid)
+	pid := auth.ProjectID(c)
+	rid, ok := paramUUID(c, "runId")
+	if !ok {
+		return
+	}
+	content, err := d.Runs.GetAuditForProject(c.Request.Context(), pid, rid)
 	if err != nil {
 		if os.IsNotExist(err) {
 			c.JSON(200, gin.H{"content": ""})
@@ -349,15 +398,24 @@ func notificationUnreadCount(c *gin.Context, d *app.Deps) {
 // markNotificationRead 标记NotificationRead。
 func markNotificationRead(c *gin.Context, d *app.Deps) {
 	u, _ := auth.User(c)
-	nid, _ := uuid.Parse(c.Param("nid"))
-	_ = d.Notifications.MarkRead(c.Request.Context(), u.ID, nid)
+	nid, ok := paramUUID(c, "nid")
+	if !ok {
+		return
+	}
+	if err := d.Notifications.MarkRead(c.Request.Context(), u.ID, nid); err != nil {
+		platformhttp.JSONError(c, 400, "bad_request", err.Error())
+		return
+	}
 	c.JSON(200, gin.H{"ok": true})
 }
 
 // markAllNotificationsRead 将当前用户全部通知标记为已读。
 func markAllNotificationsRead(c *gin.Context, d *app.Deps) {
 	u, _ := auth.User(c)
-	_ = d.Notifications.MarkAllRead(c.Request.Context(), u.ID)
+	if err := d.Notifications.MarkAllRead(c.Request.Context(), u.ID); err != nil {
+		platformhttp.JSONError(c, 500, "internal", err.Error())
+		return
+	}
 	c.JSON(200, gin.H{"ok": true})
 }
 
@@ -396,18 +454,20 @@ func streamNotifications(c *gin.Context, d *app.Deps) {
 }
 
 // repoNameForQuery 从查询参数解析并校验仓库名称。
-func repoNameForQuery(c *gin.Context, d *app.Deps, pid uuid.UUID) string {
+func repoNameForQuery(c *gin.Context, d *app.Deps, pid uuid.UUID) (string, bool) {
 	rid := c.Query("repository_id")
 	if rid == "" {
-		return ""
+		return "", true
 	}
 	id, err := uuid.Parse(rid)
 	if err != nil {
-		return ""
+		platformhttp.JSONError(c, 400, "bad_request", "无效的仓库 ID")
+		return "", false
 	}
-	r, err := d.Repositories.Get(c.Request.Context(), id)
-	if err != nil || r.ProjectID != pid {
-		return ""
+	r, err := d.Repositories.GetForProject(c.Request.Context(), pid, id)
+	if err != nil {
+		platformhttp.JSONError(c, 404, "not_found", "仓库不存在")
+		return "", false
 	}
-	return r.Name
+	return r.Name, true
 }

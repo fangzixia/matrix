@@ -6,16 +6,20 @@
 export interface ApiError {
   error: string;
   message: string;
+  code?: string;
+  details?: unknown;
 }
 
 /** 带 status/code 的 HTTP 异常，供页面捕获并展示 message */
 export class HttpError extends Error {
   status: number;
   code: string;
-  constructor(status: number, code: string, message: string) {
+  details?: unknown;
+  constructor(status: number, code: string, message: string, details?: unknown) {
     super(message);
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -36,14 +40,16 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!res.ok) {
     let code = "error";
     let message = res.statusText;
+    let details: unknown;
     try {
       const body = (await res.json()) as ApiError;
-      code = body.error || code;
+      code = body.code || body.error || code;
       message = body.message || message;
+      details = body.details;
     } catch {
       /* ignore */
     }
-    throw new HttpError(res.status, code, message);
+    throw new HttpError(res.status, code, message, details);
   }
   if (res.status === 204) {
     return undefined as T;

@@ -3,6 +3,7 @@ package plan
 
 import (
 	"context"
+	"matrix/internal/modules/docmeta"
 	"matrix/internal/modules/workspace"
 	"matrix/internal/platform/db/models"
 	"os"
@@ -69,7 +70,7 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID, repositoryID *u
 		seen[rel] = struct{}{}
 		out = append(out, Item{
 			Path:    rel,
-			Title:   titleOrFromContent(title, string(b)),
+			Title:   docmeta.TitleOrFallback(title, string(b)),
 			Content: string(b),
 		})
 	}
@@ -125,7 +126,7 @@ func (s *Service) upsert(ctx context.Context, projectID uuid.UUID, repositoryID 
 	if err != nil {
 		return err
 	}
-	title := titleOrFromContent(filepath.Base(relPath), string(b))
+	title := docmeta.TitleOrFallback(filepath.Base(relPath), string(b))
 	now := time.Now()
 	var existing models.Plan
 	q := s.db.WithContext(ctx).Where("project_id = ? AND path = ?", projectID, relPath)
@@ -178,15 +179,4 @@ func findLatestPlanFile(docsRoot string) string {
 		}
 	}
 	return best
-}
-
-// titleOrFromContent 从内容提取标题或使用文件名。
-func titleOrFromContent(fallback, content string) string {
-	for _, line := range strings.Split(content, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "# ") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "# "))
-		}
-	}
-	return fallback
 }

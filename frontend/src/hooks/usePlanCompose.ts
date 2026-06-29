@@ -136,7 +136,6 @@ export function usePlanCompose(
         activeRunIdRef.current = null;
         if (!cancelledRef.current) {
           setLoading(false);
-          setActivityState(null);
         }
       }
     },

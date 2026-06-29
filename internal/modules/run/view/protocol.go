@@ -3,6 +3,11 @@
 package view
 
 // AG-UI 对齐的事件类型。
+//
+// 当前对外 SSE 以 DB 快照流为权威：CatchUpAfterSeq 只稳定回放
+// STATE_SNAPSHOT/RUN_STARTED/ACTIVITY_SNAPSHOT/RUN_FINISHED。细粒度
+// TEXT/TOOL/STEP 事件是投影器内部语义，只有引入持久化事件日志后才可作为
+// 可恢复的外部事件流契约。
 const (
 	EventRUNStarted              = "RUN_STARTED"
 	EventRUNFinished             = "RUN_FINISHED"

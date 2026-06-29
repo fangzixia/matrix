@@ -31,7 +31,7 @@ Matrix 是一款 **私有化 B/S Web 平台**，内置 AI Agent 内核，用于�
 
 ## 技术栈
 
-- **后端**：Go 1.24、Gin、GORM、PostgreSQL、slog
+- **后端**：Go 1.26、Gin、GORM、PostgreSQL、slog
 - **前端**：React 19、Vite、Ant Design 6、@ant-design/x、Zustand、React Router
 - **AI 内核**：Coordinator + Worker Agent、OpenAI 兼容 API
 
@@ -41,7 +41,7 @@ Matrix 是一款 **私有化 B/S Web 平台**，内置 AI Agent 内核，用于�
 
 ### 环境要求
 
-- Go 1.24+
+- Go 1.26+
 - PostgreSQL 16+（本机安装）
 - Node.js 22+（前端开发 / 构建）
 
@@ -102,11 +102,7 @@ go run ./cmd/web -config config/config.yml
 先编译前端再嵌入 Go 二进制：
 
 ```bash
-# 推荐：一键脚本
-scripts/build-web.bat          # Windows
-scripts/build-web.sh           # Linux/macOS
-
-# 或手动两步（go build 不会自动跑 npm）
+# 手动两步（go build 不会自动跑 npm）
 go generate ./frontend/...
 go build -o build/matrix.exe ./cmd/web    # Windows
 go build -o build/matrix ./cmd/web        # Linux/macOS
@@ -123,7 +119,6 @@ go build -o build/matrix ./cmd/web        # Linux/macOS
 ```
 matrix/
 ├── cmd/web/                 # HTTP 服务入口
-├── cmd/worker/              # 异步 Runner 骨架（可选）
 ├── config/config.example.yml
 ├── frontend/                # React + Vite + Ant Design 前端
 ├── internal/
@@ -163,6 +158,7 @@ matrix/
 
 ```bash
 go test ./...
+cd frontend && npm run typecheck && npm run build
 ```
 
 ---

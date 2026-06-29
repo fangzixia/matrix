@@ -38,7 +38,10 @@ func registerWorkspaceRoutes(api *gin.RouterGroup, d *app.Deps) {
 func listFiles(c *gin.Context, d *app.Deps) {
 	pid := auth.ProjectID(c)
 	path := c.Query("path")
-	repoName := repoNameForQuery(c, d, pid)
+	repoName, ok := repoNameForQuery(c, d, pid)
+	if !ok {
+		return
+	}
 	var files []workspace.FileEntry
 	var err error
 	if repoName != "" {
@@ -56,7 +59,10 @@ func listFiles(c *gin.Context, d *app.Deps) {
 // readFile 读取File。
 func readFile(c *gin.Context, d *app.Deps) {
 	pid := auth.ProjectID(c)
-	repoName := repoNameForQuery(c, d, pid)
+	repoName, ok := repoNameForQuery(c, d, pid)
+	if !ok {
+		return
+	}
 	var content string
 	var err error
 	if repoName != "" {
@@ -74,7 +80,10 @@ func readFile(c *gin.Context, d *app.Deps) {
 // listPlans 列出Plans。
 func listPlans(c *gin.Context, d *app.Deps) {
 	pid := auth.ProjectID(c)
-	repoID := parseRepositoryIDQuery(c)
+	repoID, ok := parseRepositoryIDQuery(c)
+	if !ok {
+		return
+	}
 	items, err := d.Plans.List(c.Request.Context(), pid, repoID)
 	if err != nil {
 		platformhttp.JSONError(c, 500, "internal", err.Error())
@@ -101,7 +110,10 @@ func approvePlan(c *gin.Context, d *app.Deps) {
 // listEvaluations 列出Evaluations。
 func listEvaluations(c *gin.Context, d *app.Deps) {
 	pid := auth.ProjectID(c)
-	repoID := parseRepositoryIDQuery(c)
+	repoID, ok := parseRepositoryIDQuery(c)
+	if !ok {
+		return
+	}
 	items, err := d.Artifacts.ListEvaluations(c.Request.Context(), pid, repoID)
 	if err != nil {
 		platformhttp.JSONError(c, 500, "internal", err.Error())
@@ -111,16 +123,17 @@ func listEvaluations(c *gin.Context, d *app.Deps) {
 }
 
 // parseRepositoryIDQuery 从查询参数解析 repository_id。
-func parseRepositoryIDQuery(c *gin.Context) *uuid.UUID {
+func parseRepositoryIDQuery(c *gin.Context) (*uuid.UUID, bool) {
 	raw := c.Query("repository_id")
 	if raw == "" {
-		return nil
+		return nil, true
 	}
 	id, err := uuid.Parse(raw)
 	if err != nil {
-		return nil
+		platformhttp.JSONError(c, 400, "bad_request", "无效的仓库 ID")
+		return nil, false
 	}
-	return &id
+	return &id, true
 }
 
 // pullRepo 拉取项目默认仓库最新代码。
@@ -139,7 +152,9 @@ func pushRepo(c *gin.Context, d *app.Deps) {
 	var body struct {
 		Message string `json:"message"`
 	}
-	_ = c.BindJSON(&body)
+	if !bindJSON(c, &body) {
+		return
+	}
 	if err := d.Workspace.Push(c.Request.Context(), pid, body.Message); err != nil {
 		platformhttp.JSONError(c, 500, "internal", err.Error())
 		return

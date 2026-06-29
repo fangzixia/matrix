@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Avatar,
   Button,
   Flex,
   Image,
   Spin,
+  Splitter,
   Tag,
   Typography,
   message,
@@ -30,8 +31,10 @@ import type { AttachmentsProps } from "@ant-design/x";
 import type { BubbleItemType } from "@ant-design/x";
 import MarkdownView from "@/components/docs/MarkdownView";
 import RunActivityPanel from "@/components/ai/RunActivityPanel";
-import { getRunView } from "@/api/runView";
-import type { RunViewState } from "@/types/runView";
+import {
+  isRunViewTerminal,
+  useRunActivityView,
+} from "@/hooks/useRunActivityView";
 
 type AttachmentsRef = GetRef<typeof Attachments>;
 
@@ -168,7 +171,9 @@ function renderUserAttachments(item: AiMessage) {
           );
         }
         return (
-          <Tag key={`${att.name}-${att.type}`}>📄 {att.name}</Tag>
+          <Tag key={`${att.name}-${att.type}`} icon={<PaperClipOutlined />}>
+            {att.name}
+          </Tag>
         );
       })}
     </Flex>
@@ -182,30 +187,11 @@ function MessageActivityBlock({
   projectId: string;
   runId: string;
 }) {
-  const [state, setState] = useState<RunViewState | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError("");
-    getRunView(projectId, runId)
-      .then((res) => {
-        if (!cancelled) setState(res.state);
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : "加载失败");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, runId]);
+  const { state, loading, error, disconnected } = useRunActivityView(
+    projectId,
+    runId,
+    { live: true, mode: "chat" },
+  );
 
   if (loading) return <Spin size="small" />;
   if (error) {
@@ -216,7 +202,20 @@ function MessageActivityBlock({
     );
   }
   if (!state) return null;
-  return <RunActivityPanel state={state} />;
+  return (
+    <Flex vertical gap={8}>
+      {disconnected && !isRunViewTerminal(state) ? (
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          连接中断，正在等待浏览器自动重连…
+        </Typography.Text>
+      ) : null}
+      <RunActivityPanel
+        state={state}
+        running={!isRunViewTerminal(state)}
+        projectId={projectId}
+      />
+    </Flex>
+  );
 }
 
 export default function MatrixAiChat({
@@ -365,7 +364,8 @@ export default function MatrixAiChat({
           ),
           styles: {
             content: {
-              background: token.colorFillTertiary,
+              background: token.colorBgContainer,
+              border: `1px solid ${token.colorBorderSecondary}`,
               maxWidth: "100%",
             },
           },
@@ -374,7 +374,11 @@ export default function MatrixAiChat({
             if (!content && data.loading) return content;
             return (
               <Flex vertical gap={8} style={{ width: "100%" }}>
-                <MarkdownView content={content} streaming={!!data.loading} />
+                <MarkdownView
+                  content={content}
+                  variant="chat"
+                  streaming={!!data.loading}
+                />
                 {src?.activityExpanded && src.runId && projectId ? (
                   <MessageActivityBlock
                     projectId={projectId}
@@ -395,7 +399,7 @@ export default function MatrixAiChat({
                   ? [
                       {
                         key: "tools",
-                        label: src.activityExpanded ? "收起工具" : "工具调用",
+                        label: src.activityExpanded ? "收起过程" : "执行过程",
                         icon: <ToolOutlined />,
                         onItemClick: () =>
                           onToggleMessageActivity(data.key!),
@@ -456,117 +460,137 @@ export default function MatrixAiChat({
     return parts.length ? `支持附件：${parts.join("、")}` : undefined;
   }, [showAttachments, allowedTypes]);
 
-  return (
+  const messageList = (
+    <>
+      {items.length === 0 ? (
+        <Flex vertical gap={16} align="center" style={{ paddingTop: 48 }}>
+          <Welcome
+            icon={<RobotOutlined />}
+            title={welcomeTitle}
+            description={
+              welcomeDescription ||
+              (modelLabel ? `当前模型：${modelLabel}` : undefined)
+            }
+            variant="borderless"
+          />
+          {multimodalHint || attachmentHint ? (
+            <Typography.Text type="secondary">
+              {multimodalHint || attachmentHint}
+            </Typography.Text>
+          ) : null}
+          {prompts && prompts.length > 0 ? (
+            <Prompts
+              title="你可以问我"
+              items={prompts.map((p) => ({
+                key: p.key,
+                label: p.label,
+                description: p.description,
+              }))}
+              onItemClick={(info) => {
+                const label =
+                  typeof info.data.label === "string"
+                    ? info.data.label
+                    : String(info.data.label ?? "");
+                setInputValue(label);
+              }}
+              styles={{ item: { flex: "1 1 200px" } }}
+              wrap
+            />
+          ) : null}
+        </Flex>
+      ) : (
+        <Bubble.List items={bubbleItems} autoScroll role={bubbleRole} />
+      )}
+      {activitySlot}
+    </>
+  );
+
+  const senderPanel = (
     <div
+      style={{
+        height: "100%",
+        boxSizing: "border-box",
+        padding: "12px 24px 16px",
+        background: token.colorBgContainer,
+        overflow: "auto",
+      }}
+    >
+      <Sender
+        style={{ width: "100%" }}
+        value={inputValue}
+        onChange={setInputValue}
+        loading={loading}
+        disabled={loading}
+        placeholder={loading ? "AI 正在回复…" : placeholder}
+        onSubmit={handleSubmit}
+        onCancel={onCancel}
+        onPasteFile={
+          showAttachments && !loading ? handlePasteFile : undefined
+        }
+        prefix={
+          showAttachments ? (
+            <Button
+              type="text"
+              disabled={loading}
+              icon={<PaperClipOutlined />}
+              onClick={() => setHeaderOpen((open) => !open)}
+              aria-label="添加附件"
+            />
+          ) : undefined
+        }
+        header={
+          showAttachments && !loading ? (
+            <Sender.Header
+              title="附件"
+              open={headerOpen}
+              onOpenChange={setHeaderOpen}
+            >
+              <Attachments
+                ref={attachmentsRef}
+                items={attachmentItems}
+                onChange={({ fileList }) => setAttachmentItems(fileList)}
+                beforeUpload={beforeUpload}
+                accept={accept}
+                maxCount={5}
+                placeholder={{
+                  icon: <PaperClipOutlined />,
+                  title: "上传附件",
+                  description: attachmentHint || "点击或拖拽文件到此处",
+                }}
+              />
+            </Sender.Header>
+          ) : undefined
+        }
+        styles={{ input: { minHeight: 40 } }}
+      />
+    </div>
+  );
+
+  return (
+    <Splitter
+      vertical
       className={className}
       style={{
-        display: "grid",
-        gridTemplateRows: "1fr auto",
         height: "100%",
         minHeight: 0,
         background: token.colorBgContainer,
         ...style,
       }}
     >
-      <div style={{ minHeight: 0, overflow: "auto", padding: "16px 24px" }}>
-        {items.length === 0 ? (
-          <Flex vertical gap={16} align="center" style={{ paddingTop: 48 }}>
-            <Welcome
-              icon={<RobotOutlined />}
-              title={welcomeTitle}
-              description={
-                welcomeDescription ||
-                (modelLabel ? `当前模型：${modelLabel}` : undefined)
-              }
-              variant="borderless"
-            />
-            {multimodalHint || attachmentHint ? (
-              <Typography.Text type="secondary">
-                {multimodalHint || attachmentHint}
-              </Typography.Text>
-            ) : null}
-            {prompts && prompts.length > 0 ? (
-              <Prompts
-                title="你可以问我"
-                items={prompts.map((p) => ({
-                  key: p.key,
-                  label: p.label,
-                  description: p.description,
-                }))}
-                onItemClick={(info) => {
-                  const label =
-                    typeof info.data.label === "string"
-                      ? info.data.label
-                      : String(info.data.label ?? "");
-                  setInputValue(label);
-                }}
-                styles={{ item: { flex: "1 1 200px" } }}
-                wrap
-              />
-            ) : null}
-          </Flex>
-        ) : (
-          <Bubble.List items={bubbleItems} autoScroll role={bubbleRole} />
-        )}
-        {activitySlot}
-      </div>
-      <div
-        style={{
-          padding: "12px 24px 16px",
-          borderTop: `1px solid ${token.colorBorderSecondary}`,
-          background: token.colorBgContainer,
-        }}
-      >
-        <Sender
-          style={{ width: "100%" }}
-          value={inputValue}
-          onChange={setInputValue}
-          loading={loading}
-          disabled={loading}
-          placeholder={loading ? "AI 正在回复…" : placeholder}
-          onSubmit={handleSubmit}
-          onCancel={onCancel}
-          onPasteFile={
-            showAttachments && !loading ? handlePasteFile : undefined
-          }
-          prefix={
-            showAttachments ? (
-              <Button
-                type="text"
-                disabled={loading}
-                icon={<PaperClipOutlined />}
-                onClick={() => setHeaderOpen((open) => !open)}
-                aria-label="添加附件"
-              />
-            ) : undefined
-          }
-          header={
-            showAttachments && !loading ? (
-              <Sender.Header
-                title="附件"
-                open={headerOpen}
-                onOpenChange={setHeaderOpen}
-              >
-                <Attachments
-                  ref={attachmentsRef}
-                  items={attachmentItems}
-                  onChange={({ fileList }) => setAttachmentItems(fileList)}
-                  beforeUpload={beforeUpload}
-                  accept={accept}
-                  maxCount={5}
-                  placeholder={{
-                    icon: <PaperClipOutlined />,
-                    title: "上传附件",
-                    description:
-                      attachmentHint || "点击或拖拽文件到此处",
-                  }}
-                />
-              </Sender.Header>
-            ) : undefined
-          }
-          styles={{ input: { minHeight: 40 } }}
-        />
-      </div>
-    </div>
+      <Splitter.Panel defaultSize="70%" min="120px">
+        <div
+          style={{
+            height: "100%",
+            minHeight: 0,
+            overflow: "auto",
+            padding: "16px 24px",
+            boxSizing: "border-box",
+          }}
+        >
+          {messageList}
+        </div>
+      </Splitter.Panel>
+      <Splitter.Panel min="96px">{senderPanel}</Splitter.Panel>
+    </Splitter>
   );
 }

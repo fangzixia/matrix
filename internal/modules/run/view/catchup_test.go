@@ -76,3 +76,35 @@ func TestCatchUpAfterSeqIdempotent(t *testing.T) {
 		t.Fatalf("maxSeq %d", maxSeq)
 	}
 }
+
+func TestCatchUpAfterSeqDoesNotReplayFinishedAtSeq(t *testing.T) {
+	s := NewStore(nil)
+	envs, done, maxSeq := s.CatchUpAfterSeq(
+		context.Background(), "r1", ModeChat, 2,
+		"succeeded", "hello", "", "",
+	)
+	if !done {
+		t.Fatal("expected terminal")
+	}
+	if len(envs) != 0 {
+		t.Fatalf("expected no replay, got %+v", envs)
+	}
+	if maxSeq != 2 {
+		t.Fatalf("maxSeq %d", maxSeq)
+	}
+}
+
+func TestCatchUpAfterSeqFormatsTerminalError(t *testing.T) {
+	s := NewStore(nil)
+	envs, done, _ := s.CatchUpAfterSeq(
+		context.Background(), "r1", ModeChat, 0,
+		"failed", "", "authentication failed: invalid api key", "",
+	)
+	if !done || len(envs) != 1 {
+		t.Fatalf("expected terminal envelope, got done=%v envs=%+v", done, envs)
+	}
+	pl := envs[0].Payload.(RunFinishedPayload)
+	if pl.Error == "" || pl.Error == "authentication failed: invalid api key" {
+		t.Fatalf("expected formatted error, got %q", pl.Error)
+	}
+}

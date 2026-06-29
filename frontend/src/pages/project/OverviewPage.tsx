@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
+  Alert,
   Card,
   Descriptions,
   Drawer,
@@ -16,7 +17,6 @@ import { GlobalOutlined, LockOutlined } from "@ant-design/icons";
 import { useProjectStore } from "@/stores/project";
 import * as projectsApi from "@/api/projects";
 import MarkdownView from "@/components/docs/MarkdownView";
-import PlanConfirmDrawer from "@/components/docs/PlanConfirmDrawer";
 
 type DocItem = projectsApi.PlanItem | projectsApi.EvaluationItem;
 
@@ -28,34 +28,40 @@ export default function OverviewPage() {
     [],
   );
   const [loading, setLoading] = useState(true);
+  const [plansError, setPlansError] = useState("");
+  const [evaluationsError, setEvaluationsError] = useState("");
   const [preview, setPreview] = useState<{
     title: string;
     content: string;
     path: string;
   } | null>(null);
-  const [confirmPlan, setConfirmPlan] = useState<projectsApi.PlanItem | null>(
-    null,
-  );
-  async function reloadPlans() {
-    const planRes = await projectsApi.listPlans(projectId);
-    setPlans(planRes.plans ?? []);
-  }
   useEffect(() => {
     if (!projectId) return;
     setLoading(true);
-    Promise.all([
+    setPlansError("");
+    setEvaluationsError("");
+    Promise.allSettled([
       projectsApi.listPlans(projectId),
       projectsApi.listEvaluations(projectId),
-    ])
-      .then(([planRes, ev]) => {
-        setPlans(planRes.plans ?? []);
-        setEvaluations(ev.evaluations ?? []);
-      })
-      .catch(() => {
-        setPlans([]);
-        setEvaluations([]);
-      })
-      .finally(() => setLoading(false));
+    ]).then(([planRes, ev]) => {
+      if (planRes.status === "fulfilled") {
+        setPlans(planRes.value.plans ?? []);
+      } else {
+        setPlansError(
+          planRes.reason instanceof Error
+            ? planRes.reason.message
+            : "计划文档加载失败",
+        );
+      }
+      if (ev.status === "fulfilled") {
+        setEvaluations(ev.value.evaluations ?? []);
+      } else {
+        setEvaluationsError(
+          ev.reason instanceof Error ? ev.reason.message : "评测报告加载失败",
+        );
+      }
+      setLoading(false);
+    });
   }, [projectId]);
   const visibility = current?.visibility || "private";
   function openDoc(item: DocItem) {
@@ -107,6 +113,14 @@ export default function OverviewPage() {
           </Descriptions>
         </Card>
         <Card title="计划文档">
+          {plansError && (
+            <Alert
+              type="warning"
+              showIcon
+              message={plansError}
+              style={{ marginBottom: 12 }}
+            />
+          )}
           {plans.length ? (
             <List
               dataSource={plans}
@@ -139,6 +153,14 @@ export default function OverviewPage() {
           )}
         </Card>
         <Card title="评测报告">
+          {evaluationsError && (
+            <Alert
+              type="warning"
+              showIcon
+              message={evaluationsError}
+              style={{ marginBottom: 12 }}
+            />
+          )}
           {evaluations.length ? (
             <List
               dataSource={evaluations}
@@ -190,13 +212,6 @@ export default function OverviewPage() {
           </>
         )}
       </Drawer>
-      <PlanConfirmDrawer
-        projectId={projectId}
-        plan={confirmPlan}
-        open={!!confirmPlan}
-        onClose={() => setConfirmPlan(null)}
-        onApproved={reloadPlans}
-      />
     </>
   );
 }

@@ -24,7 +24,7 @@ func (r *ProjectRepoResolver) RepoRoot(ctx context.Context, projectID uuid.UUID)
 func (r *ProjectRepoResolver) RepoRootFor(ctx context.Context, projectID uuid.UUID, repoID *uuid.UUID) (string, error) {
 	var name, gitURL, branch string
 	if repoID != nil && r.Repos != nil {
-		repo, err := r.Repos.Get(ctx, *repoID)
+		repo, err := r.Repos.GetForProject(ctx, projectID, *repoID)
 		if err != nil {
 			return "", err
 		}

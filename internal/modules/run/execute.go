@@ -33,12 +33,16 @@ type StepDTO struct {
 	FinishedAt    *time.Time `json:"finished_at,omitempty"`
 }
 
-// GetAudit 返回 Run 审计日志路径或内容。
-func (s *Service) GetAudit(ctx context.Context, runID uuid.UUID) (string, error) {
-	var m models.Run
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", runID).Error; err != nil {
+// GetAuditForProject 返回项目内 Run 审计日志。
+func (s *Service) GetAuditForProject(ctx context.Context, projectID, runID uuid.UUID) (string, error) {
+	m, err := s.loadProjectRun(ctx, projectID, runID)
+	if err != nil {
 		return "", err
 	}
+	return s.readAuditFile(*m)
+}
+
+func (s *Service) readAuditFile(m models.Run) (string, error) {
 	if m.AuditPath == "" {
 		return "", nil
 	}
@@ -49,8 +53,7 @@ func (s *Service) GetAudit(ctx context.Context, runID uuid.UUID) (string, error)
 	return string(b), nil
 }
 
-// ListSteps 返回 Run 步骤列表。
-func (s *Service) ListSteps(ctx context.Context, runID uuid.UUID) ([]StepDTO, error) {
+func (s *Service) listSteps(ctx context.Context, runID uuid.UUID) ([]StepDTO, error) {
 	var rows []models.RunStep
 	if err := s.db.WithContext(ctx).Where("run_id = ?", runID).Order("sequence asc").Find(&rows).Error; err != nil {
 		return nil, err
@@ -66,13 +69,25 @@ func (s *Service) ListSteps(ctx context.Context, runID uuid.UUID) ([]StepDTO, er
 	return out, nil
 }
 
-// GetToolLog 返回工具 spill 日志内容。
-func (s *Service) GetToolLog(ctx context.Context, runID uuid.UUID, toolUseID string) (string, error) {
-	var m models.Run
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", runID).Error; err != nil {
+// ListStepsForProject 返回项目内 Run 步骤列表。
+func (s *Service) ListStepsForProject(ctx context.Context, projectID, runID uuid.UUID) ([]StepDTO, error) {
+	if _, err := s.loadProjectRun(ctx, projectID, runID); err != nil {
+		return nil, err
+	}
+	return s.listSteps(ctx, runID)
+}
+
+// GetToolLogForProject 返回项目内 Run 工具 spill 日志。
+func (s *Service) GetToolLogForProject(ctx context.Context, projectID, runID uuid.UUID, toolUseID string) (string, error) {
+	m, err := s.loadProjectRun(ctx, projectID, runID)
+	if err != nil {
 		return "", err
 	}
-	matrixDir, err := s.workspace.MatrixDir(ctx, m.ProjectID, runID)
+	return s.readToolLog(ctx, *m, toolUseID)
+}
+
+func (s *Service) readToolLog(ctx context.Context, m models.Run, toolUseID string) (string, error) {
+	matrixDir, err := s.workspace.MatrixDir(ctx, m.ProjectID, m.ID)
 	if err != nil {
 		return "", err
 	}
@@ -131,13 +146,18 @@ func (s *Service) ExecuteRun(ctx context.Context, runID uuid.UUID) error {
 		"chat_session_id", m.ChatSessionID, "prior_status", m.Status,
 	)
 	now := time.Now()
-	_ = s.db.WithContext(ctx).Model(&m).Updates(map[string]any{
+	if err := s.db.WithContext(ctx).Model(&m).Updates(map[string]any{
 		"status": "running", "started_at": now, "finished_at": nil, "error_message": "",
-	}).Error
+	}).Error; err != nil {
+		logging.Agent("run: 更新运行状态失败", "run_id", runID, "error", err.Error())
+		return err
+	}
 	if s.notifier != nil && shouldNotifyRun(m.Kind) {
 		s.notifier.NotifyRunStatus(ctx, m.CreatedBy, m.ProjectID, runID, m.Kind, "running", m.Title)
 	}
-	_ = s.viewStore.BeginRun(ctx, runID.String(), m.ProjectID.String(), m.Kind, m.Kind)
+	if err := s.viewStore.BeginRun(ctx, runID.String(), m.ProjectID.String(), m.Kind, m.Kind); err != nil {
+		return err
+	}
 
 	var runErr error
 	switch m.Kind {
@@ -197,21 +217,29 @@ func (s *Service) finalizeRun(ctx context.Context, runID uuid.UUID, m models.Run
 	if ms := s.mergeStatusAfterRun(&m, status); ms != "" {
 		updates["merge_status"] = ms
 	}
-	_ = s.db.WithContext(ctx).Model(&models.Run{}).Where("id = ?", runID).Updates(updates).Error
+	if err := s.db.WithContext(ctx).Model(&models.Run{}).Where("id = ?", runID).Updates(updates).Error; err != nil {
+		logging.Agent("run: 更新终态失败", "run_id", runID, "status", status, "error", err.Error())
+		return errors.Join(runErr, err)
+	}
 	if runErr == nil && status == "succeeded" && m.Kind == "chat" && m.ChatSessionID != nil && m.ChatUserMessageID != nil {
 		s.ensureChatAssistantMessage(ctx, *m.ChatSessionID, *m.ChatUserMessageID, runID)
 	}
 	if runErr != nil && s.runtimeCfg.Run.CleanupOnFailure && m.SandboxPath != "" {
 		_ = s.workspace.RemoveRunWorktree(ctx, m.ProjectID, m.RepositoryID, runID, m.RunBranch, m.SandboxPath)
-		_ = s.db.WithContext(ctx).Model(&models.Run{}).Where("id = ?", runID).Updates(map[string]any{
+		if err := s.db.WithContext(ctx).Model(&models.Run{}).Where("id = ?", runID).Updates(map[string]any{
 			"sandbox_path": "", "run_branch": "",
-		}).Error
+		}).Error; err != nil {
+			logging.Agent("run: 清理 worktree 状态失败", "run_id", runID, "error", err.Error())
+		}
 	}
 	if s.notifier != nil && shouldNotifyRun(m.Kind) {
 		s.notifier.NotifyRunStatus(ctx, m.CreatedBy, m.ProjectID, runID, m.Kind, status, m.Title)
 	}
 	var finished models.Run
-	_ = s.db.WithContext(ctx).First(&finished, "id = ?", runID).Error
+	if err := s.db.WithContext(ctx).First(&finished, "id = ?", runID).Error; err != nil {
+		logging.Agent("run: 加载终态失败", "run_id", runID, "error", err.Error())
+		return errors.Join(runErr, err)
+	}
 	if err := s.finishRunView(ctx, runID, status, finished.Output, errMsg, finished.MergeStatus); err != nil {
 		logging.Agent("run-view: 结束视图失败",
 			"run_id", runID, "status", status, "error", err.Error(),

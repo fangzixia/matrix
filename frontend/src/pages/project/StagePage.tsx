@@ -9,6 +9,7 @@ import {
   Flex,
   Input,
   Space,
+  Splitter,
   Table,
   Tag,
   Typography,
@@ -183,6 +184,7 @@ export default function StagePage() {
   const [evaluations, setEvaluations] = useState<projectsApi.EvaluationItem[]>(
     [],
   );
+  const [docsError, setDocsError] = useState("");
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState("");
   const [preview, setPreview] = useState<{
@@ -196,12 +198,15 @@ export default function StagePage() {
   }, [id, kind, fetchRuns]);
 
   useEffect(() => {
+    setDocsError("");
     projectsApi
       .listPlans(id)
       .then((res) => {
         setPlans(res.plans ?? []);
       })
-      .catch(() => setPlans([]));
+      .catch((e) =>
+        setDocsError(e instanceof Error ? e.message : "计划文档加载失败"),
+      );
   }, [id]);
 
   useEffect(() => {
@@ -211,7 +216,9 @@ export default function StagePage() {
       .then((res) => {
         setEvaluations(res.evaluations ?? []);
       })
-      .catch(() => setEvaluations([]));
+      .catch((e) =>
+        setDocsError(e instanceof Error ? e.message : "评测报告加载失败"),
+      );
   }, [id, kind]);
 
   const kindHint = harnessKindHints[kind];
@@ -300,56 +307,76 @@ export default function StagePage() {
     projectsApi
       .listPlans(id)
       .then((res) => setPlans(res.plans ?? []))
-      .catch(() => setPlans([]));
+      .catch((e) =>
+        setDocsError(e instanceof Error ? e.message : "计划文档加载失败"),
+      );
   }, [fetchRuns, id]);
 
   if (kind === "plan") {
     return (
-      <Flex
-        vertical
-        style={{
-          height: `calc(100vh - ${headerHeight}px)`,
-          minHeight: 0,
-          overflow: "hidden",
-        }}
-      >
-        <PlanComposePanel
-          projectId={id}
-          filePath={filePath}
-          prompts={PLAN_PROMPTS}
-          welcomeTitle="编写计划"
-          welcomeDescription={harnessKindHints.plan}
-          onRunComplete={refreshPlanData}
-          style={{ flex: 1, minHeight: 0 }}
-          footer={
-            <PlanFileFooter
-              filePath={filePath}
-              planOptions={planOptions}
-              onFilePathChange={setFilePath}
-              onPreview={(path) => openPreview(path, plans)}
-            />
-          }
-        />
-        <div
+      <>
+        {docsError && (
+          <Alert
+            type="warning"
+            showIcon
+            message={docsError}
+            style={{ margin: "0 24px 12px" }}
+          />
+        )}
+        <Splitter
+          vertical
           style={{
-            flexShrink: 0,
-            maxHeight: 280,
-            overflow: "auto",
-            padding: "12px 24px 16px",
-            borderTop: `1px solid ${token.colorBorderSecondary}`,
-            background: token.colorBgContainer,
+            height: `calc(100vh - ${headerHeight}px)`,
+            minHeight: 0,
           }}
         >
-          <Typography.Text
-            strong
-            style={{ display: "block", marginBottom: 8 }}
-          >
-            历史任务
-          </Typography.Text>
-          <TaskHistoryTable projectId={id} kind={kind} tasks={stageTasks} />
-        </div>
+          <Splitter.Panel defaultSize="72%" min="240px">
+            <PlanComposePanel
+              projectId={id}
+              filePath={filePath}
+              prompts={PLAN_PROMPTS}
+              welcomeTitle="编写计划"
+              welcomeDescription={harnessKindHints.plan}
+              onRunComplete={refreshPlanData}
+              footer={
+                <PlanFileFooter
+                  filePath={filePath}
+                  planOptions={planOptions}
+                  onFilePathChange={setFilePath}
+                  onPreview={(path) => openPreview(path, plans)}
+                />
+              }
+            />
+          </Splitter.Panel>
+          <Splitter.Panel min="160px">
+            <Flex
+              vertical
+              style={{
+                height: "100%",
+                minHeight: 0,
+                padding: "12px 24px 16px",
+                background: token.colorBgContainer,
+                boxSizing: "border-box",
+              }}
+            >
+              <Typography.Text
+                strong
+                style={{ display: "block", marginBottom: 8, flexShrink: 0 }}
+              >
+                历史任务
+              </Typography.Text>
+              <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+                <TaskHistoryTable
+                  projectId={id}
+                  kind={kind}
+                  tasks={stageTasks}
+                />
+              </div>
+            </Flex>
+          </Splitter.Panel>
+        </Splitter>
         <PreviewDrawer preview={preview} onClose={() => setPreview(null)} />
-      </Flex>
+      </>
     );
   }
 
@@ -360,6 +387,14 @@ export default function StagePage() {
         items={[{ title: <Link to={`/projects/${id}`}>概览</Link> }, { title }]}
       />
       <Typography.Title level={2}>{title}</Typography.Title>
+      {docsError && (
+        <Alert
+          type="warning"
+          showIcon
+          message={docsError}
+          style={{ marginBottom: 16 }}
+        />
+      )}
       <Card style={{ marginBottom: 16 }}>
         <Space direction="vertical" style={{ width: "100%" }} size="middle">
           {kindHint && <Alert type="info" showIcon message={kindHint} />}

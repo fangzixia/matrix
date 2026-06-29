@@ -4,6 +4,7 @@
 /.cursor/
 /data/
 /frontend/dist/
+/frontend/tsconfig.tsbuildinfo
 /config/config.yml
 /frontend/package-lock.json
 /.codegraph/

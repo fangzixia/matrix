@@ -61,6 +61,11 @@ func (s *Store) FinishRun(ctx context.Context, runID, status, output, errMsg, me
 	sess := s.runs[runID]
 	if sess != nil && sess.projector != nil {
 		sess.projector.state.Status = status
+		if status == "succeeded" {
+			sess.projector.finalizeStaleTools(true)
+		} else if status == "failed" || status == "cancelled" {
+			sess.projector.finalizeStaleTools(false)
+		}
 		if output != "" {
 			sess.projector.state.ReplyText = output
 		}
@@ -111,9 +116,10 @@ func (s *Store) PublishStep(ctx context.Context, runID string, _ string, _ strin
 		sess.seq++
 		sess.projector.state.Seq = sess.seq
 	}
+	row := s.persistRowLocked(runID, sess)
 	s.mu.Unlock()
-	if sess != nil {
-		_ = s.persist(ctx, runID)
+	if row.RunID != uuid.Nil {
+		_ = s.saveRow(ctx, row)
 	}
 }
 
@@ -121,27 +127,29 @@ func (s *Store) PublishStep(ctx context.Context, runID string, _ string, _ strin
 func (s *Store) OnSubagent(ctx context.Context, runID string, snap agent.Snapshot) {
 	s.mu.Lock()
 	sess := s.runs[runID]
-	s.mu.Unlock()
 	if sess == nil || sess.projector == nil {
+		s.mu.Unlock()
 		return
 	}
-	envs := sess.projector.OnSubagent(snap)
-	for i := range envs {
-		s.withSeq(runID, envs[i])
-	}
-	_ = s.persist(ctx, runID)
+	sess.projector.OnSubagent(snap)
+	sess.seq++
+	sess.projector.state.Seq = sess.seq
+	row := s.persistRowLocked(runID, sess)
+	s.mu.Unlock()
+	_ = s.saveRow(ctx, row)
 }
 
 // Snapshot 返回当前视图状态；无内存会话时从 DB 加载。
 func (s *Store) Snapshot(ctx context.Context, runID string) (*RunViewState, error) {
 	s.mu.Lock()
 	sess := s.runs[runID]
-	s.mu.Unlock()
 	if sess != nil && sess.projector != nil {
 		st := sess.projector.State()
 		st.Seq = sess.seq
+		s.mu.Unlock()
 		return &st, nil
 	}
+	s.mu.Unlock()
 	if s.db == nil {
 		return nil, nil
 	}
@@ -175,14 +183,12 @@ func (s *Store) apply(ctx context.Context, runID, projectID string, msg stream.M
 		sess = &runSession{projector: NewProjector(runID, projectID), projectID: projectID}
 		s.runs[runID] = sess
 	}
-	proj := sess.projector
+	sess.projector.Apply(msg)
+	sess.seq++
+	sess.projector.state.Seq = sess.seq
+	row := s.persistRowLocked(runID, sess)
 	s.mu.Unlock()
-
-	envs := proj.Apply(msg)
-	for i := range envs {
-		s.withSeq(runID, envs[i])
-	}
-	return s.persist(ctx, runID)
+	return s.saveRow(ctx, row)
 }
 
 func (s *Store) withSeq(runID string, env Envelope) Envelope {
@@ -224,6 +230,10 @@ func (s *Store) persist(ctx context.Context, runID string) error {
 	s.mu.Lock()
 	row := s.persistRowLocked(runID, s.runs[runID])
 	s.mu.Unlock()
+	return s.saveRow(ctx, row)
+}
+
+func (s *Store) saveRow(ctx context.Context, row models.RunView) error {
 	if row.RunID == uuid.Nil {
 		return nil
 	}
