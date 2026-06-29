@@ -16,6 +16,7 @@ import type {
   ToolView,
   TurnView,
 } from "@/types/runView";
+import { formatAgentProgress, formatTurnLabel } from "@/utils/agentProgress";
 
 export interface RunActivityPanelProps {
   state: RunViewState;
@@ -87,7 +88,7 @@ function renderTurnBody(
 function workerTurnsToChainItems(turns: TurnView[]): ThoughtChainItemType[] {
   return turns.map((wt) => ({
     key: wt.key,
-    title: wt.summary || `子 Agent 第 ${wt.turn} 轮`,
+    title: formatTurnLabel(wt.turn, wt.summary) || `子 Agent 第 ${wt.turn} 轮`,
     icon: <RobotOutlined />,
     status: "success" as const,
     collapsible: true,
@@ -159,14 +160,9 @@ function toolToChainItem(
 }
 
 function subagentProgressLine(snap: SubagentView): string {
-  const p = snap.progress as Record<string, unknown> | undefined;
-  if (!p) return snap.description || snap.id;
-  const parts: string[] = [];
-  if (typeof p.summary === "string") parts.push(p.summary);
-  if (typeof p.last_activity === "string") parts.push(p.last_activity);
-  if (typeof p.tool_use_count === "number")
-    parts.push(`${p.tool_use_count} 次工具调用`);
-  return parts.join(" · ") || snap.description || snap.id;
+  const line = formatAgentProgress(snap.progress, snap.status);
+  if (line) return line;
+  return snap.description || snap.id;
 }
 
 function turnHeader(turn: TurnView) {
@@ -175,7 +171,7 @@ function turnHeader(turn: TurnView) {
       <Tag color={turn.scope === "worker" ? "purple" : "blue"}>
         {turn.scope === "worker" ? "子 Agent" : "主 Agent"}
       </Tag>
-      <span>{turn.summary || `第 ${turn.turn} 轮`}</span>
+      <span>{formatTurnLabel(turn.turn, turn.summary)}</span>
     </Space>
   );
 }

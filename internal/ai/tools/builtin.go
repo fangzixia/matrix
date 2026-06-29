@@ -40,6 +40,9 @@ var ReadFile = &Tool{
 			return "", fmt.Errorf("read_file: %w", err)
 		}
 		defer f.Close()
+		if info, statErr := f.Stat(); statErr == nil && info.IsDir() {
+			return "", fmt.Errorf("read_file: 目标是目录，请使用 list_dir 工具")
+		}
 		var sb strings.Builder
 		buf := make([]byte, readFileChunkSize)
 		for {

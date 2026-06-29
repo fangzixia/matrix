@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"matrix/internal/ai/activity"
 	"matrix/internal/ai/agent"
 	"matrix/internal/ai/audit"
 	"matrix/internal/ai/query"
@@ -114,15 +115,14 @@ func (h *StreamHub) applyProgress(msg stream.Message) {
 			case stream.DataTurnProgress:
 				r.Progress.Turn = msg.Data.Turn
 				r.Progress.Transition = msg.Data.Transition
-				if msg.Data.Summary != "" {
-					r.Progress.Summary = msg.Data.Summary
-					r.Progress.LastActivity = msg.Data.Summary
-				}
+				r.Progress.CurrentTool = ""
+				r.Progress.Summary = activity.TurnSummary(msg.Data.Turn)
+				r.Progress.LastActivity = activity.TurnThinkingLabel(msg.Data.Turn, msg.Data.Transition)
 				updated = true
 			case stream.DataToolProgress, stream.DataMCPProgress:
 				if msg.Data.ToolName != "" {
 					r.Progress.CurrentTool = msg.Data.ToolName
-					r.Progress.LastActivity = msg.Data.ToolName + ": " + msg.Data.Status
+					r.Progress.LastActivity = activity.ToolActivityLabel(msg.Data.ToolName, msg.Data.Status)
 					if msg.Data.Status == "started" || msg.Data.Status == "streaming" || msg.Data.Status == "completed" || msg.Data.Status == "failed" {
 						preview := msg.Data.Message
 						if msg.Data.Type == stream.DataToolOutputDelta && msg.Data.Delta != "" {
@@ -137,12 +137,16 @@ func (h *StreamHub) applyProgress(msg stream.Message) {
 				}
 				if msg.Data.Status == "completed" {
 					r.Progress.ToolUseCount++
+					r.Progress.CurrentTool = ""
+					r.Progress.LastActivity = activity.TurnWithToolsLabel(r.Progress.Turn, r.Progress.ToolUseCount)
+				} else if msg.Data.Status == "failed" {
+					r.Progress.CurrentTool = ""
 				}
 				updated = true
 			case stream.DataToolOutputDelta:
 				if msg.Data.ToolName != "" {
 					r.Progress.CurrentTool = msg.Data.ToolName
-					r.Progress.LastActivity = msg.Data.ToolName + ": streaming"
+					r.Progress.LastActivity = activity.ToolActivityLabel(msg.Data.ToolName, "streaming")
 					r.Progress.RecentActivities = appendRecentActivity(r.Progress.RecentActivities, agent.ToolActivity{
 						ToolName: msg.Data.ToolName,
 						Status:   "streaming",
@@ -153,11 +157,11 @@ func (h *StreamHub) applyProgress(msg stream.Message) {
 			}
 		case stream.TypeAssistant:
 			if msg.Assistant != nil {
-				r.Progress.LastActivity = "assistant"
+				r.Progress.LastActivity = "整理回复中…"
 				updated = true
 			}
 		case stream.TypeResult:
-			r.Progress.LastActivity = "finished"
+			r.Progress.LastActivity = "已完成"
 			updated = true
 		}
 	})

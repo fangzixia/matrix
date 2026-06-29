@@ -131,6 +131,57 @@ func TestProjectorToolOutputDelta(t *testing.T) {
 	}
 }
 
+func TestProjectorReconcilesProvisionalToolID(t *testing.T) {
+	p := NewProjector("run-1", "proj-1")
+	p.ensureCoordinatorTurn(1, "")
+	p.Apply(stream.ToolInputStreaming("run-1", "pending-0", "write_file", "{"))
+	p.Apply(msgToolStarted("call_real", "write_file"))
+	p.Apply(msgToolFinished("call_real", "write_file", "completed"))
+
+	tools := p.state.Turns[0].Tools
+	if len(tools) != 1 {
+		t.Fatalf("want 1 tool after reconcile, got %d: %+v", len(tools), tools)
+	}
+	if tools[0].ToolCallID != "call_real" {
+		t.Fatalf("toolCallId = %q", tools[0].ToolCallID)
+	}
+	if tools[0].Status != "success" {
+		t.Fatalf("status = %q", tools[0].Status)
+	}
+}
+
+func TestProjectorWorkerToolNotOnCoordinatorTurn(t *testing.T) {
+	p := NewProjector("run-1", "proj-1")
+	p.ensureCoordinatorTurn(1, "")
+	p.Apply(msgToolStarted("parent-agent", "agent"))
+	p.Apply(msgToolFinished("parent-agent", "agent", "completed"))
+	p.parse.workerParentToolID["agent-worker"] = "parent-agent"
+
+	workerStarted := stream.WithAgent(
+		stream.ToolStarted("run-1", "call_w1", "list_dir", `{"path":"."}`),
+		"agent-worker", "", "parent-agent",
+	)
+	p.Apply(workerStarted)
+	p.Apply(stream.WithAgent(
+		stream.ToolFinished("run-1", "call_w1", "list_dir", "completed", 10, "ok"),
+		"agent-worker", "", "parent-agent",
+	))
+
+	if len(p.state.Turns[0].Tools) != 1 {
+		t.Fatalf("coordinator tools = %d", len(p.state.Turns[0].Tools))
+	}
+	agentTool := p.state.Turns[0].Tools[0]
+	if len(agentTool.WorkerTurns) != 1 {
+		t.Fatalf("worker turns = %d", len(agentTool.WorkerTurns))
+	}
+	if len(agentTool.WorkerTurns[0].Tools) != 1 {
+		t.Fatalf("worker tools = %d", len(agentTool.WorkerTurns[0].Tools))
+	}
+	if agentTool.WorkerTurns[0].Tools[0].Status != "success" {
+		t.Fatalf("worker tool status = %q", agentTool.WorkerTurns[0].Tools[0].Status)
+	}
+}
+
 func TestProjectorResult(t *testing.T) {
 	p := NewProjector("run-1", "proj-1")
 	p.Apply(stream.ResultSuccessMsg("run-1", "output text", "end_turn", 3, 0))

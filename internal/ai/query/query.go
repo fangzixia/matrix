@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"fmt"
+	"matrix/internal/ai/activity"
 	"matrix/internal/ai/audit"
 	"matrix/internal/ai/llm"
 	"matrix/internal/ai/stream"
@@ -139,7 +140,7 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 			return returnOutcome(ctx, Result{StopReason: StopMaxTurns, TurnCount: s.turnCount, Messages: s.messages})
 		}
 		trans := transitionStr(s.transition)
-		summary := fmt.Sprintf("%s第 %d 轮（跃迁: %s）", logLinePrefix(cfg), s.turnCount, trans)
+		summary := activity.TurnSummary(s.turnCount)
 		publish(ctx, sink, stream.TurnProgress(sid, s.turnCount, trans, summary))
 		ctx = logging.With(ctx, logging.Fields{
 			logging.FieldSessionID: sid,

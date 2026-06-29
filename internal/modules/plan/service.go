@@ -39,7 +39,7 @@ type Item struct {
 	RunID   string    `json:"run_id,omitempty"`
 }
 
-// List 扫描 docs/plans/ 并合并 DB 索引；正文从磁盘读取。
+// List 扫描 docs/plans/ 下实际存在的计划文件；正文从磁盘读取，不合并 DB 索引。
 func (s *Service) List(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID) ([]Item, error) {
 	if err := s.ws.EnsureDocsLayout(projectID); err != nil {
 		return nil, err
@@ -54,12 +54,19 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID, repositoryID *u
 		if _, ok := seen[rel]; ok {
 			return
 		}
-		seen[rel] = struct{}{}
 		full, err := s.ws.ResolveDocPath(projectID, rel)
 		if err != nil {
 			return
 		}
-		b, _ := os.ReadFile(full)
+		st, err := os.Stat(full)
+		if err != nil || st.IsDir() {
+			return
+		}
+		b, err := os.ReadFile(full)
+		if err != nil {
+			return
+		}
+		seen[rel] = struct{}{}
 		out = append(out, Item{
 			Path:    rel,
 			Title:   titleOrFromContent(title, string(b)),
@@ -85,34 +92,6 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID, repositoryID *u
 	}
 	for i := range out {
 		out[i].Status = statusFor(out[i].Path)
-	}
-	var rows []models.Plan
-	_ = s.db.WithContext(ctx).Where("project_id = ?", projectID).Order("updated_at desc").Find(&rows).Error
-	for _, r := range rows {
-		rel, err := workspace.SanitizeDocLogicalPath(r.Path)
-		if err != nil || rel == "" {
-			continue
-		}
-		if _, ok := seen[rel]; ok {
-			continue
-		}
-		seen[rel] = struct{}{}
-		item := Item{ID: r.ID, Path: rel, Title: r.Title, Status: r.Status}
-		if item.Status == "" {
-			item.Status = StatusDraft
-		}
-		if r.RunID != nil {
-			item.RunID = r.RunID.String()
-		}
-		if full, err := s.ws.ResolveDocPath(projectID, rel); err == nil {
-			if b, err := os.ReadFile(full); err == nil {
-				item.Content = string(b)
-				if item.Title == "" {
-					item.Title = titleOrFromContent(filepath.Base(rel), item.Content)
-				}
-			}
-		}
-		out = append(out, item)
 	}
 	return out, nil
 }

@@ -311,17 +311,62 @@ func grepApplyHeadLimit(lines []string, limit int) []string {
 	return lines[:limit]
 }
 
+// grepSplitPathAndRest 从 ripgrep 输出行中分离文件路径与后续部分（行号/内容）。
+// Windows 绝对路径含盘符冒号（如 E:\foo.go:30:line），不可直接用首个 ':' 分割。
+func grepSplitPathAndRest(line string) (filePath, rest string, ok bool) {
+	if line == "" {
+		return "", "", false
+	}
+	splitAt := grepPathLineSeparator(line)
+	if splitAt < 0 {
+		return line, "", false
+	}
+	return line[:splitAt], line[splitAt:], true
+}
+
+// grepPathLineSeparator 返回 ripgrep 行中「文件路径」与「行号:内容」之间的 ':' 位置。
+func grepPathLineSeparator(line string) int {
+	if len(line) >= 2 && line[1] == ':' {
+		c := line[0]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
+			if idx := strings.Index(line[2:], ":"); idx >= 0 {
+				return 2 + idx
+			}
+			return -1
+		}
+	}
+	if idx := strings.Index(line, ":"); idx > 0 {
+		return idx
+	}
+	return -1
+}
+
+// grepAbsolutizePathPart 将 grep 结果中的路径部分转为绝对路径；已是绝对路径则仅规范化。
+func grepAbsolutizePathPart(path, searchRoot string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return path
+	}
+	if filepath.IsAbs(path) {
+		if abs, err := filepath.Abs(path); err == nil {
+			return filepath.Clean(abs)
+		}
+		return filepath.Clean(path)
+	}
+	return ToAbsolutePath(path, searchRoot)
+}
+
 // grepAbsolutizePaths 将 grep 结果路径转为绝对路径。
 func grepAbsolutizePaths(lines []string, searchRoot, outputMode string) []string {
 	out := make([]string, len(lines))
 	for i, line := range lines {
 		switch outputMode {
 		case "files_with_matches":
-			out[i] = ToAbsolutePath(line, searchRoot)
+			out[i] = grepAbsolutizePathPart(line, searchRoot)
 		default:
-			idx := strings.Index(line, ":")
-			if idx > 0 {
-				out[i] = ToAbsolutePath(line[:idx], searchRoot) + line[idx:]
+			filePath, rest, ok := grepSplitPathAndRest(line)
+			if ok {
+				out[i] = grepAbsolutizePathPart(filePath, searchRoot) + rest
 			} else {
 				out[i] = line
 			}
