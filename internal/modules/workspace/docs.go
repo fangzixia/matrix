@@ -91,3 +91,16 @@ func (s *Service) ResolveDocPath(projectID uuid.UUID, logicalPath string) (strin
 func (s *Service) DocSandboxDir(projectID uuid.UUID) (string, error) {
 	return s.DocsRoot(projectID)
 }
+
+// MatrixDir 返回单次 Run 的 Agent 运行时数据目录（{workspaces}/{key}/.matrix/runs/{runID}），并确保目录存在。
+func (s *Service) MatrixDir(ctx context.Context, projectID, runID uuid.UUID) (string, error) {
+	key, err := s.ProjectWorkspaceKey(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	dir := storage.ProjectMatrixRunDir(s.paths, key, runID.String())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("workspace: mkdir matrix run %s: %w", dir, err)
+	}
+	return dir, nil
+}

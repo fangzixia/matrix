@@ -20,11 +20,11 @@ type OutputSpillWriter struct {
 
 // NewOutputSpillWriter 创建 toolUseID 对应的 spill 文件写入器。
 func NewOutputSpillWriter(ctx context.Context, toolUseID string) (*OutputSpillWriter, error) {
-	root := SandboxFrom(ctx)
+	root := MatrixDirFrom(ctx)
 	if root == "" {
-		return nil, fmt.Errorf("沙箱未配置")
+		return nil, fmt.Errorf("Matrix 运行时目录未配置")
 	}
-	dir := filepath.Join(root, ".matrix", "tool-outputs")
+	dir := filepath.Join(root, "tool-outputs")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}

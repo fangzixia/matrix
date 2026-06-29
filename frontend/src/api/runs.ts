@@ -59,23 +59,6 @@ export function startRun(
   });
 }
 
-export function startPipeline(
-  projectId: string,
-  message: string,
-  filePath: string,
-  stages: string[] = ["plan", "build"],
-) {
-  return api<Run>(`/api/projects/${projectId}/runs`, {
-    method: "POST",
-    body: JSON.stringify({
-      message,
-      kind: "pipeline",
-      file_path: filePath,
-      stages,
-    }),
-  });
-}
-
 export function getRun(projectId: string, runId: string) {
   return api<Run>(`/api/projects/${projectId}/runs/${runId}`);
 }

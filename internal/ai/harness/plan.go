@@ -86,13 +86,18 @@ func buildPlanPreset(mode string) string {
 }
 
 // NewPlanWorkflow 创建「计划编写」流水线工作流。
-func NewPlanWorkflow(userInput, filePath string) Workflow {
-	return newPlanWorkflowAt(userInput, filePath, time.Now())
+func NewPlanWorkflow(userInput, selectedPath, targetAbsPath string) Workflow {
+	return newPlanWorkflowAt(userInput, selectedPath, targetAbsPath, time.Now())
 }
 
 // newPlanWorkflowAt 在指定路径创建计划工作流实例。
-func newPlanWorkflowAt(userInput, filePath string, now time.Time) Workflow {
-	target, mode := resolvePlanTarget(filePath, now)
+// selectedPath 为用户选中的计划逻辑路径，空表示 create；targetAbsPath 为写入用的绝对路径。
+func newPlanWorkflowAt(userInput, selectedPath, targetAbsPath string, now time.Time) Workflow {
+	_, mode := resolvePlanTarget(selectedPath, now)
+	target := strings.TrimSpace(targetAbsPath)
+	if target == "" {
+		target, _ = resolvePlanTarget(selectedPath, now)
+	}
 	return Workflow{
 		Kind:              KindPlan,
 		State:             StatePrepared,
@@ -128,6 +133,7 @@ func PlanTargetPath(filePath string, now time.Time) string {
 }
 
 // BuildPlanTask 组装「创建计划」任务的 prompt 正文（不含工作区前缀，由调用方追加）。
-func BuildPlanTask(userInput, filePath string) string {
-	return NewPlanWorkflow(userInput, filePath).Prompt()
+// selectedPath 为用户选中的计划逻辑路径，空表示 create；targetAbsPath 为写入用的绝对路径。
+func BuildPlanTask(userInput, selectedPath, targetAbsPath string) string {
+	return NewPlanWorkflow(userInput, selectedPath, targetAbsPath).Prompt()
 }

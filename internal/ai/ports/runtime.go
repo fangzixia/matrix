@@ -38,6 +38,7 @@ type RunRequest struct {
 	Messages         []query.Message
 	SandboxDir       string
 	ExtraSandboxDirs []string
+	MatrixDir        string
 	SessionsDir      string
 	Model            ModelConfig
 	MCP              []MCPServerConfig

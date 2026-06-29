@@ -60,6 +60,7 @@ type RunSandbox interface {
 	ResolveDocPath(projectID uuid.UUID, logicalPath string) (string, error)
 	SanitizeDocLogicalPath(logicalPath string) (string, error)
 	DocSandboxDir(ctx context.Context, projectID uuid.UUID) (string, error)
+	MatrixDir(ctx context.Context, projectID, runID uuid.UUID) (string, error)
 }
 
 // Service 管理 AI 运行生命周期：入队、执行、视图投影与沙箱隔离。

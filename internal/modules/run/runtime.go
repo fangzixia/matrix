@@ -66,7 +66,7 @@ func (r *Runtime) Run(ctx context.Context, req ports.RunRequest, sink stream.Sin
 	if runID == "" {
 		runID = uuid.NewString()
 	}
-	runCtx, cleanup := r.attachRunCancel(ctx, runID, req.SandboxDir, req.ExtraSandboxDirs)
+	runCtx, cleanup := r.attachRunCancel(ctx, runID, req.SandboxDir, req.ExtraSandboxDirs, req.MatrixDir)
 	defer cleanup()
 	streamSink, closeSink := r.buildStreamingSink(sink, runID)
 	defer closeSink()
@@ -89,11 +89,14 @@ func validateRunRequest(req ports.RunRequest) error {
 	return nil
 }
 
-func (r *Runtime) attachRunCancel(ctx context.Context, runID, sandboxDir string, extraSandbox []string) (context.Context, func()) {
+func (r *Runtime) attachRunCancel(ctx context.Context, runID, sandboxDir string, extraSandbox []string, matrixDir string) (context.Context, func()) {
 	runCtx, cancel := context.WithCancel(ctx)
 	runCtx = tools.WithSandbox(runCtx, sandboxDir)
 	if len(extraSandbox) > 0 {
 		runCtx = tools.WithExtraSandboxRoots(runCtx, extraSandbox)
+	}
+	if matrixDir != "" {
+		runCtx = tools.WithMatrixDir(runCtx, matrixDir)
 	}
 	r.mu.Lock()
 	r.runCancels[runID] = cancel

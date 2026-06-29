@@ -25,7 +25,7 @@ type TodoItem struct {
 //
 // TodoWriteTool：
 //   - merge=false 全量替换；merge=true 按 id 合并
-//   - 持久化到沙箱 .matrix/todos.json
+//   - 持久化到 workspaces/{key}/.matrix/runs/{runID}/todos.json（不在 Git 源码目录内）
 func NewTodoWriteTool() *Tool {
 	return &Tool{
 		Name: "todo_write",
@@ -69,11 +69,11 @@ status 取值：pending、in_progress、completed、cancelled`,
 
 // todoWriteFilePath 返回任务项持久化文件路径。
 func todoWriteFilePath(ctx context.Context) (string, error) {
-	root := SandboxFrom(ctx)
+	root := MatrixDirFrom(ctx)
 	if root == "" {
-		return "", fmt.Errorf("沙箱未配置")
+		return "", fmt.Errorf("Matrix 运行时目录未配置")
 	}
-	return filepath.Join(root, ".matrix", "todos.json"), nil
+	return filepath.Join(root, "todos.json"), nil
 }
 
 // decodeTodos 从 JSON 解码任务项列表。

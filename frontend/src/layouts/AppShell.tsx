@@ -157,7 +157,8 @@ export function AppShell() {
   const selectedNavKey = projectId
     ? resolveProjectNavKey(location.pathname, projectId)
     : "";
-  const isChatPage = /\/projects\/[^/]+\/chat$/.test(location.pathname);
+  const isFullBleedPage =
+    /\/projects\/[^/]+\/(chat|plan)$/.test(location.pathname);
   const headerHeight = token.Layout?.headerHeight ?? 48;
   const userMenuItems: MenuProps["items"] = [
     {
@@ -291,11 +292,7 @@ export function AppShell() {
   }
   return (
     <Layout
-      style={
-        isChatPage
-          ? { height: "100vh", overflow: "hidden" }
-          : { minHeight: "100vh" }
-      }
+      style={isFullBleedPage ? { height: "100vh" } : { minHeight: "100vh" }}
     >
       <Header
         style={{
@@ -303,6 +300,8 @@ export function AppShell() {
           alignItems: "center",
           justifyContent: "space-between",
           padding: "0 16px",
+          lineHeight: "normal",
+          overflow: "visible",
           background: token.colorBgContainer,
           borderBottom: `1px solid ${token.colorBorderSecondary}`,
         }}
@@ -460,7 +459,7 @@ export function AppShell() {
       </Header>
       <Layout
         style={
-          isChatPage
+          isFullBleedPage
             ? { height: `calc(100vh - ${headerHeight}px)`, minHeight: 0 }
             : undefined
         }
@@ -495,7 +494,7 @@ export function AppShell() {
         )}
         <Content
           style={
-            isChatPage
+            isFullBleedPage
               ? {
                   padding: 0,
                   flex: 1,
@@ -509,7 +508,7 @@ export function AppShell() {
               : { padding: 24, background: token.colorBgLayout }
           }
         >
-          {isChatPage ? (
+          {isFullBleedPage ? (
             <Flex vertical style={{ height: "100%", flex: 1, minHeight: 0 }}>
               <Outlet />
             </Flex>

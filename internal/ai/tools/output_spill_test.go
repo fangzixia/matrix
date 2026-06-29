@@ -10,13 +10,14 @@ import (
 
 func TestOutputSpillWriter_AppendAndPath(t *testing.T) {
 	dir := t.TempDir()
-	ctx := WithSandbox(context.Background(), dir)
+	matrixDir := filepath.Join(dir, ".matrix")
+	ctx := WithMatrixDir(context.Background(), matrixDir)
 
 	w, err := NewOutputSpillWriter(ctx, "call-abc")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(w.Path(), filepath.Join(".matrix", "tool-outputs", "call-abc.log")) {
+	if !strings.HasSuffix(w.Path(), filepath.Join("tool-outputs", "call-abc.log")) {
 		t.Fatalf("unexpected path: %s", w.Path())
 	}
 	if err := w.Append("hello\n"); err != nil {
@@ -36,7 +37,8 @@ func TestOutputSpillWriter_AppendAndPath(t *testing.T) {
 
 func TestOutputSpillWriter_TruncatesAtCap(t *testing.T) {
 	dir := t.TempDir()
-	ctx := WithSandbox(context.Background(), dir)
+	matrixDir := filepath.Join(dir, ".matrix")
+	ctx := WithMatrixDir(context.Background(), matrixDir)
 
 	w, err := NewOutputSpillWriter(ctx, "big")
 	if err != nil {

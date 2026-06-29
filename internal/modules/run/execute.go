@@ -72,11 +72,11 @@ func (s *Service) GetToolLog(ctx context.Context, runID uuid.UUID, toolUseID str
 	if err := s.db.WithContext(ctx).First(&m, "id = ?", runID).Error; err != nil {
 		return "", err
 	}
-	sandbox, err := s.sandboxDir(ctx, &m)
+	matrixDir, err := s.workspace.MatrixDir(ctx, m.ProjectID, runID)
 	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(sandbox, ".matrix", "tool-outputs", sanitizeToolUseIDForLog(toolUseID)+".log")
+	path := filepath.Join(matrixDir, "tool-outputs", sanitizeToolUseIDForLog(toolUseID)+".log")
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
@@ -519,7 +519,7 @@ func (s *Service) buildRunRequest(ctx context.Context, m *models.Run, kind strin
 	if err != nil {
 		return ports.RunRequest{}, err
 	}
-	planFilePath := s.harnessPlanFilePath(m.ProjectID, m.FilePath, kind)
+	planAbsPath := s.harnessPlanFilePath(m.ProjectID, m.FilePath, kind)
 	evalFilePath := s.resolveHarnessDocPath(m.ProjectID, m.EvalFilePath)
 	var messages []query.Message
 	if kind == "chat" {
@@ -528,16 +528,20 @@ func (s *Service) buildRunRequest(ctx context.Context, m *models.Run, kind strin
 			return ports.RunRequest{}, err
 		}
 	} else {
-		messages = BuildHarnessMessages(kind, m.Title, planFilePath, evalFilePath, sandboxDir, docsRoot)
+		messages = BuildHarnessMessages(kind, m.Title, m.FilePath, planAbsPath, evalFilePath, sandboxDir, docsRoot)
 	}
 	docSandbox, err := s.workspace.DocSandboxDir(ctx, m.ProjectID)
+	if err != nil {
+		return ports.RunRequest{}, err
+	}
+	matrixDir, err := s.workspace.MatrixDir(ctx, m.ProjectID, m.ID)
 	if err != nil {
 		return ports.RunRequest{}, err
 	}
 	allowCommandMCP := s.runtimeCfg.AI.Security.AllowCommandMCP
 	return ports.RunRequest{
 		RunID: m.ID.String(), Kind: kind, Messages: messages,
-		SandboxDir: sandboxDir, ExtraSandboxDirs: []string{docSandbox},
+		SandboxDir: sandboxDir, ExtraSandboxDirs: []string{docSandbox}, MatrixDir: matrixDir,
 		SessionsDir: storageProjectSessions(s.paths, projectCode),
 		Model: ports.ModelConfig{
 			BaseURL: modelCfg.BaseURL, APIKey: modelCfg.APIKey,

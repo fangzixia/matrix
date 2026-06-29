@@ -108,3 +108,8 @@ func (r *ProjectRepoResolver) DocSandboxDir(ctx context.Context, projectID uuid.
 	_ = ctx
 	return r.WS.DocSandboxDir(projectID)
 }
+
+// MatrixDir 返回单次 Run 的 Agent 运行时数据目录。
+func (r *ProjectRepoResolver) MatrixDir(ctx context.Context, projectID, runID uuid.UUID) (string, error) {
+	return r.WS.MatrixDir(ctx, projectID, runID)
+}

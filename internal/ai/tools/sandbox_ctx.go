@@ -10,6 +10,8 @@ type sandboxKey struct{}
 
 type extraSandboxKey struct{}
 
+type matrixDirKey struct{}
+
 // WithSandbox 将项目沙箱根目录绑定到 context，供同一次 Run 及其子 Worker 共享。
 func WithSandbox(ctx context.Context, root string) context.Context {
 	root = normalizeSandboxRoot(root)
@@ -49,6 +51,24 @@ func ExtraSandboxRootsFrom(ctx context.Context) []string {
 	}
 	roots, _ := ctx.Value(extraSandboxKey{}).([]string)
 	return roots
+}
+
+// WithMatrixDir 绑定 Matrix 运行时数据目录（workspaces/{key}/.matrix/runs/{runID}，独立于 Git 源码）。
+func WithMatrixDir(ctx context.Context, root string) context.Context {
+	root = normalizeSandboxRoot(root)
+	if root == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, matrixDirKey{}, root)
+}
+
+// MatrixDirFrom 返回 Matrix 运行时数据目录（绝对路径）。
+func MatrixDirFrom(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	root, _ := ctx.Value(matrixDirKey{}).(string)
+	return root
 }
 
 // normalizeSandboxRoot 规范化沙箱根目录路径。

@@ -162,3 +162,13 @@ func ProjectDocsPlansDir(p Paths, projectKey string) string {
 func ProjectDocsEvaluationsDir(p Paths, projectKey string) string {
 	return filepath.Join(ProjectDocsDir(p, projectKey), "evaluations")
 }
+
+// ProjectMatrixDir 返回 Agent 运行时数据根目录（独立于 Git 源码仓库）。
+func ProjectMatrixDir(p Paths, projectKey string) string {
+	return filepath.Join(p.WorkspacesDir, projectKey, ".matrix")
+}
+
+// ProjectMatrixRunDir 返回单次 Run 的 Agent 运行时数据目录。
+func ProjectMatrixRunDir(p Paths, projectKey, runID string) string {
+	return filepath.Join(ProjectMatrixDir(p, projectKey), "runs", runID)
+}
