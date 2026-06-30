@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   Alert,
+  Button,
   Card,
   Descriptions,
   Drawer,
@@ -17,6 +18,17 @@ import { GlobalOutlined, LockOutlined } from "@ant-design/icons";
 import { useProjectStore } from "@/stores/project";
 import * as projectsApi from "@/api/projects";
 import MarkdownView from "@/components/docs/MarkdownView";
+import PlanConfirmDrawer from "@/components/docs/PlanConfirmDrawer";
+
+function planStatusLabel(status?: string) {
+  if (status === "approved") return "已批准";
+  return "待确认";
+}
+
+function planStatusColor(status?: string) {
+  if (status === "approved") return "success";
+  return "warning";
+}
 
 type DocItem = projectsApi.PlanItem | projectsApi.EvaluationItem;
 
@@ -35,6 +47,18 @@ export default function OverviewPage() {
     content: string;
     path: string;
   } | null>(null);
+  const [confirmPlan, setConfirmPlan] = useState<projectsApi.PlanItem | null>(
+    null,
+  );
+  const loadPlans = useCallback(async () => {
+    setPlansError("");
+    try {
+      const res = await projectsApi.listPlans(projectId);
+      setPlans(res.plans ?? []);
+    } catch (e) {
+      setPlansError(e instanceof Error ? e.message : "计划文档加载失败");
+    }
+  }, [projectId]);
   useEffect(() => {
     if (!projectId) return;
     setLoading(true);
@@ -126,11 +150,40 @@ export default function OverviewPage() {
               dataSource={plans}
               renderItem={(item) => (
                 <List.Item
-                  onClick={() => openDoc(item)}
-                  style={{ cursor: "pointer" }}
+                  actions={[
+                    <Button
+                      key="preview"
+                      type="link"
+                      size="small"
+                      onClick={() => openDoc(item)}
+                    >
+                      预览
+                    </Button>,
+                    item.status === "approved" ? (
+                      <Button key="confirm" type="link" size="small" disabled>
+                        已批准
+                      </Button>
+                    ) : (
+                      <Button
+                        key="confirm"
+                        type="link"
+                        size="small"
+                        onClick={() => setConfirmPlan(item)}
+                      >
+                        确认计划
+                      </Button>
+                    ),
+                  ]}
                 >
                   <List.Item.Meta
-                    title={item.title || item.path}
+                    title={
+                      <Space size={8}>
+                        <span>{item.title || item.path}</span>
+                        <Tag color={planStatusColor(item.status)}>
+                          {planStatusLabel(item.status)}
+                        </Tag>
+                      </Space>
+                    }
                     description={
                       <Typography.Text
                         type="secondary"
@@ -212,6 +265,13 @@ export default function OverviewPage() {
           </>
         )}
       </Drawer>
+      <PlanConfirmDrawer
+        projectId={projectId}
+        plan={confirmPlan}
+        open={!!confirmPlan}
+        onClose={() => setConfirmPlan(null)}
+        onApproved={loadPlans}
+      />
     </>
   );
 }
