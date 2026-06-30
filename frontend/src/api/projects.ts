@@ -155,16 +155,21 @@ export function removeMember(projectId: string, userId: string) {
   });
 }
 
-export function listFiles(projectId: string, path = "") {
-  const q = path ? `?path=${encodeURIComponent(path)}` : "";
+export function listFiles(projectId: string, runId: string, path = "") {
+  const params = new URLSearchParams({ run_id: runId });
+  if (path) params.set("path", path);
   return api<{ files: FileEntry[] }>(
-    `/api/projects/${projectId}/repository/tree${q}`,
+    `/api/projects/${projectId}/repository/tree?${params}`,
   );
 }
 
-export function readFile(projectId: string, path: string) {
+export function readFile(projectId: string, runId: string, path: string) {
+  const params = new URLSearchParams({
+    run_id: runId,
+    path,
+  });
   return api<{ content: string }>(
-    `/api/projects/${projectId}/repository/file?path=${encodeURIComponent(path)}`,
+    `/api/projects/${projectId}/repository/file?${params}`,
   );
 }
 
@@ -189,19 +194,6 @@ export function listEvaluations(projectId: string) {
   return api<{ evaluations: EvaluationItem[] | null }>(
     `/api/projects/${projectId}/evaluations`,
   );
-}
-
-export function pullRepository(projectId: string) {
-  return api<{ ok: boolean }>(`/api/projects/${projectId}/repository/pull`, {
-    method: "POST",
-  });
-}
-
-export function pushRepository(projectId: string, message?: string) {
-  return api<{ ok: boolean }>(`/api/projects/${projectId}/repository/push`, {
-    method: "POST",
-    body: JSON.stringify({ message: message || "" }),
-  });
 }
 
 /** 将 ISO 时间格式化为中文相对时间（如「3 小时前」） */

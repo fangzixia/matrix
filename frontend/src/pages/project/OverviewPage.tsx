@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   Alert,
@@ -18,7 +18,6 @@ import { GlobalOutlined, LockOutlined } from "@ant-design/icons";
 import { useProjectStore } from "@/stores/project";
 import * as projectsApi from "@/api/projects";
 import MarkdownView from "@/components/docs/MarkdownView";
-import PlanConfirmDrawer from "@/components/docs/PlanConfirmDrawer";
 
 function planStatusLabel(status?: string) {
   if (status === "approved") return "已批准";
@@ -47,18 +46,6 @@ export default function OverviewPage() {
     content: string;
     path: string;
   } | null>(null);
-  const [confirmPlan, setConfirmPlan] = useState<projectsApi.PlanItem | null>(
-    null,
-  );
-  const loadPlans = useCallback(async () => {
-    setPlansError("");
-    try {
-      const res = await projectsApi.listPlans(projectId);
-      setPlans(res.plans ?? []);
-    } catch (e) {
-      setPlansError(e instanceof Error ? e.message : "计划文档加载失败");
-    }
-  }, [projectId]);
   useEffect(() => {
     if (!projectId) return;
     setLoading(true);
@@ -159,20 +146,6 @@ export default function OverviewPage() {
                     >
                       预览
                     </Button>,
-                    item.status === "approved" ? (
-                      <Button key="confirm" type="link" size="small" disabled>
-                        已批准
-                      </Button>
-                    ) : (
-                      <Button
-                        key="confirm"
-                        type="link"
-                        size="small"
-                        onClick={() => setConfirmPlan(item)}
-                      >
-                        确认计划
-                      </Button>
-                    ),
                   ]}
                 >
                   <List.Item.Meta
@@ -265,13 +238,6 @@ export default function OverviewPage() {
           </>
         )}
       </Drawer>
-      <PlanConfirmDrawer
-        projectId={projectId}
-        plan={confirmPlan}
-        open={!!confirmPlan}
-        onClose={() => setConfirmPlan(null)}
-        onApproved={loadPlans}
-      />
     </>
   );
 }

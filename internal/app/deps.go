@@ -27,29 +27,30 @@ import (
 
 // Deps 应用级依赖容器：各领域 Service 与共享基础设施。
 type Deps struct {
-	Config         *config.Config           // config.yml 文件配置
-	Runtime        *config.RuntimeConfig    // 运行时配置（DB 热更新）
-	Paths          storage.Paths            // 数据/工作区/审计目录
-	DB             *gorm.DB                 // PostgreSQL
-	Log            *slog.Logger             // 结构化日志
-	Hub            *events.Hub              // SSE 事件总线
-	Auth           *identity.AuthService    // 登录校验
-	Users          *identity.UserRepo       // 用户 CRUD
-	Sessions       *identity.SessionService // Session Cookie
-	IAM            *iam.Enforcer            // 项目 RBAC
-	Members        *iam.MemberService       // 项目成员
-	Projects       *project.Service         // 项目
-	Repositories   *repository.Service      // Git 仓库绑定
-	Groups         *group.Service           // 用户组
-	Workspace      *workspace.Service       // Git 工作区
-	Runs           *run.Service             // AI Run/Chat
-	Jobs           *job.Service             // 任务队列
-	Pipeline       *pipeline.Service        // 流水线阶段
-	Notifications  *notification.Service    // 通知
-	Plans          *plan.Service            // 计划文档
-	Artifacts      *artifact.Service        // 评测产物
-	RunRuntime     *run.Runtime             // AI Agent 运行时
-	SystemSettings *settings.Service        // 系统级配置（DB）
+	Config         *config.Config                 // config.yml 文件配置
+	Runtime        *config.RuntimeConfig          // 运行时配置（DB 热更新）
+	Paths          storage.Paths                  // 数据/工作区/审计目录
+	DB             *gorm.DB                       // PostgreSQL
+	Log            *slog.Logger                   // 结构化日志
+	Hub            *events.Hub                    // SSE 事件总线
+	Auth           *identity.AuthService          // 登录校验
+	Users          *identity.UserRepo             // 用户 CRUD
+	Sessions       *identity.SessionService       // Session Cookie
+	IAM            *iam.Enforcer                  // 项目 RBAC
+	Members        *iam.MemberService             // 项目成员
+	Projects       *project.Service               // 项目
+	Repositories   *repository.Service            // Git 仓库绑定
+	Groups         *group.Service                 // 用户组
+	Workspace      *workspace.Service             // 工作区（Run 级仓库与文档）
+	WorkspaceRepo  *workspace.ProjectRepoResolver // Run 沙箱解析
+	Runs           *run.Service                   // AI Run/Chat
+	Jobs           *job.Service                   // 任务队列
+	Pipeline       *pipeline.Service              // 流水线阶段
+	Notifications  *notification.Service          // 通知
+	Plans          *plan.Service                  // 计划文档
+	Artifacts      *artifact.Service              // 评测产物
+	RunRuntime     *run.Runtime                   // AI Agent 运行时
+	SystemSettings *settings.Service              // 系统级配置（DB）
 }
 
 // NewDeps 组装应用依赖图（数据库、IAM、Run 队列、通知等）。
@@ -79,7 +80,6 @@ func NewDeps(cfg *config.Config, runtime *config.RuntimeConfig, paths storage.Pa
 	runs.SetJobEnqueuer(jobs)
 	runs.SetNotifier(notifications)
 	runs.SetPipeline(pipe)
-	runs.SetPullAll(ws.PullAll)
 	runs.SetPlans(plans)
 	runs.SetArtifacts(artifactsSvc)
 	runs.SetAIRuntimeReloader(sysSettings)
@@ -88,7 +88,7 @@ func NewDeps(cfg *config.Config, runtime *config.RuntimeConfig, paths storage.Pa
 		Auth: auth, Users: users, Sessions: sessions,
 		IAM: iam.NewEnforcer(db), Members: iam.NewMemberService(db),
 		Projects: projects, Repositories: repos, Groups: groups,
-		Workspace: ws, Runs: runs, Jobs: jobs, Pipeline: pipe, Notifications: notifications,
+		Workspace: ws, WorkspaceRepo: resolver, Runs: runs, Jobs: jobs, Pipeline: pipe, Notifications: notifications,
 		Plans: plans, Artifacts: artifactsSvc,
 		RunRuntime: rt, SystemSettings: sysSettings,
 	}

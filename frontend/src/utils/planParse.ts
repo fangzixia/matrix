@@ -50,25 +50,15 @@ function isNoneMarker(s: string): boolean {
   return v === "无" || v === "暂无" || v === "none" || v === "n/a" || v === "-";
 }
 
-export function itemKey(
-  section: "risk" | "conflict" | "clarify",
-  index: number,
-): string {
-  return `${section}-${index}`;
-}
-
-export function allConfirmItems(
+export function confirmDisplayItems(
   items: PlanSectionItems,
-): Array<{ key: string; section: string; text: string }> {
-  const rows: Array<{ key: string; section: string; text: string }> = [];
-  items.risks.forEach((text, i) =>
-    rows.push({ key: itemKey("risk", i), section: "风险", text }),
+): Array<{ section: string; text: string }> {
+  const rows: Array<{ section: string; text: string }> = [];
+  items.conflicts.forEach((text) =>
+    rows.push({ section: "冲突与依赖", text }),
   );
-  items.conflicts.forEach((text, i) =>
-    rows.push({ key: itemKey("conflict", i), section: "冲突与依赖", text }),
-  );
-  items.clarifications.forEach((text, i) =>
-    rows.push({ key: itemKey("clarify", i), section: "待优化 / 待澄清", text }),
+  items.clarifications.forEach((text) =>
+    rows.push({ section: "待优化 / 待澄清", text }),
   );
   return rows;
 }

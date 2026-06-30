@@ -40,27 +40,17 @@ type RunNotifier interface {
 	NotifyRunStatus(ctx context.Context, userID uuid.UUID, projectID, runID uuid.UUID, runKind, status, title string)
 }
 
-// PullAllFunc 拉取项目下全部 Git 仓库的最新代码。
-type PullAllFunc func(ctx context.Context, projectID uuid.UUID) error
-
 // AIRuntimeReloader 在 Run 启动前从数据库刷新 AI 模型配置（含 API Key）。
 type AIRuntimeReloader interface {
 	ReloadAI(ctx context.Context) error
 }
 
-// WorkspaceResolver 解析项目或指定仓库的沙箱根目录。
-type WorkspaceResolver interface {
-	RepoRoot(ctx context.Context, projectID uuid.UUID) (string, error)
-	RepoRootFor(ctx context.Context, projectID uuid.UUID, repoID *uuid.UUID) (string, error)
-}
-
-// RunSandbox 扩展工作区解析，支持 Run 级 worktree 沙箱、文档目录与合并。
+// RunSandbox 扩展工作区解析，支持 Run 级独立仓库沙箱与文档目录。
 type RunSandbox interface {
-	WorkspaceResolver
 	ProjectWorkspaceKey(ctx context.Context, projectID uuid.UUID) (string, error)
-	CreateRunWorktree(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID, runID uuid.UUID) (sandboxPath, branch string, err error)
-	RemoveRunWorktree(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID, runID uuid.UUID, branch, sandboxPath string) error
-	MergeRunWorktree(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID, runID uuid.UUID, branch, sandboxPath string) ([]string, error)
+	CreateRunRepo(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID, runID uuid.UUID) (sandboxPath string, err error)
+	CopyRunRepoFrom(ctx context.Context, projectID uuid.UUID, sourceRepoDir string, runID uuid.UUID) (sandboxPath string, err error)
+	RemoveRunRepo(ctx context.Context, projectID uuid.UUID, runID uuid.UUID) error
 	DocsRoot(ctx context.Context, projectID uuid.UUID) (string, error)
 	ResolveDocPath(projectID uuid.UUID, logicalPath string) (string, error)
 	SanitizeDocLogicalPath(logicalPath string) (string, error)
@@ -80,10 +70,8 @@ type Service struct {
 	jobs         JobEnqueuer
 	notifier     RunNotifier
 	pipeline     *pipeline.Service
-	pullAll      PullAllFunc
 	plans        *plan.Service
 	artifacts    *artifact.Service
-	sandboxLocks *sandboxLocks
 	lifecycleCtx context.Context
 	lifecycleMu  sync.RWMutex
 	aiReloader   AIRuntimeReloader
@@ -95,8 +83,7 @@ func NewService(db *gorm.DB, rt *Runtime, hub *events.Hub, paths storage.Paths, 
 		db: db, runtime: rt, hub: hub,
 		viewStore: view.NewStore(db),
 		paths:     paths, runtimeCfg: runtime,
-		workspace:    ws,
-		sandboxLocks: newSandboxLocks(),
+		workspace: ws,
 	}
 }
 
@@ -130,9 +117,6 @@ func (s *Service) SetArtifacts(a *artifact.Service) { s.artifacts = a }
 
 // SetPipeline 注入流水线服务。
 func (s *Service) SetPipeline(p *pipeline.Service) { s.pipeline = p }
-
-// SetPullAll 注入批量 Git 拉取函数。
-func (s *Service) SetPullAll(fn PullAllFunc) { s.pullAll = fn }
 
 // SetAIRuntimeReloader 注入 AI 配置热加载器，Run 启动前从 DB 刷新模型 Key。
 func (s *Service) SetAIRuntimeReloader(r AIRuntimeReloader) { s.aiReloader = r }
@@ -174,8 +158,6 @@ type RunDTO struct {
 	EvalFilePath       string     `json:"eval_file_path,omitempty"`
 	AuditPath          string     `json:"audit_path,omitempty"`
 	SandboxPath        string     `json:"sandbox_path,omitempty"`
-	RunBranch          string     `json:"run_branch,omitempty"`
-	MergeStatus        string     `json:"merge_status,omitempty"`
 	ErrorMessage       string     `json:"error_message,omitempty"`
 	Output             string     `json:"output,omitempty"`
 	StartedAt          *time.Time `json:"started_at,omitempty"`
@@ -371,7 +353,7 @@ func (s *Service) cancelRunModel(ctx context.Context, m *models.Run) error {
 	if err := s.db.WithContext(ctx).Model(m).Updates(map[string]any{"status": "cancelled", "finished_at": fin}).Error; err != nil {
 		return err
 	}
-	return s.finishRunView(ctx, m.ID, "cancelled", "", "任务已取消", "")
+	return s.finishRunView(ctx, m.ID, "cancelled", "", "任务已取消")
 }
 
 // Hub 返回通知 SSE 事件 Hub（非 Run 视图流）。
@@ -399,7 +381,7 @@ func (s *Service) catchUpRunView(ctx context.Context, m *models.Run, mode view.M
 	}
 	envs, done, maxSeq := s.viewStore.CatchUpAfterSeq(
 		ctx, m.ID.String(), mode, afterSeq,
-		m.Status, m.Output, userErr, m.MergeStatus,
+		m.Status, m.Output, userErr,
 	)
 	return envs, done, maxSeq, nil
 }
@@ -584,69 +566,9 @@ func toRunDTO(m *models.Run) RunDTO {
 		ID: m.ID, ProjectID: m.ProjectID, RepositoryID: m.RepositoryID,
 		Kind: m.Kind, Status: m.Status, Title: m.Title,
 		FilePath: m.FilePath, EvalFilePath: m.EvalFilePath,
-		AuditPath:   m.AuditPath,
-		SandboxPath: m.SandboxPath, RunBranch: m.RunBranch, MergeStatus: m.MergeStatus,
+		AuditPath:    m.AuditPath,
+		SandboxPath:  m.SandboxPath,
 		ErrorMessage: m.ErrorMessage, Output: m.Output, StartedAt: m.StartedAt,
 		FinishedAt: m.FinishedAt, CreatedAt: m.CreatedAt,
 	}
-}
-
-func (s *Service) mergeRunModel(ctx context.Context, m *models.Run) (*RunDTO, []string, error) {
-	if m.MergeStatus != "pending" {
-		return nil, nil, errors.New("当前 Run 不可合并")
-	}
-	conflicts, err := s.workspace.MergeRunWorktree(ctx, m.ProjectID, m.RepositoryID, m.ID, m.RunBranch, m.SandboxPath)
-	if err != nil {
-		return new(toRunDTO(m)), conflicts, err
-	}
-	if err := s.workspace.RemoveRunWorktree(ctx, m.ProjectID, m.RepositoryID, m.ID, m.RunBranch, m.SandboxPath); err != nil {
-		return new(toRunDTO(m)), nil, err
-	}
-	if err := s.db.WithContext(ctx).Model(m).Updates(map[string]any{
-		"merge_status": "merged", "sandbox_path": "", "run_branch": "",
-	}).Error; err != nil {
-		return nil, nil, err
-	}
-	m.MergeStatus = "merged"
-	m.SandboxPath = ""
-	m.RunBranch = ""
-	return new(toRunDTO(m)), nil, nil
-}
-
-// MergeRunForProject 将项目内 Run worktree 合并到主仓库。
-func (s *Service) MergeRunForProject(ctx context.Context, projectID, runID uuid.UUID) (*RunDTO, []string, error) {
-	m, err := s.loadProjectRun(ctx, projectID, runID)
-	if err != nil {
-		return nil, nil, err
-	}
-	return s.mergeRunModel(ctx, m)
-}
-
-func (s *Service) discardRunModel(ctx context.Context, m *models.Run) (*RunDTO, error) {
-	if m.MergeStatus != "pending" {
-		return nil, errors.New("当前 Run 不可放弃")
-	}
-	if m.SandboxPath != "" {
-		if err := s.workspace.RemoveRunWorktree(ctx, m.ProjectID, m.RepositoryID, m.ID, m.RunBranch, m.SandboxPath); err != nil {
-			return nil, err
-		}
-	}
-	if err := s.db.WithContext(ctx).Model(m).Updates(map[string]any{
-		"merge_status": "discarded", "sandbox_path": "", "run_branch": "",
-	}).Error; err != nil {
-		return nil, err
-	}
-	m.MergeStatus = "discarded"
-	m.SandboxPath = ""
-	m.RunBranch = ""
-	return new(toRunDTO(m)), nil
-}
-
-// DiscardRunForProject 放弃项目内 Run worktree 变更。
-func (s *Service) DiscardRunForProject(ctx context.Context, projectID, runID uuid.UUID) (*RunDTO, error) {
-	m, err := s.loadProjectRun(ctx, projectID, runID)
-	if err != nil {
-		return nil, err
-	}
-	return s.discardRunModel(ctx, m)
 }

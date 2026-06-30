@@ -96,7 +96,6 @@ export interface RunFinishedPayload {
   status: string;
   output?: string;
   error?: string;
-  mergeStatus?: string;
 }
 
 export interface TextDeltaPayload {

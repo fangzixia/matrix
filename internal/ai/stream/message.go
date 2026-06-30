@@ -94,8 +94,7 @@ type Message struct {
 	Assistant *AssistantPayload `json:"message,omitempty"`
 
 	// run_terminal 类型字段
-	Status      string `json:"status,omitempty"`
-	MergeStatus string `json:"merge_status,omitempty"`
+	Status string `json:"status,omitempty"`
 
 	// result 类型字段
 	Subtype      string `json:"subtype,omitempty"`
@@ -366,13 +365,12 @@ func Assistant(sessionID, text, thinking string, toolCalls []ToolUseBlock, stopR
 }
 
 // RunTerminalMsg 构建 Run 结束事件（经 SSE event: run:terminal 推送）。
-func RunTerminalMsg(sessionID, status, output, errMsg, mergeStatus string) Message {
+func RunTerminalMsg(sessionID, status, output, errMsg string) Message {
 	m := base(sessionID)
 	m.Type = TypeRunTerminal
 	m.Status = status
 	m.Output = output
 	m.ErrorMessage = errMsg
-	m.MergeStatus = mergeStatus
 	return m
 }
 

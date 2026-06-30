@@ -23,7 +23,7 @@ import * as runsApi from "@/api/runs";
 import type { RunStep } from "@/api/runs";
 import type { RunViewState } from "@/types/runView";
 import { runStatusLabels, stageTitles } from "@/locales/zh-CN";
-import { canMergeRun, isStageKind, stageKindFromPath } from "@/utils/stage";
+import { isStageKind, stageKindFromPath } from "@/utils/stage";
 import { useRunStore } from "@/stores/run";
 import { useRunActivityView } from "@/hooks/useRunActivityView";
 
@@ -68,9 +68,6 @@ export default function StageTaskDetailPage() {
   const setCurrent = useRunStore((s) => s.setCurrent);
   const [steps, setSteps] = useState<RunStep[]>([]);
   const [stepsError, setStepsError] = useState("");
-  const [mergeError, setMergeError] = useState("");
-  const [conflicts, setConflicts] = useState<string[]>([]);
-  const [acting, setActing] = useState(false);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const running =
     currentRun?.status === "running" ||
@@ -162,35 +159,7 @@ export default function StageTaskDetailPage() {
     await reloadView();
   }
 
-  async function merge() {
-    setActing(true);
-    setMergeError("");
-    setConflicts([]);
-    try {
-      const run = await runsApi.mergeRun(projectId, taskId);
-      setCurrent(run);
-      setConflicts([]);
-    } catch (e) {
-      const err = e as Error & { conflicts?: string[] };
-      setMergeError(err.message || "合并失败");
-      if (err.conflicts?.length) setConflicts(err.conflicts);
-    } finally {
-      setActing(false);
-    }
-  }
-
-  async function discard() {
-    setActing(true);
-    try {
-      const run = await runsApi.discardRun(projectId, taskId);
-      setCurrent(run);
-    } finally {
-      setActing(false);
-    }
-  }
-
   const panelState = viewState ?? emptyView(taskId);
-  const canMerge = currentRun ? canMergeRun(currentRun) : false;
   const { result } = panelState;
   const terminal = currentRun && !running;
   const resultStatus = useMemo(() => {
@@ -253,33 +222,12 @@ export default function StageTaskDetailPage() {
             {currentRun?.title || taskId}
           </Typography.Title>
           {currentRun && (
-            <Space wrap>
-              <Tag color={statusColor(currentRun.status)}>
-                {runStatusLabels[currentRun.status] || currentRun.status}
-              </Tag>
-              {currentRun.merge_status && (
-                <Tag>
-                  {currentRun.merge_status === "pending"
-                    ? "待合并"
-                    : currentRun.merge_status === "merged"
-                      ? "已合并"
-                      : "已放弃"}
-                </Tag>
-              )}
-            </Space>
+            <Tag color={statusColor(currentRun.status)}>
+              {runStatusLabels[currentRun.status] || currentRun.status}
+            </Tag>
           )}
         </div>
         <Space wrap>
-          {canMerge && (
-            <>
-              <Button type="primary" loading={acting} onClick={merge}>
-                合并到主仓库
-              </Button>
-              <Button loading={acting} onClick={discard}>
-                放弃
-              </Button>
-            </>
-          )}
           {(currentRun?.status === "running" ||
             currentRun?.status === "queued") && (
             <Button danger onClick={cancel}>
@@ -293,11 +241,6 @@ export default function StageTaskDetailPage() {
           {currentRun.sandbox_path && (
             <Descriptions.Item label="沙箱">
               {currentRun.sandbox_path}
-            </Descriptions.Item>
-          )}
-          {currentRun.run_branch && (
-            <Descriptions.Item label="分支">
-              {currentRun.run_branch}
             </Descriptions.Item>
           )}
           {currentRun.started_at && (
@@ -330,16 +273,6 @@ export default function StageTaskDetailPage() {
         />
       )}
       {stepsError && <Alert type="warning" showIcon message={stepsError} />}
-      {mergeError && (
-        <Alert
-          type="error"
-          showIcon
-          message={mergeError}
-          description={
-            conflicts.length ? `冲突文件：${conflicts.join(", ")}` : undefined
-          }
-        />
-      )}
       <Card
         title="运行过程"
         extra={runningExtra}

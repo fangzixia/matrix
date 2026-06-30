@@ -32,8 +32,6 @@ func registerRunRoutes(api *gin.RouterGroup, d *app.Deps) {
 	api.GET("/projects/:id/runs/:runId/view", authz, guest, func(c *gin.Context) { getRunView(c, d) })
 	api.GET("/projects/:id/runs/:runId/tools/:toolUseId/log", authz, guest, func(c *gin.Context) { getToolLog(c, d) })
 	api.POST("/projects/:id/runs/:runId/cancel", authz, dev, func(c *gin.Context) { cancelRun(c, d) })
-	api.POST("/projects/:id/runs/:runId/merge", authz, dev, func(c *gin.Context) { mergeRun(c, d) })
-	api.POST("/projects/:id/runs/:runId/discard", authz, dev, func(c *gin.Context) { discardRun(c, d) })
 }
 
 // listRuns 列出Runs。
@@ -214,41 +212,4 @@ func cancelRun(c *gin.Context, d *app.Deps) {
 		return
 	}
 	c.JSON(200, gin.H{"ok": true})
-}
-
-// mergeRun 合并Run。
-func mergeRun(c *gin.Context, d *app.Deps) {
-	pid := auth.ProjectID(c)
-	rid, ok := paramUUID(c, "runId")
-	if !ok {
-		return
-	}
-	rn, conflicts, err := d.Runs.MergeRunForProject(c.Request.Context(), pid, rid)
-	if err != nil {
-		if len(conflicts) > 0 {
-			platformhttp.JSONErrorDetails(c, 409, "conflict", err.Error(), gin.H{
-				"conflicts": conflicts,
-				"run":       rn,
-			})
-			return
-		}
-		platformhttp.JSONError(c, 400, "bad_request", err.Error())
-		return
-	}
-	c.JSON(200, rn)
-}
-
-// discardRun 丢弃Run。
-func discardRun(c *gin.Context, d *app.Deps) {
-	pid := auth.ProjectID(c)
-	rid, ok := paramUUID(c, "runId")
-	if !ok {
-		return
-	}
-	rn, err := d.Runs.DiscardRunForProject(c.Request.Context(), pid, rid)
-	if err != nil {
-		platformhttp.JSONError(c, 400, "bad_request", err.Error())
-		return
-	}
-	c.JSON(200, rn)
 }

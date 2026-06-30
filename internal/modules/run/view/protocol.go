@@ -53,10 +53,9 @@ type RunStartedPayload struct {
 
 // RUN_FINISHED payload.
 type RunFinishedPayload struct {
-	Status      string `json:"status"`
-	Output      string `json:"output,omitempty"`
-	Error       string `json:"error,omitempty"`
-	MergeStatus string `json:"mergeStatus,omitempty"`
+	Status string `json:"status"`
+	Output string `json:"output,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 // RUN_ERROR payload.

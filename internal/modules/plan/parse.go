@@ -68,38 +68,3 @@ func isNoneMarker(s string) bool {
 		return false
 	}
 }
-
-// ItemKey 为计划确认项生成稳定键。
-func ItemKey(section string, index int) string {
-	return section + "-" + itoa(index)
-}
-
-// itoa 将整数格式化为十进制字符串。
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var digits []byte
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	return string(digits)
-}
-
-// UnresolvedKeys 返回仍需要用户填写解决方案文本的项键。
-func UnresolvedKeys(items SectionItems, resolutions map[string]string) []string {
-	var keys []string
-	appendUnresolved := func(section string, list []string) {
-		for i, item := range list {
-			key := ItemKey(section, i)
-			if strings.TrimSpace(resolutions[key]) == "" {
-				keys = append(keys, key+": "+item)
-			}
-		}
-	}
-	appendUnresolved("risk", items.Risks)
-	appendUnresolved("conflict", items.Conflicts)
-	appendUnresolved("clarify", items.Clarifications)
-	return keys
-}

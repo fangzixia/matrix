@@ -34,6 +34,7 @@ import DocFileSelect, {
 } from "@/components/docs/DocFileSelect";
 
 import MarkdownView from "@/components/docs/MarkdownView";
+import PlanConfirmDrawer from "@/components/docs/PlanConfirmDrawer";
 
 const PLAN_PROMPTS: ChatPromptItem[] = [
   {
@@ -63,13 +64,17 @@ function statusColor(status: string) {
 function PlanFileFooter({
   filePath,
   planOptions,
+  planStatus,
   onFilePathChange,
   onPreview,
+  onConfirm,
 }: {
   filePath: string;
   planOptions: DocFileOption[];
+  planStatus?: string;
   onFilePathChange: (path: string) => void;
   onPreview: (path: string) => void;
+  onConfirm: () => void;
 }) {
   if (planOptions.length > 0) {
     return (
@@ -81,7 +86,16 @@ function PlanFileFooter({
           placeholder="选择计划文件（可选）"
         />
         {filePath && (
-          <Button onClick={() => onPreview(filePath)}>预览</Button>
+          <>
+            <Button onClick={() => onPreview(filePath)}>预览</Button>
+            {planStatus === "approved" ? (
+              <Button disabled>已批准</Button>
+            ) : (
+              <Button type="primary" onClick={onConfirm}>
+                确认计划
+              </Button>
+            )}
+          </>
         )}
       </Space.Compact>
     );
@@ -192,6 +206,9 @@ export default function StagePage() {
     content: string;
     path: string;
   } | null>(null);
+  const [confirmPlan, setConfirmPlan] = useState<projectsApi.PlanItem | null>(
+    null,
+  );
 
   useEffect(() => {
     fetchRuns(id, kind);
@@ -273,7 +290,7 @@ export default function StagePage() {
     if (requiresApprovedPlan && filePath) {
       const selected = plans.find((p) => p.path === filePath);
       if (selected && selected.status !== "approved") {
-        setStartError("计划尚未批准，请先在概览页确认计划");
+        setStartError("计划尚未批准，请先在编写计划页确认计划");
         return;
       }
     }
@@ -312,6 +329,11 @@ export default function StagePage() {
       );
   }, [fetchRuns, id]);
 
+  const selectedPlan = useMemo(
+    () => plans.find((p) => p.path === filePath) ?? null,
+    [plans, filePath],
+  );
+
   if (kind === "plan") {
     return (
       <>
@@ -342,8 +364,10 @@ export default function StagePage() {
                 <PlanFileFooter
                   filePath={filePath}
                   planOptions={planOptions}
+                  planStatus={selectedPlan?.status}
                   onFilePathChange={setFilePath}
                   onPreview={(path) => openPreview(path, plans)}
+                  onConfirm={() => setConfirmPlan(selectedPlan)}
                 />
               }
             />
@@ -376,6 +400,13 @@ export default function StagePage() {
           </Splitter.Panel>
         </Splitter>
         <PreviewDrawer preview={preview} onClose={() => setPreview(null)} />
+        <PlanConfirmDrawer
+          projectId={id}
+          plan={confirmPlan}
+          open={!!confirmPlan}
+          onClose={() => setConfirmPlan(null)}
+          onApproved={refreshPlanData}
+        />
       </>
     );
   }

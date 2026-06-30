@@ -4,7 +4,6 @@ import (
 	"matrix/internal/app"
 	"matrix/internal/modules/iam"
 	"matrix/internal/modules/plan"
-	"matrix/internal/modules/workspace"
 	"matrix/internal/platform/auth"
 	platformhttp "matrix/internal/platform/http"
 
@@ -17,38 +16,40 @@ func registerWorkspaceRoutes(api *gin.RouterGroup, d *app.Deps) {
 	authz := auth.RequireAuth(d.Sessions)
 	guest := auth.RequireProject(d.IAM, iam.RoleGuest)
 	dev := auth.RequireProject(d.IAM, iam.RoleDeveloper)
-	maint := auth.RequireProject(d.IAM, iam.RoleMaintainer)
-	// 列出仓库目录树
-	api.GET("/projects/:id/repository/tree", authz, guest, func(c *gin.Context) { listFiles(c, d) })
-	// 读取仓库文件内容
-	api.GET("/projects/:id/repository/file", authz, guest, func(c *gin.Context) { readFile(c, d) })
-	// 拉取默认仓库最新代码
-	api.POST("/projects/:id/repository/pull", authz, dev, func(c *gin.Context) { pullRepo(c, d) })
-	// 推送默认仓库本地提交
-	api.POST("/projects/:id/repository/push", authz, maint, func(c *gin.Context) { pushRepo(c, d) })
-	// 列出项目计划
+	api.GET("/projects/:id/repository/tree", authz, guest, func(c *gin.Context) { listRunRepoFiles(c, d) })
+	api.GET("/projects/:id/repository/file", authz, guest, func(c *gin.Context) { readRunRepoFile(c, d) })
 	api.GET("/projects/:id/plans", authz, guest, func(c *gin.Context) { listPlans(c, d) })
-	// 批准计划
 	api.POST("/projects/:id/plans/approve", authz, dev, func(c *gin.Context) { approvePlan(c, d) })
-	// 列出评估结果
 	api.GET("/projects/:id/evaluations", authz, guest, func(c *gin.Context) { listEvaluations(c, d) })
 }
 
-// listFiles 列出Files。
-func listFiles(c *gin.Context, d *app.Deps) {
+func parseRunIDQuery(c *gin.Context) (uuid.UUID, bool) {
+	raw := c.Query("run_id")
+	if raw == "" {
+		platformhttp.JSONError(c, 400, "bad_request", "缺少 run_id")
+		return uuid.Nil, false
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		platformhttp.JSONError(c, 400, "bad_request", "无效的 run_id")
+		return uuid.Nil, false
+	}
+	return id, true
+}
+
+// listRunRepoFiles 列出 Run 仓库目录树。
+func listRunRepoFiles(c *gin.Context, d *app.Deps) {
 	pid := auth.ProjectID(c)
-	path := c.Query("path")
-	repoName, ok := repoNameForQuery(c, d, pid)
+	runID, ok := parseRunIDQuery(c)
 	if !ok {
 		return
 	}
-	var files []workspace.FileEntry
-	var err error
-	if repoName != "" {
-		files, err = d.Workspace.ListFilesFor(pid, repoName, path)
-	} else {
-		files, err = d.Workspace.ListFiles(pid, path)
+	if _, err := d.Runs.GetForProject(c.Request.Context(), pid, runID); err != nil {
+		platformhttp.JSONError(c, 404, "not_found", "运行不存在")
+		return
 	}
+	path := c.Query("path")
+	files, err := d.WorkspaceRepo.ListRunFiles(c.Request.Context(), pid, runID, path)
 	if err != nil {
 		platformhttp.JSONError(c, 500, "internal", err.Error())
 		return
@@ -56,20 +57,18 @@ func listFiles(c *gin.Context, d *app.Deps) {
 	c.JSON(200, gin.H{"files": files})
 }
 
-// readFile 读取File。
-func readFile(c *gin.Context, d *app.Deps) {
+// readRunRepoFile 读取 Run 仓库文件内容。
+func readRunRepoFile(c *gin.Context, d *app.Deps) {
 	pid := auth.ProjectID(c)
-	repoName, ok := repoNameForQuery(c, d, pid)
+	runID, ok := parseRunIDQuery(c)
 	if !ok {
 		return
 	}
-	var content string
-	var err error
-	if repoName != "" {
-		content, err = d.Workspace.ReadFileFor(pid, repoName, c.Query("path"))
-	} else {
-		content, err = d.Workspace.ReadFile(pid, c.Query("path"))
+	if _, err := d.Runs.GetForProject(c.Request.Context(), pid, runID); err != nil {
+		platformhttp.JSONError(c, 404, "not_found", "运行不存在")
+		return
 	}
+	content, err := d.WorkspaceRepo.ReadRunFile(c.Request.Context(), pid, runID, c.Query("path"))
 	if err != nil {
 		platformhttp.JSONError(c, 500, "internal", err.Error())
 		return
@@ -134,30 +133,4 @@ func parseRepositoryIDQuery(c *gin.Context) (*uuid.UUID, bool) {
 		return nil, false
 	}
 	return &id, true
-}
-
-// pullRepo 拉取项目默认仓库最新代码。
-func pullRepo(c *gin.Context, d *app.Deps) {
-	pid := auth.ProjectID(c)
-	if err := d.Workspace.Pull(c.Request.Context(), pid); err != nil {
-		platformhttp.JSONError(c, 500, "internal", err.Error())
-		return
-	}
-	c.JSON(200, gin.H{"ok": true})
-}
-
-// pushRepo 推送项目默认仓库本地提交。
-func pushRepo(c *gin.Context, d *app.Deps) {
-	pid := auth.ProjectID(c)
-	var body struct {
-		Message string `json:"message"`
-	}
-	if !bindJSON(c, &body) {
-		return
-	}
-	if err := d.Workspace.Push(c.Request.Context(), pid, body.Message); err != nil {
-		platformhttp.JSONError(c, 500, "internal", err.Error())
-		return
-	}
-	c.JSON(200, gin.H{"ok": true})
 }

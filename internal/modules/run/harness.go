@@ -8,7 +8,8 @@ import (
 
 // BuildHarnessMessages 按 harness kind 组装首条 user 消息。
 // planSelectedPath 为用户选中的计划逻辑路径（plan 阶段空表示新建）；planAbsPath 为解析后的绝对路径。
-func BuildHarnessMessages(kind, userMessage, planSelectedPath, planAbsPath, evalPath, sandboxDir, docsRoot string) []query.Message {
+// sourceSandboxRunID 为 verify 复用的实现 Run ID（非 verify 或未知时传空字符串）。
+func BuildHarnessMessages(kind, userMessage, planSelectedPath, planAbsPath, evalPath, sandboxDir, docsRoot, sourceSandboxRunID string) []query.Message {
 	content := userMessage
 	switch kind {
 	case string(harness.KindPlan):
@@ -23,7 +24,7 @@ func BuildHarnessMessages(kind, userMessage, planSelectedPath, planAbsPath, eval
 	default:
 	}
 	if kind != "chat" && kind != "task" && kind != "" && (sandboxDir != "" || docsRoot != "") {
-		content = tools.FormatHarnessUserMessage(sandboxDir, docsRoot, content)
+		content = tools.FormatHarnessUserMessage(sandboxDir, docsRoot, content, sourceSandboxRunID)
 	}
 	return []query.Message{{Role: "user", Content: content}}
 }

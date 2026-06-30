@@ -45,11 +45,15 @@ func ResolveAndValidateToolPath(ctx context.Context, path string) (string, error
 }
 
 // FormatHarnessUserMessage 附加源代码沙箱与文档目录前缀。
-func FormatHarnessUserMessage(codeSandbox, docsRoot, msg string) string {
+// sourceSandboxRunID 非空时表示 verify 复用的实现 Run ID。
+func FormatHarnessUserMessage(codeSandbox, docsRoot, msg, sourceSandboxRunID string) string {
 	msg = strings.TrimSpace(msg)
 	var lines []string
 	if root := normalizeSandboxRoot(codeSandbox); root != "" {
 		lines = append(lines, fmt.Sprintf("沙箱目录（源代码）: %s", root))
+	}
+	if id := strings.TrimSpace(sourceSandboxRunID); id != "" && id != "00000000-0000-0000-0000-000000000000" {
+		lines = append(lines, fmt.Sprintf("实现 Run（代码复制来源）: %s", id))
 	}
 	if root := normalizeSandboxRoot(docsRoot); root != "" {
 		lines = append(lines, fmt.Sprintf("文档目录（计划/评测，非源码）: %s", root))

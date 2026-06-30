@@ -1,7 +1,7 @@
 /**
  * Run / 任务 API（内部执行单元，UI 层称「任务」）。
  */
-import { api, HttpError } from "./client";
+import { api } from "./client";
 
 /** AI 任务执行记录 */
 export interface Run {
@@ -13,8 +13,6 @@ export interface Run {
   title?: string;
   audit_path?: string;
   sandbox_path?: string;
-  run_branch?: string;
-  merge_status?: string;
   error_message?: string;
   output?: string;
   started_at?: string;
@@ -74,28 +72,4 @@ export function cancelRun(projectId: string, runId: string) {
     `/api/projects/${projectId}/runs/${runId}/cancel`,
     { method: "POST" },
   );
-}
-
-export async function mergeRun(projectId: string, runId: string) {
-  try {
-    return await api<Run>(`/api/projects/${projectId}/runs/${runId}/merge`, {
-      method: "POST",
-    });
-  } catch (e) {
-    if (e instanceof HttpError) {
-      const details = e.details as { conflicts?: string[] } | undefined;
-      const err = new Error(e.message || "合并失败") as Error & {
-        conflicts?: string[];
-      };
-      err.conflicts = details?.conflicts;
-      throw err;
-    }
-    throw e;
-  }
-}
-
-export function discardRun(projectId: string, runId: string) {
-  return api<Run>(`/api/projects/${projectId}/runs/${runId}/discard`, {
-    method: "POST",
-  });
 }

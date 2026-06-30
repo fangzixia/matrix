@@ -4,22 +4,6 @@ export type StageKind = (typeof STAGE_KINDS)[number];
 
 const stageKindSet = new Set<string>(STAGE_KINDS);
 
-const worktreeKindSet = new Set<string>(["implement", "build"]);
-
-function usesWorktreeKind(kind: string): boolean {
-  return worktreeKindSet.has(kind);
-}
-
-export function canMergeRun(run: {
-  status: string;
-  merge_status?: string;
-  kind: string;
-}): boolean {
-  if (run.status !== "succeeded" || run.merge_status !== "pending")
-    return false;
-  return usesWorktreeKind(run.kind) || run.kind === "pipeline";
-}
-
 export function isStageKind(kind: string): kind is StageKind {
   return stageKindSet.has(kind);
 }

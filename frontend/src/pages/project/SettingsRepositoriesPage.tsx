@@ -22,7 +22,6 @@ export default function SettingsRepositoriesPage() {
   const { id: projectId = "" } = useParams();
   const onSettingsTabChange = useSettingsTabNavigate(projectId);
   const [repos, setRepos] = useState<Repository[]>([]);
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [actingId, setActingId] = useState("");
   const [form] = Form.useForm();
@@ -47,32 +46,6 @@ export default function SettingsRepositoriesPage() {
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "添加失败");
-    }
-  }
-  async function pull(r: Repository) {
-    setError("");
-    setMessage("");
-    setActingId(r.id);
-    try {
-      await reposApi.pullRepo(projectId, r.id);
-      setMessage(`已拉取 ${r.name}`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "拉取失败");
-    } finally {
-      setActingId("");
-    }
-  }
-  async function push(r: Repository) {
-    setError("");
-    setMessage("");
-    setActingId(r.id);
-    try {
-      await reposApi.pushRepo(projectId, r.id);
-      setMessage(`已推送 ${r.name}`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "推送失败");
-    } finally {
-      setActingId("");
     }
   }
   async function remove(r: Repository) {
@@ -111,9 +84,6 @@ export default function SettingsRepositoriesPage() {
       {error && (
         <Alert type="error" message={error} style={{ marginBottom: 16 }} />
       )}
-      {message && (
-        <Alert type="success" message={message} style={{ marginBottom: 16 }} />
-      )}
       <Card style={{ maxWidth: 560, marginBottom: 24 }}>
         <Form
           form={form}
@@ -150,12 +120,6 @@ export default function SettingsRepositoriesPage() {
           title="操作"
           render={(_, row: Repository) => (
             <Space>
-              <Button loading={actingId === row.id} onClick={() => pull(row)}>
-                拉取
-              </Button>
-              <Button loading={actingId === row.id} onClick={() => push(row)}>
-                推送
-              </Button>
               <Button danger loading={actingId === row.id} onClick={() => remove(row)}>
                 删除
               </Button>

@@ -43,10 +43,6 @@ func registerMgmtRoutes(api *gin.RouterGroup, d *app.Deps) {
 	api.POST("/projects/:id/repositories", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleMaintainer), func(c *gin.Context) { createRepository(c, d) })
 	// 删除项目仓库
 	api.DELETE("/projects/:id/repositories/:rid", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleMaintainer), func(c *gin.Context) { deleteRepository(c, d) })
-	// 拉取指定仓库最新代码
-	api.POST("/projects/:id/repositories/:rid/pull", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleDeveloper), func(c *gin.Context) { pullRepository(c, d) })
-	// 推送指定仓库本地提交
-	api.POST("/projects/:id/repositories/:rid/push", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleMaintainer), func(c *gin.Context) { pushRepository(c, d) })
 	// 获取 Run 详情
 	api.GET("/projects/:id/runs/:runId", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { getRun(c, d) })
 	// 列出 Run 执行步骤
@@ -268,11 +264,6 @@ func createRepository(c *gin.Context, d *app.Deps) {
 		platformhttp.JSONError(c, 400, "bad_request", err.Error())
 		return
 	}
-	if err := d.Workspace.EnsureRepo(c.Request.Context(), pid, r.Name, r.GitURL, r.GitBranch); err != nil {
-		_ = d.Repositories.DeleteForProject(c.Request.Context(), pid, r.ID)
-		platformhttp.JSONError(c, 500, "internal", err.Error())
-		return
-	}
 	c.JSON(201, r)
 }
 
@@ -285,40 +276,6 @@ func deleteRepository(c *gin.Context, d *app.Deps) {
 	}
 	if err := d.Repositories.DeleteForProject(c.Request.Context(), pid, rid); err != nil {
 		platformhttp.JSONError(c, 400, "bad_request", err.Error())
-		return
-	}
-	c.JSON(200, gin.H{"ok": true})
-}
-
-// pullRepository 拉取Repository。
-func pullRepository(c *gin.Context, d *app.Deps) {
-	pid := auth.ProjectID(c)
-	rid, ok := paramUUID(c, "rid")
-	if !ok {
-		return
-	}
-	if err := d.Workspace.PullByID(c.Request.Context(), pid, rid); err != nil {
-		platformhttp.JSONError(c, 500, "internal", err.Error())
-		return
-	}
-	c.JSON(200, gin.H{"ok": true})
-}
-
-// pushRepository 推送Repository。
-func pushRepository(c *gin.Context, d *app.Deps) {
-	pid := auth.ProjectID(c)
-	rid, ok := paramUUID(c, "rid")
-	if !ok {
-		return
-	}
-	var body struct {
-		Message string `json:"message"`
-	}
-	if !bindJSON(c, &body) {
-		return
-	}
-	if err := d.Workspace.PushByID(c.Request.Context(), pid, rid, body.Message); err != nil {
-		platformhttp.JSONError(c, 500, "internal", err.Error())
 		return
 	}
 	c.JSON(200, gin.H{"ok": true})

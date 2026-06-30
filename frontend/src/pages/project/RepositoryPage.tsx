@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
   Breadcrumb,
@@ -7,7 +7,6 @@ import {
   Card,
   Empty,
   Flex,
-  Input,
   List,
   Row,
   Col,
@@ -15,59 +14,65 @@ import {
 } from "antd";
 import { FileOutlined, FolderOutlined, HomeOutlined } from "@ant-design/icons";
 import * as projectsApi from "@/api/projects";
-import { pullRepository, pushRepository } from "@/api/projects";
 import type { FileEntry } from "@/api/projects";
 
 export default function RepositoryPage() {
   const { id = "" } = useParams();
+  const [searchParams] = useSearchParams();
+  const runId = searchParams.get("run_id") ?? "";
   const [path, setPath] = useState("");
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [content, setContent] = useState("");
   const [selected, setSelected] = useState("");
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [info, setInfo] = useState("");
+
   async function loadDir(p = "") {
+    if (!runId) return;
     setPath(p);
-    const res = await projectsApi.listFiles(id, p);
-    setFiles(res.files);
-    setContent("");
-    setSelected("");
+    setError("");
+    try {
+      const res = await projectsApi.listFiles(id, runId, p);
+      setFiles(res.files);
+      setContent("");
+      setSelected("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "加载失败");
+    }
   }
+
   async function openFile(file: FileEntry) {
     if (file.is_dir) {
       await loadDir(file.path);
       return;
     }
     setSelected(file.path);
-    const res = await projectsApi.readFile(id, file.path);
-    setContent(res.content);
-  }
-  async function pull() {
-    setError("");
-    setInfo("");
     try {
-      await pullRepository(id);
-      setInfo("拉取成功");
-      await loadDir(path);
+      const res = await projectsApi.readFile(id, runId, file.path);
+      setContent(res.content);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "拉取失败");
+      setError(e instanceof Error ? e.message : "读取失败");
     }
   }
-  async function push() {
-    setError("");
-    setInfo("");
-    try {
-      await pushRepository(id, message);
-      setInfo("推送成功");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "推送失败");
-    }
-  }
+
   useEffect(() => {
-    loadDir();
-  }, [id]);
+    if (runId) {
+      loadDir();
+    }
+  }, [id, runId]);
+
   const pathParts = path ? path.split("/").filter(Boolean) : [];
+
+  if (!runId) {
+    return (
+      <Alert
+        type="info"
+        showIcon
+        message="请从任务详情页打开仓库浏览"
+        description="仓库按 Run 独立存储，URL 需携带 run_id 参数，例如 /projects/{id}/repository?run_id=..."
+      />
+    );
+  }
+
   return (
     <>
       <Flex
@@ -80,24 +85,10 @@ export default function RepositoryPage() {
         <Typography.Title level={2} style={{ margin: 0 }}>
           仓库
         </Typography.Title>
-        <Flex align="center" gap={8} wrap="wrap">
-          <Input
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            placeholder="提交说明"
-            style={{ minWidth: 200, width: 320 }}
-          />
-          <Button onClick={pull}>拉取</Button>
-          <Button type="primary" onClick={push}>
-            推送
-          </Button>
-        </Flex>
+        <Typography.Text type="secondary">Run: {runId}</Typography.Text>
       </Flex>
       {error && (
         <Alert type="error" message={error} style={{ marginBottom: 12 }} />
-      )}
-      {info && (
-        <Alert type="success" message={info} style={{ marginBottom: 12 }} />
       )}
       <Row gutter={16}>
         <Col xs={24} md={8}>

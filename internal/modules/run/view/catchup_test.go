@@ -9,7 +9,7 @@ func TestCatchUpAfterSeqTerminalChat(t *testing.T) {
 	s := NewStore(nil)
 	envs, done, maxSeq := s.CatchUpAfterSeq(
 		context.Background(), "r1", ModeChat, 0,
-		"succeeded", "hello", "", "",
+		"succeeded", "hello", "",
 	)
 	if !done {
 		t.Fatal("expected terminal")
@@ -33,7 +33,7 @@ func TestCatchUpAfterSeqQueuedRun(t *testing.T) {
 	s := NewStore(nil)
 	envs, done, maxSeq := s.CatchUpAfterSeq(
 		context.Background(), "r1", ModeChat, 0,
-		"queued", "", "", "",
+		"queued", "", "",
 	)
 	if done {
 		t.Fatal("expected not terminal")
@@ -50,7 +50,7 @@ func TestCatchUpAfterSeqRunningWithoutSnapshot(t *testing.T) {
 	s := NewStore(nil)
 	envs, done, maxSeq := s.CatchUpAfterSeq(
 		context.Background(), "r1", ModeChat, 1,
-		"running", "", "", "",
+		"running", "", "",
 	)
 	if done {
 		t.Fatal("expected not terminal")
@@ -67,7 +67,7 @@ func TestCatchUpAfterSeqIdempotent(t *testing.T) {
 	s := NewStore(nil)
 	envs, done, maxSeq := s.CatchUpAfterSeq(
 		context.Background(), "r1", ModeChat, 2,
-		"running", "", "", "",
+		"running", "", "",
 	)
 	if done || len(envs) != 0 {
 		t.Fatalf("expected no events, got %d done=%v", len(envs), done)
@@ -81,7 +81,7 @@ func TestCatchUpAfterSeqDoesNotReplayFinishedAtSeq(t *testing.T) {
 	s := NewStore(nil)
 	envs, done, maxSeq := s.CatchUpAfterSeq(
 		context.Background(), "r1", ModeChat, 2,
-		"succeeded", "hello", "", "",
+		"succeeded", "hello", "",
 	)
 	if !done {
 		t.Fatal("expected terminal")
@@ -98,7 +98,7 @@ func TestCatchUpAfterSeqFormatsTerminalError(t *testing.T) {
 	s := NewStore(nil)
 	envs, done, _ := s.CatchUpAfterSeq(
 		context.Background(), "r1", ModeChat, 0,
-		"failed", "", "authentication failed: invalid api key", "",
+		"failed", "", "authentication failed: invalid api key",
 	)
 	if !done || len(envs) != 1 {
 		t.Fatalf("expected terminal envelope, got done=%v envs=%+v", done, envs)

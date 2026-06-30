@@ -78,11 +78,6 @@ func (s *Service) Approve(ctx context.Context, projectID uuid.UUID, in ConfirmIn
 	if err != nil {
 		return err
 	}
-	items := ParseSectionItems(string(content))
-	unresolved := UnresolvedKeys(items, in.Resolutions)
-	if len(unresolved) > 0 {
-		return fmt.Errorf("仍有未确认项: %s", strings.Join(unresolved, "; "))
-	}
 	now := time.Now()
 	var row models.Plan
 	err = s.db.WithContext(ctx).Where("project_id = ? AND path = ?", projectID, path).First(&row).Error

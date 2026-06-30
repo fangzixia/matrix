@@ -260,7 +260,7 @@ func buildWorkerConfig(
 		LogPrefix:    logLabel,
 		MaxTurns:     maxTurns,
 		InitialMessages: []query.Message{
-			{Role: query.RoleUser, Content: tools.FormatHarnessUserMessage(cfg.SandboxDir, "", prompt)},
+			{Role: query.RoleUser, Content: tools.FormatHarnessUserMessage(cfg.SandboxDir, "", prompt, "")},
 		},
 	})
 	if cfg.EnableNestedAgents && cfg.StreamHub != nil {

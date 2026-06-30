@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Drawer, Form, Input, Space, Typography } from "antd";
+import { Alert, Button, Drawer, List, Space, Typography } from "antd";
 import type { PlanItem } from "@/api/projects";
 import * as projectsApi from "@/api/projects";
-import { allConfirmItems, parsePlanSections } from "@/utils/planParse";
+import { confirmDisplayItems, parsePlanSections } from "@/utils/planParse";
 
 type Props = {
   projectId: string;
@@ -19,32 +19,36 @@ export default function PlanConfirmDrawer({
   onClose,
   onApproved,
 }: Props) {
-  const [form] = Form.useForm();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const items = useMemo(
     () =>
-      plan?.content ? allConfirmItems(parsePlanSections(plan.content)) : [],
+      plan?.content
+        ? confirmDisplayItems(parsePlanSections(plan.content))
+        : [],
     [plan?.content],
   );
+  const groupedItems = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const item of items) {
+      const list = map.get(item.section) ?? [];
+      list.push(item.text);
+      map.set(item.section, list);
+    }
+    return map;
+  }, [items]);
   useEffect(() => {
     if (!open || !plan) return;
-    form.resetFields();
     setError("");
-  }, [open, plan, form]);
+  }, [open, plan]);
   async function submit() {
     if (!plan) return;
     setError("");
     setLoading(true);
     try {
-      const values = await form.validateFields();
-      const resolutions: Record<string, string> = {};
-      for (const item of items) {
-        resolutions[item.key] = String(values[item.key] ?? "").trim();
-      }
       await projectsApi.approvePlan(projectId, {
         path: plan.path,
-        resolutions,
+        resolutions: {},
       });
       onApproved();
       onClose();
@@ -82,21 +86,25 @@ export default function PlanConfirmDrawer({
       )}
       {items.length === 0 ? (
         <Typography.Paragraph type="secondary">
-          计划中无待确认的风险、冲突或澄清项，可直接批准。
+          计划中无冲突或待澄清项，可直接批准。
         </Typography.Paragraph>
       ) : (
-        <Form form={form} layout="vertical">
-          {items.map((item) => (
-            <Form.Item
-              key={item.key}
-              name={item.key}
-              label={`${item.section}：${item.text}`}
-              rules={[{ required: true, message: "请填写确认或解决办法" }]}
-            >
-              <Input.TextArea rows={2} placeholder="确认意见或解决办法" />
-            </Form.Item>
+        <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+            批准前请知悉以下冲突与待澄清项：
+          </Typography.Paragraph>
+          {[...groupedItems.entries()].map(([section, texts]) => (
+            <div key={section}>
+              <Typography.Text strong>{section}</Typography.Text>
+              <List
+                size="small"
+                dataSource={texts}
+                renderItem={(text) => <List.Item>{text}</List.Item>}
+                style={{ marginTop: 4 }}
+              />
+            </div>
           ))}
-        </Form>
+        </Space>
       )}
     </Drawer>
   );

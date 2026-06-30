@@ -12,7 +12,7 @@ func (s *Store) CatchUpAfterSeq(
 	runID string,
 	mode Mode,
 	afterSeq int64,
-	status, output, errMsg, mergeStatus string,
+	status, output, errMsg string,
 ) ([]Envelope, bool, int64) {
 	now := time.Now().UnixMilli()
 	var out []Envelope
@@ -50,7 +50,7 @@ func (s *Store) CatchUpAfterSeq(
 				Seq:       finSeq,
 				Timestamp: now,
 				Payload: RunFinishedPayload{
-					Status: status, Output: output, Error: userErr, MergeStatus: mergeStatus,
+					Status: status, Output: output, Error: userErr,
 				},
 			}
 			if allowedForMode(mode, finished.Type) {

@@ -64,11 +64,6 @@ func createProject(c *gin.Context, d *app.Deps) {
 		platformhttp.JSONError(c, 500, "internal", err.Error())
 		return
 	}
-	if err := d.Workspace.EnsureClone(c.Request.Context(), p.ID, p.GitURL, p.GitBranch); err != nil {
-		_ = d.Projects.Delete(c.Request.Context(), p.ID)
-		platformhttp.JSONError(c, 500, "internal", err.Error())
-		return
-	}
 	c.JSON(201, p)
 }
 

@@ -28,12 +28,8 @@ type SystemConfig struct {
 
 // StorageConfig 是本地数据目录布局。
 type StorageConfig struct {
-	BaseDir       string   `yaml:"base_dir"`
-	DataDir       string   `yaml:"data_dir"`
-	WorkspacesDir string   `yaml:"workspaces_dir"`
-	AuditDir      string   `yaml:"audit_dir"`
-	ExportsDir    string   `yaml:"exports_dir"`
-	AllowedRoots  []string `yaml:"allowed_roots"`
+	DataDir      string   `yaml:"data_dir"`
+	AllowedRoots []string `yaml:"allowed_roots"`
 }
 
 // LoggingConfig 是日志输出选项。
@@ -122,20 +118,8 @@ func validate(cfg *Config) error {
 	if strings.TrimSpace(cfg.System.Env) == "" {
 		return fmt.Errorf("system.env is required")
 	}
-	if strings.TrimSpace(cfg.Storage.BaseDir) == "" {
-		return fmt.Errorf("storage.base_dir is required")
-	}
 	if strings.TrimSpace(cfg.Storage.DataDir) == "" {
 		return fmt.Errorf("storage.data_dir is required")
-	}
-	if strings.TrimSpace(cfg.Storage.WorkspacesDir) == "" {
-		return fmt.Errorf("storage.workspaces_dir is required")
-	}
-	if strings.TrimSpace(cfg.Storage.AuditDir) == "" {
-		return fmt.Errorf("storage.audit_dir is required")
-	}
-	if strings.TrimSpace(cfg.Storage.ExportsDir) == "" {
-		return fmt.Errorf("storage.exports_dir is required")
 	}
 	if strings.TrimSpace(cfg.Logging.Dir) == "" {
 		return fmt.Errorf("logging.dir is required")

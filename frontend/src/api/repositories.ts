@@ -42,20 +42,3 @@ export function deleteRepository(projectId: string, repoId: string) {
     { method: "DELETE" },
   );
 }
-
-export function pullRepo(projectId: string, repoId: string) {
-  return api<{ ok: boolean }>(
-    `/api/projects/${projectId}/repositories/${repoId}/pull`,
-    { method: "POST" },
-  );
-}
-
-export function pushRepo(projectId: string, repoId: string, message?: string) {
-  return api<{ ok: boolean }>(
-    `/api/projects/${projectId}/repositories/${repoId}/push`,
-    {
-      method: "POST",
-      body: JSON.stringify({ message: message || "" }),
-    },
-  );
-}

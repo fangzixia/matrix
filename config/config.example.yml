@@ -4,11 +4,7 @@ system:
   env: development  # development | production
 
 storage:
-  base_dir: ./data       # 数据根目录
-  data_dir: ./data       # 业务数据（工作区、审计等）
-  workspaces_dir: workspaces
-  audit_dir: audit
-  exports_dir: exports
+  data_dir: ./data       # 业务数据根（相对 cwd 或绝对路径）
 
 logging:
   dir: ./logs

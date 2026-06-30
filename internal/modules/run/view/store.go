@@ -55,8 +55,7 @@ func (s *Store) BeginRun(ctx context.Context, runID, projectID, kind, phase stri
 }
 
 // FinishRun 持久化终态视图；RUN_FINISHED 由 CatchUpAfterSeq 从 runs 表合成。
-func (s *Store) FinishRun(ctx context.Context, runID, status, output, errMsg, mergeStatus string) error {
-	_ = mergeStatus
+func (s *Store) FinishRun(ctx context.Context, runID, status, output, errMsg string) error {
 	s.mu.Lock()
 	sess := s.runs[runID]
 	if sess != nil && sess.projector != nil {

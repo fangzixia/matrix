@@ -3,12 +3,12 @@ import type { ReactNode } from "react";
 import { ApiOutlined, RobotOutlined, ToolOutlined } from "@ant-design/icons";
 import { Button, Collapse, Empty, Space, Tag, Typography } from "antd";
 import {
-  Bubble,
   CodeHighlighter,
   Think,
   ThoughtChain,
   Welcome,
 } from "@ant-design/x";
+import MarkdownView from "@/components/docs/MarkdownView";
 import type { ThoughtChainItemType } from "@ant-design/x";
 import type {
   RunViewState,
@@ -54,6 +54,7 @@ function renderTurnBody(
 ) {
   const streaming = running && isLatest;
   const tools = turn.tools ?? [];
+  const messageBody = turnMessageBody(turn);
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
       {turn.thinking ? (
@@ -79,11 +80,10 @@ function renderTurnBody(
           )}
         />
       ) : null}
-      {turn.message ? (
-        <Bubble
-          role="ai"
-          content={turn.message}
-          loading={streaming && turn.messageStreaming}
+      {messageBody ? (
+        <MarkdownView
+          content={messageBody}
+          variant="chat"
           streaming={streaming && turn.messageStreaming}
         />
       ) : null}
@@ -150,13 +150,25 @@ function ToolOutputBlock({
     }
   }
 
-  return (
-    <Space direction="vertical" size={4} style={{ width: "100%" }}>
+  const textBlock =
+    lang === "text" ? (
+      <Typography.Paragraph
+        style={{ marginBottom: 0, whiteSpace: "pre-wrap", fontSize: 13 }}
+        type="secondary"
+      >
+        {shown}
+      </Typography.Paragraph>
+    ) : (
       <div style={{ maxHeight: 320, overflow: "auto" }}>
         <CodeHighlighter lang={lang} header={false}>
           {shown}
         </CodeHighlighter>
       </div>
+    );
+
+  return (
+    <Space direction="vertical" size={4} style={{ width: "100%" }}>
+      {textBlock}
       {isStreaming ? (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           输出流式更新中…
@@ -321,6 +333,20 @@ function turnHeader(turn: TurnView) {
   );
 }
 
+/** 折叠标题已展示首行摘要时，正文省略重复首行。 */
+function turnMessageBody(turn: TurnView): string | null {
+  const msg = (turn.message ?? "").trim();
+  if (!msg) return null;
+  const title = deriveTurnTitle(turn).trim();
+  if (!msg.includes("\n")) {
+    return msg === title ? null : msg;
+  }
+  const firstLine = msg.split(/\r?\n/)[0]?.trim() ?? "";
+  if (!firstLine || !title.startsWith(firstLine)) return msg;
+  const rest = msg.slice(firstLine.length).replace(/^\s*\r?\n/, "").trim();
+  return rest || null;
+}
+
 export default function RunActivityPanel({
   state,
   running,
@@ -404,6 +430,8 @@ export default function RunActivityPanel({
       ) : null}
       {collapseItems.length > 0 ? (
         <Collapse
+          style={{ width: "100%" }}
+          styles={{ body: { paddingBlock: 12, paddingInline: 4 } }}
           items={collapseItems}
           activeKey={activeKeys}
           onChange={(keys) =>
@@ -413,8 +441,8 @@ export default function RunActivityPanel({
       ) : null}
       {result?.output &&
       !visibleTurns.some((t) => (t.message ?? "").includes(result.output!)) ? (
-        <div style={{ marginTop: 16 }}>
-          <Bubble role="ai" content={result.output} />
+        <div style={{ marginTop: 16, width: "100%" }}>
+          <MarkdownView content={result.output} variant="chat" />
         </div>
       ) : null}
     </div>

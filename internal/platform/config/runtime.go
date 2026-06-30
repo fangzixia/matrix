@@ -110,33 +110,17 @@ type PipelineConfig struct {
 
 // RunConfig 是 Run 沙箱相关内部参数。
 type RunConfig struct {
-	SandboxMode      string // worktree（默认）| shared
-	CleanupOnFailure bool   // 失败或取消时删除 worktree
+	CleanupOnFailure bool // 失败或取消时删除 Run 沙箱目录
 }
-
-// SandboxModeWorktree 为每 Run 独立 worktree 沙箱（可并行）。
-const SandboxModeWorktree = "worktree"
-
-// SandboxModeShared 为共享主仓库沙箱（旧版，项目内串行）。
-const SandboxModeShared = "shared"
 
 // DefaultRuntime 返回运行时配置的代码内置默认值（数据库无记录时由 Bootstrap 应用）。
 func DefaultRuntime() *RuntimeConfig {
 	return &RuntimeConfig{
 		MCP: MCPConfig{Servers: map[string]MCPServerConfig{}},
 		Run: RunConfig{
-			SandboxMode:      SandboxModeWorktree,
 			CleanupOnFailure: true,
 		},
 	}
-}
-
-// ActiveSandboxMode 返回当前 Run 沙箱模式（默认 worktree）。
-func (r *RuntimeConfig) ActiveSandboxMode() string {
-	if r == nil || strings.TrimSpace(r.Run.SandboxMode) == "" {
-		return SandboxModeWorktree
-	}
-	return strings.TrimSpace(r.Run.SandboxMode)
 }
 
 // ToSpec 将 ModelProfile 转换为运行时 ModelSpec。

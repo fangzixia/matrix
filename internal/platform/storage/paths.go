@@ -19,6 +19,13 @@ type Paths struct {
 	LogDir        string
 }
 
+// 业务数据子目录名（硬编码，相对 DataDir）。
+const (
+	dirWorkspaces = "workspaces"
+	dirAudit      = "audit"
+	dirExports    = "exports"
+)
+
 // 日志子目录名（硬编码，对应 logs/{category}/{YYYY-MM-DD}.log）。
 const (
 	LogCategorySystem = "system"
@@ -39,13 +46,12 @@ func (p Paths) LogPath(category string, date time.Time) string {
 
 // Resolve 根据配置计算各数据目录的绝对路径并校验 allowed_roots。
 func Resolve(cfg *config.Config) (Paths, error) {
-	base := config.ResolvePath(".", cfg.Storage.BaseDir)
-	data := config.ResolvePath(base, cfg.Storage.DataDir)
+	data := config.ResolvePath(".", cfg.Storage.DataDir)
 	p := Paths{
 		DataDir:       data,
-		WorkspacesDir: config.ResolvePath(data, cfg.Storage.WorkspacesDir),
-		AuditDir:      config.ResolvePath(data, cfg.Storage.AuditDir),
-		ExportsDir:    config.ResolvePath(data, cfg.Storage.ExportsDir),
+		WorkspacesDir: filepath.Join(data, dirWorkspaces),
+		AuditDir:      filepath.Join(data, dirAudit),
+		ExportsDir:    filepath.Join(data, dirExports),
 		LogDir:        config.ResolvePath(".", cfg.Logging.Dir),
 	}
 	if err := validateAllowedRoots(cfg.Storage.AllowedRoots, p); err != nil {
@@ -108,17 +114,14 @@ func EnsureLayout(p Paths) error {
 	return nil
 }
 
-// ProjectRepoDir 返回项目默认 Git 仓库克隆目录。
-func ProjectRepoDir(p Paths, projectKey string) string {
-	return filepath.Join(p.WorkspacesDir, projectKey, "repo")
+// RunSandboxDir 返回单次 Run 的沙箱根目录（含 repo 子目录）。
+func RunSandboxDir(p Paths, projectKey, runID string) string {
+	return filepath.Join(p.WorkspacesDir, projectKey, "runs", runID)
 }
 
-// ProjectNamedRepoDir 返回项目具名 Git 仓库克隆目录。
-func ProjectNamedRepoDir(p Paths, projectKey, repoName string) string {
-	if repoName == "" || repoName == "default" {
-		return ProjectRepoDir(p, projectKey)
-	}
-	return filepath.Join(p.WorkspacesDir, projectKey, "repos", repoName)
+// RunRepoDir 返回单次 Run 的独立 Git 仓库克隆目录。
+func RunRepoDir(p Paths, projectKey, runID string) string {
+	return filepath.Join(RunSandboxDir(p, projectKey, runID), "repo")
 }
 
 // ProjectAuditDir 返回项目审计日志根目录。
@@ -139,11 +142,6 @@ func RunAuditFile(p Paths, projectKey, runID string) string {
 // ProjectSubagentsDir 返回项目子 Agent sidechain transcript 目录。
 func ProjectSubagentsDir(sessionsDir string) string {
 	return filepath.Join(filepath.Dir(sessionsDir), "subagents")
-}
-
-// RunWorktreeDir 返回单次 Run 的 Git worktree 工作目录。
-func RunWorktreeDir(p Paths, projectKey, runID string) string {
-	return filepath.Join(p.WorkspacesDir, projectKey, "runs", runID)
 }
 
 // ProjectDocsDir 返回项目计划/评测文档根目录（独立于 Git 源码仓库）。
