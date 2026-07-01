@@ -58,8 +58,33 @@ func TestCatchUpAfterSeqRunningWithoutSnapshot(t *testing.T) {
 	if len(envs) != 1 || envs[0].Type != EventACTIVITYSnapshot {
 		t.Fatalf("got %+v", envs)
 	}
-	if maxSeq != 2 {
+	if maxSeq != runViewBeginSeq {
 		t.Fatalf("maxSeq %d", maxSeq)
+	}
+}
+
+func TestCatchUpAfterSeqSnapshotAfterQueuedStart(t *testing.T) {
+	s := NewStore(nil)
+	ctx := context.Background()
+	if err := s.BeginRun(ctx, "r1", "p1", "implement", "implement"); err != nil {
+		t.Fatal(err)
+	}
+	envs, done, maxSeq := s.CatchUpAfterSeq(
+		ctx, "r1", ModeChat, 1,
+		"running", "", "",
+	)
+	if done {
+		t.Fatal("expected not terminal")
+	}
+	if len(envs) != 1 || envs[0].Type != EventSTATESnapshot {
+		t.Fatalf("expected STATE_SNAPSHOT, got %+v", envs)
+	}
+	if maxSeq != runViewBeginSeq {
+		t.Fatalf("maxSeq %d", maxSeq)
+	}
+	pl := envs[0].Payload.(RunViewState)
+	if pl.StatusLabel != "Agent 正在工作…" {
+		t.Fatalf("statusLabel %q", pl.StatusLabel)
 	}
 }
 

@@ -36,6 +36,9 @@ func NewStore(db *gorm.DB) *Store {
 	}
 }
 
+// runViewBeginSeq 为 BeginRun 快照序号；seq=1 预留给 CatchUp 合成的 RUN_STARTED。
+const runViewBeginSeq int64 = 2
+
 // BeginRun 初始化 Run 视图会话并持久化初始快照。
 func (s *Store) BeginRun(ctx context.Context, runID, projectID, kind, phase string) error {
 	s.mu.Lock()
@@ -43,8 +46,8 @@ func (s *Store) BeginRun(ctx context.Context, runID, projectID, kind, phase stri
 	proj.state.Status = "running"
 	proj.state.StatusLabel = "Agent 正在工作…"
 	proj.state.Phase = phase
-	proj.state.Seq = 1
-	s.runs[runID] = &runSession{projector: proj, projectID: projectID, seq: 1}
+	proj.state.Seq = runViewBeginSeq
+	s.runs[runID] = &runSession{projector: proj, projectID: projectID, seq: runViewBeginSeq}
 	s.mu.Unlock()
 	logging.Agent("run-view: 视图已开始", "run_id", runID, "kind", kind)
 	if err := s.persist(ctx, runID); err != nil {
@@ -104,6 +107,22 @@ func (s *Store) FinishRun(ctx context.Context, runID, status, output, errMsg str
 		}
 	}
 	return nil
+}
+
+// SetStatusLabel 更新运行状态标签并持久化（如克隆仓库等准备阶段）。
+func (s *Store) SetStatusLabel(ctx context.Context, runID, label string) {
+	s.mu.Lock()
+	sess := s.runs[runID]
+	if sess != nil && sess.projector != nil {
+		sess.projector.state.StatusLabel = label
+		sess.seq++
+		sess.projector.state.Seq = sess.seq
+	}
+	row := s.persistRowLocked(runID, sess)
+	s.mu.Unlock()
+	if row.RunID != uuid.Nil {
+		_ = s.saveRow(ctx, row)
+	}
 }
 
 // PublishStep 更新流水线步骤状态并持久化。

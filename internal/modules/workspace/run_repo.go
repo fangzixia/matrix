@@ -1,19 +1,29 @@
 package workspace
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"io/fs"
+	"matrix/internal/platform/config"
 	"matrix/internal/platform/gitutil"
+	"matrix/internal/platform/logging"
 	"matrix/internal/platform/storage"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+)
+
+const (
+	gitCloneTimeout  = 2 * time.Minute
+	gitCloneAttempts = 3
 )
 
 // CopyRunRepoFrom 将实现 Run 的 repo 目录复制到目标 Run 沙箱（runs/{runID}/repo）。
@@ -137,25 +147,35 @@ func (s *Service) CreateRunRepo(ctx context.Context, projectID uuid.UUID, runID 
 	if branch == "" {
 		branch = "main"
 	}
-	if err := os.MkdirAll(filepath.Dir(repoDir), 0o755); err != nil {
-		return "", err
-	}
-	timeout := s.git.CloneTimeout
-	if timeout <= 0 {
-		timeout = 300 * time.Second
-	}
-	cctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	cmd := exec.CommandContext(cctx, "git", "clone", "--depth", "1", "-b", branch, gitURL, repoDir)
-	if env := gitutil.SSHCommandEnv(s.git, gitURL); env != nil {
-		cmd.Env = env
-	}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
+	var lastErr error
+	for attempt := 1; attempt <= gitCloneAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		if attempt > 1 {
+			if err := os.RemoveAll(sandboxDir); err != nil {
+				return "", fmt.Errorf("prepare run sandbox: %w", err)
+			}
+		}
+		if err := os.MkdirAll(filepath.Dir(repoDir), 0o755); err != nil {
+			return "", err
+		}
+		logging.Info("workspace: git clone 开始",
+			"run_id", runID, "attempt", attempt, "max_attempts", gitCloneAttempts,
+			"branch", branch, "git_url", gitURL,
+		)
+		_, err := runGitClone(ctx, gitURL, branch, repoDir, s.git)
+		if err == nil {
+			logging.Info("workspace: git clone 成功", "run_id", runID, "attempt", attempt)
+			return repoDir, nil
+		}
+		lastErr = err
+		logging.Warn("workspace: git clone 失败",
+			"run_id", runID, "attempt", attempt, "error", err.Error(),
+		)
 		_ = os.RemoveAll(sandboxDir)
-		return "", fmt.Errorf("git clone: %w: %s", err, string(out))
 	}
-	return repoDir, nil
+	return "", &SourceFetchError{Attempts: gitCloneAttempts, Cause: lastErr}
 }
 
 // RemoveRunRepo 删除 Run 沙箱目录。
@@ -165,4 +185,56 @@ func (s *Service) RemoveRunRepo(ctx context.Context, projectID uuid.UUID, runID 
 		return err
 	}
 	return os.RemoveAll(storage.RunSandboxDir(s.paths, key, runID.String()))
+}
+
+func runGitClone(ctx context.Context, gitURL, branch, repoDir string, gitCfg config.GitConfig) ([]byte, error) {
+	cctx, cancel := context.WithTimeout(ctx, gitCloneTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(cctx, "git", "clone", "--depth", "1", "-b", branch, gitURL, repoDir)
+	if env := gitutil.SSHCommandEnv(gitCfg, gitURL); env != nil {
+		cmd.Env = env
+	}
+	return runGitCloneCmd(cctx, cmd)
+}
+
+// runGitCloneCmd 执行 git clone；超时时终止进程树（Windows 上 git 会 spawn index-pack 子进程）。
+func runGitCloneCmd(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	if err := cmd.Start(); err != nil {
+		return buf.Bytes(), err
+	}
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- cmd.Wait() }()
+
+	select {
+	case err := <-waitDone:
+		if err != nil {
+			return buf.Bytes(), fmt.Errorf("%w: %s", err, strings.TrimSpace(buf.String()))
+		}
+		return buf.Bytes(), nil
+	case <-ctx.Done():
+		if cmd.Process != nil {
+			killProcessTree(cmd.Process.Pid)
+		}
+		<-waitDone
+		msg := strings.TrimSpace(buf.String())
+		if msg != "" {
+			return buf.Bytes(), fmt.Errorf("git clone 超时: %s", msg)
+		}
+		return buf.Bytes(), fmt.Errorf("git clone 超时: %w", ctx.Err())
+	}
+}
+
+func killProcessTree(pid int) {
+	if pid <= 0 {
+		return
+	}
+	if runtime.GOOS == "windows" {
+		_ = exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid)).Run()
+		return
+	}
+	_ = exec.Command("kill", "-TERM", strconv.Itoa(pid)).Run()
 }

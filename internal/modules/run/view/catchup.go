@@ -78,17 +78,17 @@ func (s *Store) CatchUpAfterSeq(
 				out = append(out, started)
 				maxSeq = 1
 			}
-		} else if afterSeq < 2 && status == "running" {
+		} else if afterSeq < runViewBeginSeq && status == "running" {
 			env := Envelope{
 				Type:      EventACTIVITYSnapshot,
 				RunID:     runID,
-				Seq:       2,
+				Seq:       runViewBeginSeq,
 				Timestamp: now,
 				Payload:   ActivitySnapshotPayload{StatusLabel: "Agent 正在工作…"},
 			}
 			if allowedForMode(mode, env.Type) {
 				out = append(out, env)
-				maxSeq = 2
+				maxSeq = runViewBeginSeq
 			}
 		}
 	}

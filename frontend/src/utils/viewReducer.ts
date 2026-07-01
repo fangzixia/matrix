@@ -144,6 +144,9 @@ export function formatUserRunError(raw: string): string {
   if (/未配置模型|未配置 API Key/i.test(msg)) {
     return msg;
   }
+  if (/git clone 失败|git clone 超时|source fetch failed/i.test(msg)) {
+    return "源码获取失败，请检查仓库地址、分支名称与 Git 访问权限后重试。";
+  }
   if (/429|rate limit|too many requests/i.test(msg)) {
     return "模型服务请求过于频繁，请稍后再试。";
   }

@@ -42,6 +42,11 @@ type Executor interface {
 	ExecuteRun(ctx context.Context, runID uuid.UUID) error
 }
 
+// RetryDecider 可选：返回 false 时 Job 失败不再重新入队（如源码 clone 耗尽重试）。
+type RetryDecider interface {
+	ShouldRetryRun(err error) bool
+}
+
 // Service 管理异步任务队列：Run 入队、认领、完成与重试。
 type Service struct {
 	db          *gorm.DB
@@ -216,11 +221,11 @@ func (s *Service) runClaimedJob(ctx context.Context, workerID string, c *Claimed
 		"duration_ms", time.Since(start).Milliseconds(),
 		"success", runErr == nil,
 	)
-	s.finishJob(ctx, c.JobID, runErr)
+	s.finishJob(ctx, c.JobID, runErr, exec)
 }
 
 // finishJob 更新任务终态；失败且未达最大重试次数时重新入队。
-func (s *Service) finishJob(ctx context.Context, jobID uuid.UUID, runErr error) {
+func (s *Service) finishJob(ctx context.Context, jobID uuid.UUID, runErr error, exec Executor) {
 	success := runErr == nil
 	if err := s.Complete(ctx, jobID, success); err != nil {
 		logging.Warn("job: 更新任务状态失败", "job_id", jobID, "error", err.Error())
@@ -235,6 +240,9 @@ func (s *Service) finishJob(ctx context.Context, jobID uuid.UUID, runErr error) 
 		return
 	}
 	if job.Attempts >= s.maxAttempts {
+		return
+	}
+	if rd, ok := exec.(RetryDecider); ok && !rd.ShouldRetryRun(runErr) {
 		return
 	}
 	s.requeueOrWarn(ctx, jobID)

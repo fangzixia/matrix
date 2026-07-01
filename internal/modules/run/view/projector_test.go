@@ -303,6 +303,14 @@ func TestFormatUserRunErrorAPIKey(t *testing.T) {
 	}
 }
 
+func TestFormatUserRunErrorSourceFetch(t *testing.T) {
+	raw := "git clone 失败（已重试 3 次）: git clone 超时: Cloning into 'repo'..."
+	msg := FormatUserRunError(raw)
+	if msg != sourceFetchUserMessage {
+		t.Fatalf("expected source fetch message, got %q", msg)
+	}
+}
+
 func TestExtractReplyTextFromTurns(t *testing.T) {
 	p := NewProjector("run-1", "proj-1")
 	p.ensureCoordinatorTurn(1, "")
@@ -334,8 +342,8 @@ func TestStoreApplyAdvancesSnapshotSeq(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first == nil || first.Seq != 2 {
-		t.Fatalf("expected seq 2 after first apply, got %+v", first)
+	if first == nil || first.Seq != 3 {
+		t.Fatalf("expected seq 3 after first apply, got %+v", first)
 	}
 	if err := s.apply(ctx, "run-1", "proj-1", msgTextDelta("hello")); err != nil {
 		t.Fatal(err)
@@ -344,8 +352,8 @@ func TestStoreApplyAdvancesSnapshotSeq(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second == nil || second.Seq != 3 {
-		t.Fatalf("expected seq 3 after second apply, got %+v", second)
+	if second == nil || second.Seq != 4 {
+		t.Fatalf("expected seq 4 after second apply, got %+v", second)
 	}
 }
 

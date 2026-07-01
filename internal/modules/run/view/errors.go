@@ -6,11 +6,19 @@ import (
 	"strings"
 )
 
+const sourceFetchUserMessage = "源码获取失败，请检查仓库地址、分支名称与 Git 访问权限后重试。"
+
 var (
 	reLoopModel = regexp.MustCompile(`(?i)^loop:\s*模型错误:\s*`)
 	reLLM       = regexp.MustCompile(`(?i)^llm:\s*`)
 	reServerErr = regexp.MustCompile(`服务端返回 \d+:\s*(\{[\s\S]+\})`)
 )
+
+func isSourceFetchError(msg string) bool {
+	return strings.Contains(msg, "git clone 失败") ||
+		strings.Contains(msg, "git clone 超时") ||
+		strings.Contains(msg, "source fetch failed")
+}
 
 // FormatUserRunError 将后端/模型原始错误转为用户可读文案。
 func FormatUserRunError(raw string) string {
@@ -39,6 +47,9 @@ func FormatUserRunError(raw string) string {
 	}
 	if strings.Contains(msg, "未配置模型") || strings.Contains(msg, "未配置 API Key") {
 		return msg
+	}
+	if isSourceFetchError(msg) {
+		return sourceFetchUserMessage
 	}
 	if strings.Contains(lower, "429") || strings.Contains(lower, "rate limit") || strings.Contains(lower, "too many requests") {
 		return "模型服务请求过于频繁，请稍后再试。"

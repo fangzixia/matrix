@@ -137,6 +137,9 @@ export default function StageTaskDetailPage() {
           await loadSteps();
           const updated = await runsApi.getRun(projectId, taskId);
           setCurrent(updated);
+          if (["running", "queued", "pending"].includes(updated.status)) {
+            await reloadView();
+          }
           if (
             !["running", "queued", "pending"].includes(updated.status)
           ) {

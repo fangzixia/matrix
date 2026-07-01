@@ -562,13 +562,17 @@ func (s *Service) RunChat(ctx context.Context, projectID, userID, sessionID, use
 
 // toRunDTO 将 Run 模型转换为 API DTO。
 func toRunDTO(m *models.Run) RunDTO {
+	errMsg := m.ErrorMessage
+	if errMsg != "" {
+		errMsg = view.FormatUserRunError(errMsg)
+	}
 	return RunDTO{
 		ID: m.ID, ProjectID: m.ProjectID, RepositoryID: m.RepositoryID,
 		Kind: m.Kind, Status: m.Status, Title: m.Title,
 		FilePath: m.FilePath, EvalFilePath: m.EvalFilePath,
 		AuditPath:    m.AuditPath,
 		SandboxPath:  m.SandboxPath,
-		ErrorMessage: m.ErrorMessage, Output: m.Output, StartedAt: m.StartedAt,
+		ErrorMessage: errMsg, Output: m.Output, StartedAt: m.StartedAt,
 		FinishedAt: m.FinishedAt, CreatedAt: m.CreatedAt,
 	}
 }

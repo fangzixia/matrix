@@ -10,6 +10,7 @@ import (
 	"matrix/internal/ai/query"
 	"matrix/internal/modules/eval"
 	"matrix/internal/modules/run/view"
+	"matrix/internal/modules/workspace"
 	"matrix/internal/platform/db/models"
 	"matrix/internal/platform/logging"
 	"matrix/internal/platform/storage"
@@ -166,6 +167,14 @@ func (s *Service) ExecuteRun(ctx context.Context, runID uuid.UUID) error {
 	return s.finalizeRun(ctx, runID, m, runErr, runStart)
 }
 
+// ShouldRetryRun 实现 job.RetryDecider：源码 clone 耗尽重试后不再 Job 重试。
+func (s *Service) ShouldRetryRun(err error) bool {
+	if err == nil {
+		return false
+	}
+	return !workspace.IsSourceFetchError(err)
+}
+
 func (s *Service) loadRunForExecute(ctx context.Context, runID uuid.UUID) (models.Run, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return models.Run{}, false, err
@@ -295,8 +304,13 @@ func (s *Service) prepareRunRepo(ctx context.Context, m *models.Run) error {
 		}
 		m.SourceSandboxRunID = sourceRunID
 	default:
+		logging.Agent("run: 正在准备仓库沙箱", "run_id", m.ID, "kind", m.Kind)
+		s.viewStore.SetStatusLabel(ctx, m.ID.String(), "正在克隆仓库…")
 		sandboxPath, err = s.workspace.CreateRunRepo(ctx, m.ProjectID, m.RepositoryID, m.ID)
 		if err != nil {
+			if workspace.IsSourceFetchError(err) {
+				s.viewStore.SetStatusLabel(ctx, m.ID.String(), view.FormatUserRunError(err.Error()))
+			}
 			return err
 		}
 	}
