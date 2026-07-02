@@ -26,8 +26,8 @@ const (
 	gitCloneAttempts = 3
 )
 
-// CopyRunRepoFrom 将实现 Run 的 repo 目录复制到目标 Run 沙箱（runs/{runID}/repo）。
-func (s *Service) CopyRunRepoFrom(ctx context.Context, projectID uuid.UUID, sourceRepoDir string, runID uuid.UUID) (string, error) {
+// CopyRepo 将来源 repo 目录复制到目标 Run 沙箱（runs/{runID}/repo），避免重新 git clone。
+func (s *Service) CopyRepo(ctx context.Context, projectID uuid.UUID, sourceRepoDir string, runID uuid.UUID) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}

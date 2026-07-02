@@ -45,7 +45,7 @@ func ResolveAndValidateToolPath(ctx context.Context, path string) (string, error
 }
 
 // FormatHarnessUserMessage 附加源代码沙箱与文档目录前缀。
-// sourceSandboxRunID 非空时表示 verify 复用的实现 Run ID。
+// sourceSandboxRunID 非空时表示 verify/implement 复用的实现 Run ID。
 func FormatHarnessUserMessage(codeSandbox, docsRoot, msg, sourceSandboxRunID string) string {
 	msg = strings.TrimSpace(msg)
 	var lines []string

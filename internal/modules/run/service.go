@@ -49,7 +49,7 @@ type AIRuntimeReloader interface {
 type RunSandbox interface {
 	ProjectWorkspaceKey(ctx context.Context, projectID uuid.UUID) (string, error)
 	CreateRunRepo(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID, runID uuid.UUID) (sandboxPath string, err error)
-	CopyRunRepoFrom(ctx context.Context, projectID uuid.UUID, sourceRepoDir string, runID uuid.UUID) (sandboxPath string, err error)
+	CopyRepo(ctx context.Context, projectID uuid.UUID, sourceRepoDir string, runID uuid.UUID) (sandboxPath string, err error)
 	RemoveRunRepo(ctx context.Context, projectID uuid.UUID, runID uuid.UUID) error
 	DocsRoot(ctx context.Context, projectID uuid.UUID) (string, error)
 	ResolveDocPath(projectID uuid.UUID, logicalPath string) (string, error)

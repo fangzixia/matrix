@@ -29,9 +29,9 @@ func (r *ProjectRepoResolver) CreateRunRepo(ctx context.Context, projectID uuid.
 	return r.WS.CreateRunRepo(ctx, projectID, runID, gitURL, branch)
 }
 
-// CopyRunRepoFrom 将实现 Run 的 repo 复制到目标 Run 沙箱。
-func (r *ProjectRepoResolver) CopyRunRepoFrom(ctx context.Context, projectID uuid.UUID, sourceRepoDir string, runID uuid.UUID) (string, error) {
-	return r.WS.CopyRunRepoFrom(ctx, projectID, sourceRepoDir, runID)
+// CopyRepo 将来源 repo 复制到目标 Run 沙箱。
+func (r *ProjectRepoResolver) CopyRepo(ctx context.Context, projectID uuid.UUID, sourceRepoDir string, runID uuid.UUID) (string, error) {
+	return r.WS.CopyRepo(ctx, projectID, sourceRepoDir, runID)
 }
 
 // RemoveRunRepo 删除 Run 沙箱目录。

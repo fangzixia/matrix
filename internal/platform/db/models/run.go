@@ -21,7 +21,7 @@ type Run struct {
 	FilePath     string     `gorm:"size:512"`
 	EvalFilePath string     `gorm:"size:512"`
 	SandboxPath  string     `gorm:"size:1024"`
-	// SourceSandboxRunID 为 verify 复用的代码沙箱来源 Run（不入库）。
+	// SourceSandboxRunID 为 verify/implement 复用的代码沙箱来源 Run（不入库）。
 	SourceSandboxRunID uuid.UUID  `gorm:"-" json:"source_sandbox_run_id,omitempty"`
 	Output             string     `gorm:"type:text"`
 	ChatSessionID      *uuid.UUID `gorm:"type:uuid;index"`

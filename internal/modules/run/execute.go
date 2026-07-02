@@ -288,7 +288,7 @@ func (s *Service) ensureChatAssistantMessage(ctx context.Context, sessionID, use
 	)
 }
 
-// prepareRunRepo 为 Run 准备 Git 沙箱：verify 从同计划最新实现 Run 复制 repo，其余阶段独立 clone。
+// prepareRunRepo 为 Run 准备 Git 沙箱：implement/verify 通过 copyRepo 复用同 plan 来源 repo（implement 无历史时 clone），其余阶段独立 clone。
 func (s *Service) prepareRunRepo(ctx context.Context, m *models.Run) error {
 	if m.SandboxPath != "" {
 		return nil
@@ -298,19 +298,39 @@ func (s *Service) prepareRunRepo(ctx context.Context, m *models.Run) error {
 	switch m.Kind {
 	case "verify":
 		var sourceRunID uuid.UUID
-		sandboxPath, sourceRunID, err = s.resolveVerifySandbox(ctx, m)
+		sandboxPath, sourceRunID, _, err = s.copyRepo(ctx, m, copyRepoOpts{
+			stage:         "verify",
+			sourceKinds:   verifySourceKinds,
+			requireSource: true,
+			notFoundHint:  "implement",
+		})
 		if err != nil {
 			return err
 		}
 		m.SourceSandboxRunID = sourceRunID
-	default:
-		logging.Agent("run: 正在准备仓库沙箱", "run_id", m.ID, "kind", m.Kind)
-		s.viewStore.SetStatusLabel(ctx, m.ID.String(), "正在克隆仓库…")
-		sandboxPath, err = s.workspace.CreateRunRepo(ctx, m.ProjectID, m.RepositoryID, m.ID)
+	case "implement":
+		var sourceRunID uuid.UUID
+		var copied bool
+		sandboxPath, sourceRunID, copied, err = s.copyRepo(ctx, m, copyRepoOpts{
+			stage:         "implement",
+			sourceKinds:   codeSandboxKinds,
+			requireSource: false,
+			notFoundHint:  "实现",
+		})
 		if err != nil {
-			if workspace.IsSourceFetchError(err) {
-				s.viewStore.SetStatusLabel(ctx, m.ID.String(), view.FormatUserRunError(err.Error()))
+			return err
+		}
+		if copied {
+			m.SourceSandboxRunID = sourceRunID
+		} else {
+			sandboxPath, err = s.cloneRunRepo(ctx, m)
+			if err != nil {
+				return err
 			}
+		}
+	default:
+		sandboxPath, err = s.cloneRunRepo(ctx, m)
+		if err != nil {
 			return err
 		}
 	}
@@ -318,6 +338,19 @@ func (s *Service) prepareRunRepo(ctx context.Context, m *models.Run) error {
 	return s.db.WithContext(ctx).Model(m).Updates(map[string]any{
 		"sandbox_path": sandboxPath,
 	}).Error
+}
+
+func (s *Service) cloneRunRepo(ctx context.Context, m *models.Run) (string, error) {
+	logging.Agent("run: 正在准备仓库沙箱", "run_id", m.ID, "kind", m.Kind)
+	s.viewStore.SetStatusLabel(ctx, m.ID.String(), "正在克隆仓库…")
+	sandboxPath, err := s.workspace.CreateRunRepo(ctx, m.ProjectID, m.RepositoryID, m.ID)
+	if err != nil {
+		if workspace.IsSourceFetchError(err) {
+			s.viewStore.SetStatusLabel(ctx, m.ID.String(), view.FormatUserRunError(err.Error()))
+		}
+		return "", err
+	}
+	return sandboxPath, nil
 }
 
 const buildMaxRounds = 5
@@ -534,7 +567,7 @@ func (s *Service) buildRunRequest(ctx context.Context, m *models.Run, kind strin
 		return ports.RunRequest{}, err
 	}
 	planAbsPath := s.harnessPlanFilePath(m.ProjectID, m.FilePath, kind)
-	evalFilePath := s.resolveHarnessDocPath(m.ProjectID, m.EvalFilePath)
+	evalFilePath := s.harnessEvalAbsPath(m.ProjectID, docsRoot, m, kind)
 	var messages []query.Message
 	if kind == "chat" {
 		messages, err = s.buildChatRunMessages(ctx, m)
@@ -566,6 +599,26 @@ func (s *Service) buildRunRequest(ctx context.Context, m *models.Run, kind strin
 			AllowShell: s.runtimeCfg.AI.Security.AllowShell, AllowCommandMCP: allowCommandMCP,
 		},
 	}, nil
+}
+
+// harnessEvalAbsPath 返回 Harness 阶段使用的评测报告绝对路径。
+// implement 按 PLAN 名自动查找最新 EVAL；build 使用用户指定的 eval_file_path。
+func (s *Service) harnessEvalAbsPath(projectID uuid.UUID, docsRoot string, m *models.Run, kind string) string {
+	switch kind {
+	case string(harness.KindImplement):
+		if strings.TrimSpace(m.FilePath) == "" {
+			return ""
+		}
+		evalRel, _, err := eval.LatestEval(docsRoot, m.FilePath)
+		if err != nil {
+			return ""
+		}
+		return s.resolveHarnessDocPath(projectID, evalRel)
+	case string(harness.KindBuild):
+		return s.resolveHarnessDocPath(projectID, m.EvalFilePath)
+	default:
+		return ""
+	}
 }
 
 // resolveHarnessDocPath 解析 Harness 文档逻辑路径为绝对路径。
