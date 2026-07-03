@@ -43,7 +43,7 @@ type Deps struct {
 	Groups         *group.Service                 // 用户组
 	Workspace      *workspace.Service             // 工作区（Run 级仓库与文档）
 	WorkspaceRepo  *workspace.ProjectRepoResolver // Run 沙箱解析
-	Runs           *run.Service                   // AI Run/Chat
+	RunService     *run.Service                   // AI Run/Chat
 	Jobs           *job.Service                   // 任务队列
 	Pipeline       *pipeline.Service              // 流水线阶段
 	Notifications  *notification.Service          // 通知
@@ -88,7 +88,7 @@ func NewDeps(cfg *config.Config, runtime *config.RuntimeConfig, paths storage.Pa
 		Auth: auth, Users: users, Sessions: sessions,
 		IAM: iam.NewEnforcer(db), Members: iam.NewMemberService(db),
 		Projects: projects, Repositories: repos, Groups: groups,
-		Workspace: ws, WorkspaceRepo: resolver, Runs: runs, Jobs: jobs, Pipeline: pipe, Notifications: notifications,
+		Workspace: ws, WorkspaceRepo: resolver, RunService: runs, Jobs: jobs, Pipeline: pipe, Notifications: notifications,
 		Plans: plans, Artifacts: artifactsSvc,
 		RunRuntime: rt, SystemSettings: sysSettings,
 	}
@@ -103,7 +103,7 @@ func (d *Deps) Close() {
 
 // StartJobWorker 在 Web 进程内启动嵌入式任务消费者（与 HTTP 服务同进程）。
 func (d *Deps) StartJobWorker(ctx context.Context) {
-	if d.Jobs == nil || d.Runs == nil || !d.Runtime.Worker.Enabled {
+	if d.Jobs == nil || d.RunService == nil || !d.Runtime.Worker.Enabled {
 		return
 	}
 	wid := worker.ID()
@@ -112,5 +112,5 @@ func (d *Deps) StartJobWorker(ctx context.Context) {
 		"concurrency", d.Runtime.Worker.Concurrency,
 		"poll_interval", d.Runtime.Worker.PollInterval,
 	)
-	go d.Jobs.RunWorker(ctx, wid, d.Runtime.Worker.PollInterval, d.Runtime.Worker.Concurrency, d.Runs)
+	go d.Jobs.RunWorker(ctx, wid, d.Runtime.Worker.PollInterval, d.Runtime.Worker.Concurrency, d.RunService)
 }

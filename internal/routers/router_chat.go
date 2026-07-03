@@ -6,6 +6,7 @@ import (
 	"matrix/internal/ai/query"
 	"matrix/internal/app"
 	"matrix/internal/modules/iam"
+	"matrix/internal/modules/run"
 	"matrix/internal/platform/auth"
 	"matrix/internal/platform/config"
 	platformhttp "matrix/internal/platform/http"
@@ -82,7 +83,7 @@ func toChatModelDTO(p config.ModelProfile) chatModelDTO {
 
 func listChat(c *gin.Context, d *app.Deps) {
 	pid := auth.ProjectID(c)
-	sessions, err := d.Runs.ListChatSessions(c.Request.Context(), pid)
+	sessions, err := d.RunService.ListChatSessions(c.Request.Context(), pid)
 	if err != nil {
 		platformhttp.JSONError(c, 500, "internal", err.Error())
 		return
@@ -111,7 +112,7 @@ func createChat(c *gin.Context, d *app.Deps) {
 		}
 		id = parsed
 	}
-	session, err := d.Runs.CreateChatSession(c.Request.Context(), pid, u.ID, id, body.Title, body.ModelID)
+	session, err := d.RunService.CreateChatSession(c.Request.Context(), pid, u.ID, id, body.Title, body.ModelID)
 	if err != nil {
 		platformhttp.JSONError(c, 500, "internal_error", err.Error())
 		return
@@ -127,7 +128,7 @@ func getChat(c *gin.Context, d *app.Deps) {
 		platformhttp.JSONError(c, 400, "bad_request", "无效会话 ID")
 		return
 	}
-	session, err := d.Runs.GetChatSession(c.Request.Context(), pid, sessionID)
+	session, err := d.RunService.GetChatSession(c.Request.Context(), pid, sessionID)
 	if err != nil {
 		platformhttp.JSONError(c, 404, "not_found", "会话不存在")
 		return
@@ -151,7 +152,7 @@ func patchChat(c *gin.Context, d *app.Deps) {
 		platformhttp.JSONError(c, 400, "bad_request", "无效请求")
 		return
 	}
-	session, err := d.Runs.UpdateChatSession(c.Request.Context(), pid, sessionID, body.Title, body.ModelID)
+	session, err := d.RunService.UpdateChatSession(c.Request.Context(), pid, sessionID, body.Title, body.ModelID)
 	if err != nil {
 		platformhttp.JSONError(c, 404, "not_found", err.Error())
 		return
@@ -198,7 +199,7 @@ func deleteChat(c *gin.Context, d *app.Deps) {
 		platformhttp.JSONError(c, 400, "bad_request", "无效会话 ID")
 		return
 	}
-	if err := d.Runs.DeleteChatSession(c.Request.Context(), pid, sessionID); err != nil {
+	if err := d.RunService.DeleteChatSession(c.Request.Context(), pid, sessionID); err != nil {
 		platformhttp.JSONError(c, 404, "not_found", err.Error())
 		return
 	}
@@ -248,7 +249,7 @@ func runChat(c *gin.Context, d *app.Deps) {
 		platformhttp.JSONError(c, 400, "bad_request", "无效会话 ID")
 		return
 	}
-	if _, err := d.Runs.GetChatSession(c.Request.Context(), pid, sessionID); err != nil {
+	if _, err := d.RunService.GetChatSession(c.Request.Context(), pid, sessionID); err != nil {
 		platformhttp.JSONError(c, 404, "not_found", "会话不存在")
 		return
 	}
@@ -256,13 +257,7 @@ func runChat(c *gin.Context, d *app.Deps) {
 	if body.ParentID != nil {
 		parentID = strings.TrimSpace(*body.ParentID)
 	}
-	if err := d.Runs.ValidateParentDB(c.Request.Context(), sessionID, parentID); err != nil {
-		platformhttp.JSONError(c, 400, "bad_request", err.Error())
-		return
-	}
-	// 历史上下文
-	history, err := d.Runs.HistoryForParentDB(c.Request.Context(), sessionID, parentID)
-	if err != nil {
+	if err := d.RunService.ValidateParentDB(c.Request.Context(), sessionID, parentID); err != nil {
 		platformhttp.JSONError(c, 400, "bad_request", err.Error())
 		return
 	}
@@ -294,12 +289,16 @@ func runChat(c *gin.Context, d *app.Deps) {
 	}
 	// 保存用户消息
 	userMessageID := uuid.New()
-	if err := d.Runs.InsertChatUserMessage(c.Request.Context(), sessionID, parentID, body.Message, attachments, userMessageID); err != nil {
+	if err := d.RunService.InsertChatUserMessage(c.Request.Context(), sessionID, parentID, body.Message, attachments, userMessageID); err != nil {
 		platformhttp.JSONError(c, 500, "internal_error", "用户消息保存失败")
 		return
 	}
 	// 提交任务
-	rn, err := d.Runs.RunChat(c.Request.Context(), pid, u.ID, sessionID, userMessageID, body.Message, attachments, history, modelID)
+	rn, err := d.RunService.Start(c.Request.Context(), pid, u.ID, run.StartInput{
+		Kind: "chat", Title: body.Message, Message: body.Message,
+		ModelID:       modelID,
+		ChatSessionID: &sessionID, ChatUserMessageID: &userMessageID,
+	})
 	if err != nil {
 		platformhttp.JSONError(c, 400, "bad_request", err.Error())
 		return
@@ -311,7 +310,6 @@ func runChat(c *gin.Context, d *app.Deps) {
 		"user_message_id", userMessageID,
 		"status", rn.Status,
 		"model_id", modelID,
-		"history_len", len(history),
 	)
 	// 返回 202 Accepted（已接受）
 	c.JSON(202, rn)

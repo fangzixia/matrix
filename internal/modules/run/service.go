@@ -95,7 +95,6 @@ type StartInput struct {
 	FilePath          string
 	EvalFilePath      string
 	ModelID           string
-	Messages          []query.Message
 	RepositoryID      *uuid.UUID
 	Stages            []string
 	Sync              bool
@@ -206,10 +205,6 @@ func (s *Service) loadProjectRun(ctx context.Context, projectID, runID uuid.UUID
 
 // Start 启动 Run。
 func (s *Service) Start(ctx context.Context, projectID, userID uuid.UUID, in StartInput) (*RunDTO, error) {
-	// 刷新配置
-	if err := s.refreshAIRuntime(ctx); err != nil {
-		return nil, fmt.Errorf("刷新 AI 配置失败: %w", err)
-	}
 	modelID := strings.TrimSpace(in.ModelID)
 	// 检查模型有效性
 	if _, _, err := s.runtimeCfg.AI.ResolveModel(modelID); err != nil {
@@ -300,21 +295,24 @@ func (s *Service) Start(ctx context.Context, projectID, userID uuid.UUID, in Sta
 	}); err != nil {
 		return nil, err
 	}
-	execCtx := s.runCtx()
-	if in.Sync {
-		logging.Agent("run: 同步派发", "run_id", runID, "kind", kind)
-		go func() { _ = s.ExecuteRun(execCtx, runID) }()
-	} else if s.jobs != nil {
-		logging.Agent("run: 已入队等待执行",
-			"run_id", runID, "kind", kind,
-			"chat_session_id", in.ChatSessionID,
-			"chat_user_message_id", in.ChatUserMessageID,
-		)
-	} else {
-		logging.Agent("run: 进程内直接执行", "run_id", runID, "kind", kind)
-		go func() { _ = s.ExecuteRun(execCtx, runID) }()
-	}
+	queued := !in.Sync && s.jobs != nil
+	s.dispatchExecute(runID, kind, queued, in.ChatSessionID, in.ChatUserMessageID)
 	return new(toRunDTO(&m)), nil
+}
+
+// dispatchExecute 在 Run 记录已持久化后启动执行（队列 or 进程内 goroutine）。
+func (s *Service) dispatchExecute(runID uuid.UUID, kind string, queued bool, chatSessionID, chatUserMessageID *uuid.UUID) {
+	if queued {
+		logging.Agent("run: 等待执行中...",
+			"run_id", runID, "kind", kind,
+			"chat_session_id", chatSessionID,
+			"chat_user_message_id", chatUserMessageID,
+		)
+		return
+	}
+	execCtx := s.runCtx()
+	logging.Agent("run: 进程内执行", "run_id", runID, "kind", kind)
+	go func() { _ = s.ExecuteRun(execCtx, runID) }()
 }
 
 // mcpConfigsToPorts 将 MCP YAML 配置转换为运行时端口配置。
@@ -542,21 +540,6 @@ func (s *Service) DeleteChatSession(ctx context.Context, projectID, sessionID uu
 			return errors.New("会话不存在")
 		}
 		return nil
-	})
-}
-
-// RunChat 启动或续接 Chat Run。
-func (s *Service) RunChat(ctx context.Context, projectID, userID, sessionID, userMessageID uuid.UUID, userMessage string, attachments []query.MessageAttachment, history []query.Message, modelID string) (*RunDTO, error) {
-	//组装请求消息
-	userMsg := query.Message{Role: query.RoleUser, Content: userMessage, Attachments: attachments}
-	//组装上下文
-	msgs := append(history, userMsg)
-	sid := sessionID
-	uid := userMessageID
-	return s.Start(ctx, projectID, userID, StartInput{
-		Kind: "chat", Title: userMessage, Message: userMessage,
-		ModelID: modelID, Messages: msgs,
-		ChatSessionID: &sid, ChatUserMessageID: &uid,
 	})
 }
 

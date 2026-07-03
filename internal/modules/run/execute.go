@@ -120,12 +120,15 @@ func (s *Service) finishRunView(ctx context.Context, runID uuid.UUID, status, ou
 	return s.viewStore.FinishRun(ctx, runID.String(), status, output, errMsg)
 }
 
-// ExecuteRun 执行 Run 的 Harness 流水线。
+// ExecuteRun 执行 Run 全生命周期。
 func (s *Service) ExecuteRun(ctx context.Context, runID uuid.UUID) error {
+	// 1. load
 	m, skip, err := s.loadRunForExecute(ctx, runID)
 	if err != nil || skip {
 		return err
 	}
+
+	// 2. setup
 	if err := s.refreshAIRuntime(ctx); err != nil {
 		logging.Agent("run: 刷新 AI 配置失败", "run_id", runID, "error", err.Error())
 		return fmt.Errorf("刷新 AI 配置失败: %w", err)
@@ -148,23 +151,32 @@ func (s *Service) ExecuteRun(ctx context.Context, runID uuid.UUID) error {
 	if err := s.viewStore.BeginRun(ctx, runID.String(), m.ProjectID.String(), m.Kind, m.Kind); err != nil {
 		return err
 	}
+
+	// 3. sandbox
 	if err := s.prepareRunRepo(ctx, &m); err != nil {
 		return s.finalizeRun(ctx, runID, m, err, runStart)
 	}
 
-	var runErr error
-	switch m.Kind {
-	case "build":
-		runErr = s.executeBuildLoop(ctx, &m)
-	case "pipeline":
-		runErr = s.executePipeline(ctx, &m)
-	default:
-		runErr = s.executeSingle(ctx, &m, m.Kind, nil)
-	}
+	// 4. runBody
+	runErr := s.runBodyByKind(ctx, &m)
 	if ctx.Err() != nil {
 		runErr = ctx.Err()
 	}
+
+	// 5. finalize
 	return s.finalizeRun(ctx, runID, m, runErr, runStart)
+}
+
+// runBodyByKind 按 Run 类型分发执行体，所有 AI 阶段收敛到 executeRunStage。
+func (s *Service) runBodyByKind(ctx context.Context, m *models.Run) error {
+	switch m.Kind {
+	case "build":
+		return s.executeBuildLoop(ctx, m)
+	case "pipeline":
+		return s.executePipeline(ctx, m)
+	default:
+		return s.executeRunStage(ctx, m, m.Kind)
+	}
 }
 
 // ShouldRetryRun 实现 job.RetryDecider：源码 clone 耗尽重试后不再 Job 重试。
@@ -361,10 +373,10 @@ func (s *Service) executeBuildLoop(ctx context.Context, m *models.Run) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := s.runHarnessStage(ctx, m, "implement", nil); err != nil {
+		if err := s.executeRunStage(ctx, m, "implement"); err != nil {
 			return fmt.Errorf("构建第 %d 轮编码: %w", round, err)
 		}
-		if err := s.runHarnessStage(ctx, m, "verify", nil); err != nil {
+		if err := s.executeRunStage(ctx, m, "verify"); err != nil {
 			return fmt.Errorf("构建第 %d 轮验证: %w", round, err)
 		}
 		docsRoot, err := s.workspace.DocsRoot(ctx, m.ProjectID)
@@ -386,14 +398,6 @@ func (s *Service) executeBuildLoop(ctx context.Context, m *models.Run) error {
 		}
 	}
 	return nil
-}
-
-// sandboxDir 返回 Run 独立仓库目录（sandbox_path）。
-func (s *Service) sandboxDir(_ context.Context, m *models.Run) (string, error) {
-	if m.SandboxPath == "" {
-		return "", fmt.Errorf("run 仓库未就绪")
-	}
-	return m.SandboxPath, nil
 }
 
 // loadExistingSteps 加载 Run 已有流水线步骤。
@@ -439,7 +443,7 @@ func (s *Service) executePipeline(ctx context.Context, m *models.Run) error {
 		if kind == "build" {
 			stepErr = s.executeBuildLoop(ctx, m)
 		} else {
-			stepErr = s.executeSingle(ctx, m, kind, &stepID)
+			stepErr = s.executeRunStage(ctx, m, kind)
 		}
 		fin := time.Now()
 		stepStatus := "succeeded"
@@ -488,65 +492,57 @@ func (s *Service) beginPipelineStep(
 	return step.ID, nil
 }
 
-// executeSingle 执行单阶段 Harness Run。
-func (s *Service) executeSingle(ctx context.Context, m *models.Run, kind string, stepID *uuid.UUID) error {
-	return s.runHarnessStage(ctx, m, kind, stepID)
-}
-
-// runHarnessStage 运行单个 Harness 阶段并持久化结果。
-func (s *Service) runHarnessStage(ctx context.Context, m *models.Run, kind string, _ *uuid.UUID) error {
-	runStage := func() error {
-		req, err := s.buildRunRequest(ctx, m, kind)
-		if err != nil {
-			return err
-		}
-		logging.Agent("run: Harness 阶段就绪",
-			"run_id", m.ID, "kind", kind,
-			"message_count", len(req.Messages),
-			"sandbox_dir", req.SandboxDir,
-			"model", req.Model.Model,
-			"chat_session_id", m.ChatSessionID,
-			"chat_user_message_id", m.ChatUserMessageID,
-		)
-		if len(req.Messages) == 0 {
-			logging.Agent("run: LLM 输入消息为空", "run_id", m.ID, "kind", kind)
-		}
-		sink := s.viewStore.Sink(m.ID.String(), m.ProjectID.String())
-		onSubagent := func(snap agent.Snapshot) {
-			s.viewStore.OnSubagent(ctx, m.ID.String(), snap)
-		}
-		req.OnSubagentUpdate = onSubagent
-		req.OnSubagentDone = onSubagent
-		result, runErr := s.runtime.Run(ctx, req, sink)
-		logging.Agent("run: runtime.Run 返回",
-			"run_id", m.ID, "kind", kind,
-			"run_err", runErr != nil,
-			"result_err", result.Err,
-			"output_len", len(runOutputFromResult(result)),
-			"stop_reason", result.StopReason,
-			"turn_count", result.TurnCount,
-		)
-		if runErr == nil && result.Err == nil {
-			output := runOutputFromResult(result)
-			if output != "" {
-				_ = s.db.WithContext(ctx).Model(&models.Run{}).Where("id = ?", m.ID).
-					Update("output", output).Error
-			}
-		}
-		if runErr != nil {
-			return runErr
-		}
-		if result.Err != nil {
-			return result.Err
-		}
-		docsRoot, err := s.workspace.DocsRoot(ctx, m.ProjectID)
-		if err != nil {
-			return err
-		}
-		s.indexHarnessOutputs(ctx, m, kind, docsRoot)
-		return nil
+// executeRunStage 执行单次 AI 阶段（chat / plan / implement / verify / build 子阶段等）并持久化结果。
+func (s *Service) executeRunStage(ctx context.Context, m *models.Run, kind string) error {
+	req, err := s.buildRunRequest(ctx, m, kind)
+	if err != nil {
+		return err
 	}
-	return runStage()
+	logging.Agent("run: AI 阶段就绪",
+		"run_id", m.ID, "kind", kind,
+		"message_count", len(req.Messages),
+		"sandbox_dir", req.SandboxDir,
+		"model", req.Model.Model,
+		"chat_session_id", m.ChatSessionID,
+		"chat_user_message_id", m.ChatUserMessageID,
+	)
+	if len(req.Messages) == 0 {
+		logging.Agent("run: LLM 输入消息为空", "run_id", m.ID, "kind", kind)
+	}
+	sink := s.viewStore.Sink(m.ID.String(), m.ProjectID.String())
+	onSubagent := func(snap agent.Snapshot) {
+		s.viewStore.OnSubagent(ctx, m.ID.String(), snap)
+	}
+	req.OnSubagentUpdate = onSubagent
+	req.OnSubagentDone = onSubagent
+	result, runErr := s.runtime.Run(ctx, req, sink)
+	logging.Agent("run: runtime.Run 返回",
+		"run_id", m.ID, "kind", kind,
+		"run_err", runErr != nil,
+		"result_err", result.Err,
+		"output_len", len(runOutputFromResult(result)),
+		"stop_reason", result.StopReason,
+		"turn_count", result.TurnCount,
+	)
+	if runErr == nil && result.Err == nil {
+		output := runOutputFromResult(result)
+		if output != "" {
+			_ = s.db.WithContext(ctx).Model(&models.Run{}).Where("id = ?", m.ID).
+				Update("output", output).Error
+		}
+	}
+	if runErr != nil {
+		return runErr
+	}
+	if result.Err != nil {
+		return result.Err
+	}
+	docsRoot, err := s.workspace.DocsRoot(ctx, m.ProjectID)
+	if err != nil {
+		return err
+	}
+	s.indexHarnessOutputs(ctx, m, kind, docsRoot)
+	return nil
 }
 
 func (s *Service) buildRunRequest(ctx context.Context, m *models.Run, kind string) (ports.RunRequest, error) {
@@ -558,10 +554,10 @@ func (s *Service) buildRunRequest(ctx context.Context, m *models.Run, kind strin
 	if err != nil {
 		return ports.RunRequest{}, err
 	}
-	sandboxDir, err := s.sandboxDir(ctx, m)
-	if err != nil {
-		return ports.RunRequest{}, err
+	if m.SandboxPath == "" {
+		return ports.RunRequest{}, fmt.Errorf("run 仓库未就绪")
 	}
+	sandboxDir := m.SandboxPath
 	docsRoot, err := s.workspace.DocsRoot(ctx, m.ProjectID)
 	if err != nil {
 		return ports.RunRequest{}, err

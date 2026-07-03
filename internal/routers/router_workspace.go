@@ -44,7 +44,7 @@ func listRunRepoFiles(c *gin.Context, d *app.Deps) {
 	if !ok {
 		return
 	}
-	if _, err := d.Runs.GetForProject(c.Request.Context(), pid, runID); err != nil {
+	if _, err := d.RunService.GetForProject(c.Request.Context(), pid, runID); err != nil {
 		platformhttp.JSONError(c, 404, "not_found", "运行不存在")
 		return
 	}
@@ -64,7 +64,7 @@ func readRunRepoFile(c *gin.Context, d *app.Deps) {
 	if !ok {
 		return
 	}
-	if _, err := d.Runs.GetForProject(c.Request.Context(), pid, runID); err != nil {
+	if _, err := d.RunService.GetForProject(c.Request.Context(), pid, runID); err != nil {
 		platformhttp.JSONError(c, 404, "not_found", "运行不存在")
 		return
 	}

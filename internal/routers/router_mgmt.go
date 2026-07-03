@@ -288,7 +288,7 @@ func getRun(c *gin.Context, d *app.Deps) {
 	if !ok {
 		return
 	}
-	rn, err := d.Runs.GetForProject(c.Request.Context(), pid, rid)
+	rn, err := d.RunService.GetForProject(c.Request.Context(), pid, rid)
 	if err != nil {
 		platformhttp.JSONError(c, 404, "not_found", "运行不存在")
 		return
@@ -303,7 +303,7 @@ func listRunSteps(c *gin.Context, d *app.Deps) {
 	if !ok {
 		return
 	}
-	steps, err := d.Runs.ListStepsForProject(c.Request.Context(), pid, rid)
+	steps, err := d.RunService.ListStepsForProject(c.Request.Context(), pid, rid)
 	if err != nil {
 		platformhttp.JSONError(c, 500, "internal", err.Error())
 		return
@@ -318,7 +318,7 @@ func getRunAudit(c *gin.Context, d *app.Deps) {
 	if !ok {
 		return
 	}
-	content, err := d.Runs.GetAuditForProject(c.Request.Context(), pid, rid)
+	content, err := d.RunService.GetAuditForProject(c.Request.Context(), pid, rid)
 	if err != nil {
 		if os.IsNotExist(err) {
 			c.JSON(200, gin.H{"content": ""})

@@ -66,7 +66,7 @@ func Run(ctx context.Context, opts Options) error {
 	if err := deps.Repositories.MigrateLegacyProjects(ctx); err != nil {
 		loggers.System.Warn("迁移旧版仓库绑定失败", "err", err)
 	}
-	deps.Runs.SetLifecycle(ctx) // 进程退出时取消进行中的 Run
+	deps.RunService.SetLifecycle(ctx) // 进程退出时取消进行中的 Run
 	defer deps.Close()
 	deps.StartJobWorker(ctx) // 嵌入式任务队列消费者
 	engine := platformhttp.NewEngine(loggers.Access, loggers.System, dev)

@@ -38,7 +38,7 @@ func registerRunRoutes(api *gin.RouterGroup, d *app.Deps) {
 func listRuns(c *gin.Context, d *app.Deps) {
 	pid := auth.ProjectID(c)
 	kind := c.Query("kind")
-	runs, err := d.Runs.List(c.Request.Context(), pid, kind)
+	runs, err := d.RunService.List(c.Request.Context(), pid, kind)
 	if err != nil {
 		platformhttp.JSONError(c, 500, "internal", err.Error())
 		return
@@ -63,7 +63,7 @@ func startRun(c *gin.Context, d *app.Deps) {
 		body.Kind = "task"
 	}
 	sync := c.Query("sync") == "1"
-	rn, err := d.Runs.Start(c.Request.Context(), pid, u.ID, run.StartInput{
+	rn, err := d.RunService.Start(c.Request.Context(), pid, u.ID, run.StartInput{
 		Kind: body.Kind, Message: body.Message, FilePath: body.FilePath,
 		EvalFilePath: body.EvalFilePath, Title: body.Message, Sync: sync,
 	})
@@ -102,7 +102,7 @@ func streamRun(c *gin.Context, d *app.Deps) {
 	first := true
 
 	for {
-		envs, done, maxSeq, err := d.Runs.StreamCatchUpSinceForProject(c.Request.Context(), pid, rid, mode, lastSeq)
+		envs, done, maxSeq, err := d.RunService.StreamCatchUpSinceForProject(c.Request.Context(), pid, rid, mode, lastSeq)
 		if err != nil {
 			if first {
 				if err == gorm.ErrRecordNotFound {
@@ -168,7 +168,7 @@ func getRunView(c *gin.Context, d *app.Deps) {
 	if !ok {
 		return
 	}
-	st, err := d.Runs.GetRunViewForProject(c.Request.Context(), pid, rid)
+	st, err := d.RunService.GetRunViewForProject(c.Request.Context(), pid, rid)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			platformhttp.JSONError(c, 404, "not_found", "Run 不存在")
@@ -188,7 +188,7 @@ func getToolLog(c *gin.Context, d *app.Deps) {
 		return
 	}
 	toolUseID := c.Param("toolUseId")
-	content, err := d.Runs.GetToolLogForProject(c.Request.Context(), pid, rid, toolUseID)
+	content, err := d.RunService.GetToolLogForProject(c.Request.Context(), pid, rid, toolUseID)
 	if err != nil {
 		if os.IsNotExist(err) {
 			platformhttp.JSONError(c, 404, "not_found", "工具日志不存在")
@@ -207,7 +207,7 @@ func cancelRun(c *gin.Context, d *app.Deps) {
 	if !ok {
 		return
 	}
-	if err := d.Runs.CancelForProject(c.Request.Context(), pid, rid); err != nil {
+	if err := d.RunService.CancelForProject(c.Request.Context(), pid, rid); err != nil {
 		platformhttp.JSONError(c, 404, "not_found", "运行不存在")
 		return
 	}
