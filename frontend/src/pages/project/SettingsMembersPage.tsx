@@ -12,26 +12,25 @@ import {
   Space,
   Spin,
   Table,
-  Tabs,
   Typography,
   theme,
 } from "antd";
 import { useProjectStore } from "@/stores/project";
 import { useProjectPermissions } from "@/hooks/useProjectPermissions";
-import { useSettingsTabNavigate } from "@/hooks/useSettingsTabNavigate";
 import { useUserSearch } from "@/hooks/useUserSearch";
 import * as projectsApi from "@/api/projects";
 import type { ProjectMember, MemberRole } from "@/api/projects";
 import type { User } from "@/api/auth";
-import { settingsTabs } from "@/locales/zh-CN";
 import { avatarInitials } from "@/utils/avatar";
+import { pageCardProps } from "@/theme/surface";
+import { ProjectSettingsFrame } from "@/pages/project/ProjectSettingsFrame";
 
 export default function SettingsMembersPage() {
   const { token } = theme.useToken();
+  const cardProps = pageCardProps(token);
   const { id = "" } = useParams();
   const projectStore = useProjectStore();
   const perms = useProjectPermissions(projectStore.current);
-  const onSettingsTabChange = useSettingsTabNavigate(id);
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [username, setUsername] = useState("");
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -102,29 +101,28 @@ export default function SettingsMembersPage() {
     });
   }
   return (
-    <>
-      <Tabs
-        activeKey="members"
-        onChange={onSettingsTabChange}
-        items={settingsTabs(id).map((tab) => ({
-          key: tab.key,
-          label: tab.label,
-        }))}
-        style={{ marginBottom: 16 }}
-      />
-      <Typography.Title level={2}>项目成员</Typography.Title>
+    <ProjectSettingsFrame
+      projectId={id}
+      activeTab="members"
+      sectionTitle="项目成员"
+    >
       {error && (
-        <Alert type="error" message={error} style={{ marginBottom: 16 }} />
+        <Alert type="error" message={error} showIcon style={{ marginBottom: 16 }} />
       )}
       {!perms.canManageMembers && !error && (
         <Alert
           type="info"
+          showIcon
           message="您仅有查看权限。如需邀请或管理成员，请联系项目 Maintainer 或 Owner。"
           style={{ marginBottom: 16 }}
         />
       )}
       {perms.canManageMembers && (
-        <Card title="邀请成员" style={{ maxWidth: 560, marginBottom: 16 }}>
+        <Card
+          title="邀请成员"
+          {...cardProps}
+          style={{ ...cardProps.style, marginBottom: 16 }}
+        >
           <Space direction="vertical" style={{ width: "100%" }} size="middle">
             <Typography.Text type="secondary">
               按登录名、显示名称或邮箱搜索。
@@ -166,7 +164,8 @@ export default function SettingsMembersPage() {
           </Space>
         </Card>
       )}
-      <Table dataSource={members} rowKey="user_id" pagination={false}>
+      <Card title="成员列表" {...cardProps}>
+        <Table dataSource={members} rowKey="user_id" pagination={false}>
         <Table.Column
           title=""
           width={48}
@@ -229,6 +228,7 @@ export default function SettingsMembersPage() {
           />
         )}
       </Table>
-    </>
+      </Card>
+    </ProjectSettingsFrame>
   );
 }

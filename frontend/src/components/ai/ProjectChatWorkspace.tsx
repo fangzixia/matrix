@@ -145,7 +145,7 @@ export default function ProjectChatWorkspace({
         height: "100%",
         minHeight: 0,
         overflow: "hidden",
-        background: token.colorBgContainer,
+        background: token.colorBgLayout,
         ...style,
       }}
     >
@@ -158,26 +158,45 @@ export default function ProjectChatWorkspace({
           onClick: createNewChat,
           disabled: loading,
         }}
+        styles={{
+          root: {
+            background: token.colorFillAlter,
+          },
+          creation: {
+            borderRadius: token.borderRadius,
+            fontWeight: 500,
+          },
+          item: {
+            borderRadius: token.borderRadius,
+          },
+        }}
         style={{
           width: 260,
           flexShrink: 0,
           height: "100%",
-          borderRight: `1px solid ${token.colorBorderSecondary}`,
-          background: token.colorBgContainer,
+          borderRight: `1px solid ${token.colorBorder}`,
           padding: "12px 8px",
         }}
       />
       <Flex
         vertical
-        style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }}
+        style={{
+          flex: 1,
+          minWidth: 0,
+          minHeight: 0,
+          overflow: "hidden",
+          background: token.colorBgContainer,
+        }}
       >
         {modelOptions.length > 0 ? (
           <Flex
             align="center"
             gap={8}
             style={{
-              padding: "8px 24px 0",
+              padding: "10px 24px",
               flexShrink: 0,
+              borderBottom: `1px solid ${token.colorBorderSecondary}`,
+              background: token.colorBgContainer,
             }}
           >
             <Typography.Text type="secondary">会话模型</Typography.Text>

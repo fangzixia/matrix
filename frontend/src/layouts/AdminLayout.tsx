@@ -49,6 +49,7 @@ export function AdminLayout() {
           padding: "0 24px",
           background: token.colorBgContainer,
           borderBottom: `1px solid ${token.colorBorderSecondary}`,
+          boxShadow: token.boxShadow,
         }}
       >
         <Link to="/projects">
@@ -64,21 +65,26 @@ export function AdminLayout() {
       <Layout>
         <Sider
           width={220}
+          theme="light"
           style={{
-            background: token.colorBgContainer,
-            borderRight: `1px solid ${token.colorBorderSecondary}`,
+            background: token.colorFillAlter,
+            borderRight: `1px solid ${token.colorBorder}`,
+            overflow: "hidden",
           }}
         >
           <Menu
             mode="inline"
+            theme="light"
             selectedKeys={[selectedKey]}
             items={menuItems}
             onClick={({ key }) => navigate(key)}
-            style={{ borderInlineEnd: "none", paddingTop: 8 }}
+            style={{ borderInlineEnd: "none", background: "transparent" }}
           />
         </Sider>
         <Content style={{ padding: 24, background: token.colorBgLayout }}>
-          <Outlet />
+          <div style={{ maxWidth: 1280, margin: "0 auto" }}>
+            <Outlet />
+          </div>
         </Content>
       </Layout>
     </Layout>

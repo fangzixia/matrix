@@ -10,17 +10,17 @@ import {
   Modal,
   Space,
   Table,
-  Tabs,
-  Typography,
+  theme,
 } from "antd";
 import * as reposApi from "@/api/repositories";
 import type { Repository } from "@/api/repositories";
-import { useSettingsTabNavigate } from "@/hooks/useSettingsTabNavigate";
-import { settingsTabs } from "@/locales/zh-CN";
+import { pageCardProps } from "@/theme/surface";
+import { ProjectSettingsFrame } from "@/pages/project/ProjectSettingsFrame";
 
 export default function SettingsRepositoriesPage() {
+  const { token } = theme.useToken();
+  const cardProps = pageCardProps(token);
   const { id: projectId = "" } = useParams();
-  const onSettingsTabChange = useSettingsTabNavigate(projectId);
   const [repos, setRepos] = useState<Repository[]>([]);
   const [error, setError] = useState("");
   const [actingId, setActingId] = useState("");
@@ -70,21 +70,15 @@ export default function SettingsRepositoriesPage() {
     });
   }
   return (
-    <div>
-      <Tabs
-        activeKey="repositories"
-        onChange={onSettingsTabChange}
-        items={settingsTabs(projectId).map((tab) => ({
-          key: tab.key,
-          label: tab.label,
-        }))}
-        style={{ marginBottom: 16 }}
-      />
-      <Typography.Title level={2}>仓库</Typography.Title>
+    <ProjectSettingsFrame
+      projectId={projectId}
+      activeTab="repositories"
+      sectionTitle="仓库"
+    >
       {error && (
-        <Alert type="error" message={error} style={{ marginBottom: 16 }} />
+        <Alert type="error" message={error} showIcon style={{ marginBottom: 16 }} />
       )}
-      <Card style={{ maxWidth: 560, marginBottom: 24 }}>
+      <Card title="添加仓库" {...cardProps} style={{ ...cardProps.style, marginBottom: 16 }}>
         <Form
           form={form}
           layout="vertical"
@@ -108,7 +102,8 @@ export default function SettingsRepositoriesPage() {
           </Button>
         </Form>
       </Card>
-      <Table dataSource={repos} rowKey="id" pagination={false}>
+      <Card title="已绑定仓库" {...cardProps}>
+        <Table dataSource={repos} rowKey="id" pagination={false}>
         <Table.Column title="名称" dataIndex="name" />
         <Table.Column title="Git 地址" dataIndex="git_url" />
         <Table.Column title="分支" dataIndex="git_branch" />
@@ -127,6 +122,7 @@ export default function SettingsRepositoriesPage() {
           )}
         />
       </Table>
-    </div>
+      </Card>
+    </ProjectSettingsFrame>
   );
 }

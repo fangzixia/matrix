@@ -32,6 +32,7 @@ export default function MarkdownView({
     "--table-body-bg": token.colorBgContainer,
     "--cite-bg": token.colorFillTertiary,
     "--cite-hover-bg": token.colorFillSecondary,
+    "--font-mono": token.fontFamilyCode,
   } as CSSProperties;
 
   const mergedClassName = [

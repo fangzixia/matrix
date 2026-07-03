@@ -50,7 +50,7 @@ export default function PlanComposePanel({
         height: "100%",
         minHeight: 0,
         overflow: "hidden",
-        background: token.colorBgContainer,
+        background: token.colorBgLayout,
         ...style,
       }}
     >

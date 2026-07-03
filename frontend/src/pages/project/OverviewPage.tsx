@@ -13,11 +13,13 @@ import {
   Spin,
   Tag,
   Typography,
+  theme,
 } from "antd";
 import { GlobalOutlined, LockOutlined } from "@ant-design/icons";
 import { useProjectStore } from "@/stores/project";
 import * as projectsApi from "@/api/projects";
 import MarkdownView from "@/components/docs/MarkdownView";
+import { pageCardProps } from "@/theme/surface";
 
 function planStatusLabel(status?: string) {
   if (status === "approved") return "已批准";
@@ -32,6 +34,8 @@ function planStatusColor(status?: string) {
 type DocItem = projectsApi.PlanItem | projectsApi.EvaluationItem;
 
 export default function OverviewPage() {
+  const { token } = theme.useToken();
+  const cardProps = pageCardProps(token);
   const { id: projectId = "" } = useParams();
   const current = useProjectStore((s) => s.current);
   const [plans, setPlans] = useState<projectsApi.PlanItem[]>([]);
@@ -110,7 +114,7 @@ export default function OverviewPage() {
         </Flex>
       )}
       <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-        <Card title="项目信息">
+        <Card title="项目信息" {...cardProps}>
           <Descriptions column={1} size="small" colon>
             <Descriptions.Item label="项目编码">
               <code>{current?.path || "—"}</code>
@@ -123,7 +127,7 @@ export default function OverviewPage() {
             </Descriptions.Item>
           </Descriptions>
         </Card>
-        <Card title="计划文档">
+        <Card title="计划文档" {...cardProps}>
           {plansError && (
             <Alert
               type="warning"
@@ -178,7 +182,7 @@ export default function OverviewPage() {
             </Empty>
           )}
         </Card>
-        <Card title="评测报告">
+        <Card title="评测报告" {...cardProps}>
           {evaluationsError && (
             <Alert
               type="warning"

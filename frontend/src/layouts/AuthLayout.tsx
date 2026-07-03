@@ -9,7 +9,12 @@ const { Header, Content, Footer } = Layout;
 export function AuthLayout() {
   const { token } = theme.useToken();
   return (
-    <Layout style={{ minHeight: "100vh", background: token.colorBgLayout }}>
+    <Layout
+      style={{
+        minHeight: "100vh",
+        background: `linear-gradient(180deg, ${token.colorBgLayout} 0%, ${token.colorFillAlter} 50%, ${token.colorBgContainer} 100%)`,
+      }}
+    >
       <Header
         style={{
           display: "flex",
@@ -17,6 +22,7 @@ export function AuthLayout() {
           padding: "0 24px",
           background: token.colorBgContainer,
           borderBottom: `1px solid ${token.colorBorderSecondary}`,
+          boxShadow: token.boxShadow,
         }}
       >
         <MatrixLogo />
@@ -41,7 +47,15 @@ export function AuthLayout() {
               }
             />
           </Flex>
-          <Card style={{ width: 400, maxWidth: "100%" }}>
+          <Card
+            style={{
+              width: 400,
+              maxWidth: "100%",
+              boxShadow: token.boxShadowSecondary,
+              border: `1px solid ${token.colorBorderSecondary}`,
+            }}
+            styles={{ body: { padding: "32px 28px" } }}
+          >
             <Outlet />
           </Card>
         </Flex>

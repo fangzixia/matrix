@@ -1,0 +1,30 @@
+/* Matrix 全局 Ant Design / @ant-design/x 视觉增强（主题层，非页面级） */
+
+/* 卡片：明确边框 + 阴影 + 标题栏 */
+.ant-card-bordered {
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.07), 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.ant-card-bordered > .ant-card-head {
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+  min-height: 48px;
+}
+
+/* 表格：圆角容器感 */
+.ant-table-wrapper .ant-table {
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* 对话列表：选中项高亮 */
+.ant-conversations-item-active {
+  background: var(--ant-color-primary-bg) !important;
+  font-weight: 500;
+}
+
+/* 快捷提示：hover 反馈 */
+.ant-prompts-item:hover {
+  border-color: var(--ant-color-primary-border) !important;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08) !important;
+}

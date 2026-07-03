@@ -334,6 +334,7 @@ export function AppShell() {
           overflow: "visible",
           background: token.colorBgContainer,
           borderBottom: `1px solid ${token.colorBorderSecondary}`,
+          boxShadow: token.boxShadow,
         }}
       >
         <Flex align="center" gap={8} wrap="nowrap">
@@ -505,12 +506,21 @@ export function AppShell() {
         {projectId && currentProject && (
           <Sider
             width={220}
+            theme="light"
             style={{
-              background: token.colorBgContainer,
-              borderRight: `1px solid ${token.colorBorderSecondary}`,
+              background: token.colorFillAlter,
+              borderRight: `1px solid ${token.colorBorder}`,
+              overflow: "hidden",
             }}
           >
-            <Flex align="center" gap={8} style={{ padding: "16px 16px 8px" }}>
+            <Flex
+              align="center"
+              gap={8}
+              style={{
+                padding: "16px 16px 12px",
+                borderBottom: `1px solid ${token.colorBorderSecondary}`,
+              }}
+            >
               <Avatar
                 shape="square"
                 style={{ backgroundColor: token.colorPrimary, flexShrink: 0 }}
@@ -523,10 +533,14 @@ export function AppShell() {
             </Flex>
             <Menu
               mode="inline"
+              theme="light"
               selectedKeys={[selectedNavKey]}
               items={siderMenuItems}
               onClick={onSiderMenuClick}
-              style={{ borderInlineEnd: "none" }}
+              style={{
+                borderInlineEnd: "none",
+                background: "transparent",
+              }}
             />
           </Sider>
         )}
@@ -543,7 +557,11 @@ export function AppShell() {
                   flexDirection: "column",
                   background: token.colorBgContainer,
                 }
-              : { padding: 24, background: token.colorBgLayout }
+              : {
+                  padding: 24,
+                  background: token.colorBgLayout,
+                  minHeight: "100%",
+                }
           }
         >
           {isFullBleedPage ? (

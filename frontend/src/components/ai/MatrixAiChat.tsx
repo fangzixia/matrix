@@ -12,6 +12,7 @@ import {
   theme,
 } from "antd";
 import type { GetRef } from "antd";
+import type { GlobalToken } from "antd/es/theme/interface";
 import {
   PaperClipOutlined,
   RobotOutlined,
@@ -155,7 +156,7 @@ async function fileToChatAttachment(
   };
 }
 
-function renderUserAttachments(item: AiMessage) {
+function renderUserAttachments(item: AiMessage, token: GlobalToken) {
   if (!item.attachments?.length) return null;
   return (
     <Flex vertical gap={8}>
@@ -166,7 +167,7 @@ function renderUserAttachments(item: AiMessage) {
               key={`${att.name}-${att.mime_type}`}
               src={`data:${att.mime_type};base64,${att.data}`}
               alt={att.name}
-              style={{ maxWidth: 240, maxHeight: 240, borderRadius: 4 }}
+              style={{ maxWidth: 240, maxHeight: 240, borderRadius: token.borderRadius }}
             />
           );
         }
@@ -304,7 +305,7 @@ export default function MatrixAiChat({
           data.key != null &&
           (src?.content?.trim() || hasAttachments);
         const footerParts: ReactNode[] = [];
-        if (hasAttachments && src) footerParts.push(renderUserAttachments(src));
+        if (hasAttachments && src) footerParts.push(renderUserAttachments(src, token));
         if (showResend) {
           footerParts.push(
             <Actions
@@ -332,8 +333,10 @@ export default function MatrixAiChat({
           ),
           styles: {
             content: {
-              background: token.colorPrimary,
-              color: token.colorTextLightSolid,
+              background: token.colorPrimaryBg,
+              color: token.colorText,
+              border: `1px solid ${token.colorPrimaryBorder}`,
+              borderRadius: token.borderRadiusLG,
             },
           },
           footer: footerParts.length ? (
@@ -366,6 +369,7 @@ export default function MatrixAiChat({
             content: {
               background: token.colorBgContainer,
               border: `1px solid ${token.colorBorderSecondary}`,
+              borderRadius: token.borderRadiusLG,
               maxWidth: "100%",
             },
           },
@@ -493,7 +497,17 @@ export default function MatrixAiChat({
                     : String(info.data.label ?? "");
                 setInputValue(label);
               }}
-              styles={{ item: { flex: "1 1 200px" } }}
+              styles={{
+                list: { gap: 12, maxWidth: 720, width: "100%" },
+                item: {
+                  flex: "1 1 200px",
+                  border: `1px solid ${token.colorBorderSecondary}`,
+                  borderRadius: token.borderRadiusLG,
+                  background: token.colorBgContainer,
+                  boxShadow: token.boxShadowTertiary,
+                  padding: "14px 16px",
+                },
+              }}
               wrap
             />
           ) : null}
@@ -512,11 +526,18 @@ export default function MatrixAiChat({
         boxSizing: "border-box",
         padding: "12px 24px 16px",
         background: token.colorBgContainer,
+        borderTop: `1px solid ${token.colorBorderSecondary}`,
         overflow: "auto",
       }}
     >
       <Sender
-        style={{ width: "100%" }}
+        style={{
+          width: "100%",
+          border: `1px solid ${token.colorBorderSecondary}`,
+          borderRadius: token.borderRadiusLG,
+          boxShadow: token.boxShadowTertiary,
+          background: token.colorBgContainer,
+        }}
         value={inputValue}
         onChange={setInputValue}
         loading={loading}
@@ -573,7 +594,7 @@ export default function MatrixAiChat({
       style={{
         height: "100%",
         minHeight: 0,
-        background: token.colorBgContainer,
+        background: token.colorBgLayout,
         ...style,
       }}
     >
@@ -585,6 +606,7 @@ export default function MatrixAiChat({
             overflow: "auto",
             padding: "16px 24px",
             boxSizing: "border-box",
+            background: token.colorBgLayout,
           }}
         >
           {messageList}

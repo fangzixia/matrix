@@ -17,9 +17,11 @@ import { GlobalOutlined, LockOutlined, PlusOutlined } from "@ant-design/icons";
 import { useProjectStore } from "@/stores/project";
 import * as projectsApi from "@/api/projects";
 import { avatarInitials } from "@/utils/avatar";
+import { listCardProps } from "@/theme/surface";
 
 export default function ProjectsPage() {
   const { token } = theme.useToken();
+  const cardProps = listCardProps(token);
   const navigate = useNavigate();
   const projects = useProjectStore((s) => s.projects);
   const fetchProjects = useProjectStore((s) => s.fetchProjects);
@@ -69,8 +71,12 @@ export default function ProjectsPage() {
           renderItem={(p) => {
             const visibility = p.visibility || "private";
             return (
-              <List.Item>
-                <Card style={{ width: "100%" }} bordered={false}>
+              <List.Item style={{ padding: 0, border: "none" }}>
+                <Card
+                  {...cardProps}
+                  style={{ ...cardProps.style, width: "100%" }}
+                  styles={{ body: { padding: "16px 20px" } }}
+                >
                   <Flex gap={16} align="flex-start">
                     <Link to={`/projects/${p.id}`}>
                       <Avatar

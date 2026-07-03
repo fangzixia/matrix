@@ -27,7 +27,7 @@ export function MatrixLogo({ showText = true, size = 24 }: MatrixLogoProps) {
         />
       </svg>
       {showText && (
-        <Typography.Text strong style={{ fontSize: 16, color: "#e24329" }}>
+        <Typography.Text strong style={{ fontSize: 16, color: token.colorPrimary }}>
           Matrix
         </Typography.Text>
       )}
