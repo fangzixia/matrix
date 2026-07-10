@@ -83,14 +83,14 @@ export default function SystemGitTab() {
     ? `服务运行于 ${form.platform_label || "当前系统"}，默认私钥路径：${form.default_ssh_key_path}`
     : `服务运行于 ${form.platform_label || "当前系统"}，请填写私钥绝对路径`;
   return (
-    <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-      {error && <Alert type="error" message={error} />}
-      {message && <Alert type="success" message={message} />}
+    <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
+      {error && <Alert type="error" title={error} />}
+      {message && <Alert type="success" title={message} />}
       <Typography.Title level={4}>Git 访问</Typography.Title>
       <Typography.Text type="secondary">
         按 Git 主机配置 SSH 私钥，支持多条。
       </Typography.Text>
-      <Alert type="info" message={platformHint} />
+      <Alert type="info" title={platformHint} />
       <Form layout="vertical">
         <Form.Item label="克隆超时">
           <Input
@@ -104,7 +104,7 @@ export default function SystemGitTab() {
       </Form>
       {form.accesses.map((row, index) => (
         <Card key={row.id} size="small">
-          <Space direction="vertical" style={{ width: "100%" }}>
+          <Space orientation="vertical" style={{ width: "100%" }}>
             <Form layout="vertical">
               <Form.Item label="名称">
                 <Input
@@ -161,7 +161,7 @@ export default function SystemGitTab() {
         添加 Git 访问配置
       </Button>
       <Card title="连接测试" size="small">
-        <Space direction="vertical" style={{ width: "100%" }}>
+        <Space orientation="vertical" style={{ width: "100%" }}>
           <Input
             value={gitTestUrl}
             onChange={(e) => setGitTestUrl(e.target.value)}
@@ -174,8 +174,8 @@ export default function SystemGitTab() {
           >
             测试连接
           </Button>
-          {gitTestError && <Alert type="error" message={gitTestError} />}
-          {gitTestMsg && <Alert type="success" message={gitTestMsg} />}
+          {gitTestError && <Alert type="error" title={gitTestError} />}
+          {gitTestMsg && <Alert type="success" title={gitTestMsg} />}
           <Typography.Text type="secondary">
             测试会使用当前已保存的 Git 配置；如修改了 SSH 私钥路径，请先保存配置。
           </Typography.Text>

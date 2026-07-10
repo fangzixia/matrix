@@ -33,21 +33,22 @@ export default function DocFileSelect({
   return (
     <Select
       allowClear={allowClear}
-      showSearch
+      showSearch={{
+        optionFilterProp: "label",
+        filterOption: (input, option) => {
+          const q = input.toLowerCase();
+          const label = String(option?.label ?? "").toLowerCase();
+          const path = String(
+            (option as { path?: string })?.path ?? "",
+          ).toLowerCase();
+          return label.includes(q) || path.includes(q);
+        },
+      }}
       disabled={disabled}
       placeholder={placeholder}
       value={value || undefined}
       onChange={(v) => onChange?.(v ?? "")}
       options={selectOptions}
-      optionFilterProp="label"
-      filterOption={(input, option) => {
-        const q = input.toLowerCase();
-        const label = String(option?.label ?? "").toLowerCase();
-        const path = String(
-          (option as { path?: string })?.path ?? "",
-        ).toLowerCase();
-        return label.includes(q) || path.includes(q);
-      }}
       optionRender={(option) => (
         <div>
           <div>{option.label}</div>

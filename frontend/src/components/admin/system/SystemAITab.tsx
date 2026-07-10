@@ -89,16 +89,16 @@ export default function SystemAITab() {
   if (!loaded)
     return <Spin style={{ display: "block", margin: "24px auto" }} />;
   return (
-    <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-      {error && <Alert type="error" message={error} />}
-      {message && <Alert type="success" message={message} />}
+    <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
+      {error && <Alert type="error" title={error} />}
+      {message && <Alert type="success" title={message} />}
       <Typography.Title level={4}>模型配置</Typography.Title>
       <Typography.Text type="secondary">
         可配置多个模型并选择启用；标记为「默认」的已启用模型将用于系统 Run。
       </Typography.Text>
       {form.models.map((row, index) => (
         <Card key={row.id} size="small">
-          <Space direction="vertical" style={{ width: "100%" }} size="middle">
+          <Space orientation="vertical" style={{ width: "100%" }} size="middle">
             <Space wrap>
               <Checkbox
                 checked={row.enabled}
@@ -190,7 +190,7 @@ export default function SystemAITab() {
                 />
               </Form.Item>
               <Form.Item label="多模态">
-                <Space direction="vertical">
+                <Space orientation="vertical">
                   <Checkbox
                     checked={row.multimodal ?? false}
                     onChange={(e) => {
@@ -270,7 +270,7 @@ export default function SystemAITab() {
         </Form.Item>
       </Form>
       <h3>安全</h3>
-      <Space direction="vertical">
+      <Space orientation="vertical">
         <Checkbox
           checked={form.security.allow_shell}
           onChange={(e) =>

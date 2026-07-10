@@ -68,7 +68,7 @@ export default function ProjectNewPage() {
     <>
       <Typography.Title level={2}>创建新项目</Typography.Title>
       {error && (
-        <Alert type="error" message={error} style={{ marginBottom: 16 }} />
+        <Alert type="error" title={error} style={{ marginBottom: 16 }} />
       )}
       <Card style={{ maxWidth: 560 }}>
         <Form
@@ -114,7 +114,7 @@ export default function ProjectNewPage() {
           </Form.Item>
           <Form.Item label="可见性" name="visibility">
             <Radio.Group>
-              <Space direction="vertical">
+              <Space orientation="vertical">
                 {visibilityOptions.map((opt) => (
                   <Radio key={opt.value} value={opt.value}>
                     <Typography.Text strong>{opt.label}</Typography.Text>

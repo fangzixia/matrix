@@ -67,7 +67,7 @@ export default function RepositoryPage() {
       <Alert
         type="info"
         showIcon
-        message="请从任务详情页打开仓库浏览"
+        title="请从任务详情页打开仓库浏览"
         description="仓库按 Run 独立存储，URL 需携带 run_id 参数，例如 /projects/{id}/repository?run_id=..."
       />
     );
@@ -88,7 +88,7 @@ export default function RepositoryPage() {
         <Typography.Text type="secondary">Run: {runId}</Typography.Text>
       </Flex>
       {error && (
-        <Alert type="error" message={error} style={{ marginBottom: 12 }} />
+        <Alert type="error" title={error} style={{ marginBottom: 12 }} />
       )}
       <Row gutter={16}>
         <Col xs={24} md={8}>

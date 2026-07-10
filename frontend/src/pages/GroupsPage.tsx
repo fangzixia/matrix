@@ -113,7 +113,7 @@ export default function GroupsPage() {
         </Button>
       </Flex>
       {listError && (
-        <Alert type="error" message={listError} style={{ marginBottom: 16 }} />
+        <Alert type="error" title={listError} style={{ marginBottom: 16 }} />
       )}
       {loading ? (
         <Spin style={{ display: "block", margin: "24px auto" }} />
@@ -170,7 +170,7 @@ export default function GroupsPage() {
         {createError && (
           <Alert
             type="error"
-            message={createError}
+            title={createError}
             style={{ marginBottom: 12 }}
           />
         )}
@@ -191,7 +191,7 @@ export default function GroupsPage() {
         {editError && (
           <Alert
             type="error"
-            message={editError}
+            title={editError}
             style={{ marginBottom: 12 }}
           />
         )}
@@ -208,7 +208,7 @@ export default function GroupsPage() {
         {deleteError && (
           <Alert
             type="error"
-            message={deleteError}
+            title={deleteError}
             style={{ marginBottom: 12 }}
           />
         )}

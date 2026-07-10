@@ -164,7 +164,7 @@ function PreviewDrawer({
       title={preview?.title}
       open={!!preview}
       onClose={onClose}
-      width={720}
+      size={720}
     >
       {preview && (
         <>
@@ -299,7 +299,7 @@ export default function StagePage() {
           <Alert
             type="warning"
             showIcon
-            message={docsError}
+            title={docsError}
             style={{ margin: "0 24px 12px" }}
           />
         )}
@@ -392,14 +392,14 @@ export default function StagePage() {
         <Alert
           type="warning"
           showIcon
-          message={docsError}
+          title={docsError}
           style={{ marginBottom: 16 }}
         />
       )}
       <Card style={{ marginBottom: 16 }}>
-        <Space direction="vertical" style={{ width: "100%" }} size="middle">
-          {kindHint && <Alert type="info" showIcon message={kindHint} />}
-          {startError && <Alert type="error" showIcon message={startError} />}
+        <Space orientation="vertical" style={{ width: "100%" }} size="middle">
+          {kindHint && <Alert type="info" showIcon title={kindHint} />}
+          {startError && <Alert type="error" showIcon title={startError} />}
           <Input
             value={message}
             onChange={(e) => setMessage(e.target.value)}

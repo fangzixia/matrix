@@ -31,10 +31,10 @@ export default function ProfilePage() {
     <>
       <Typography.Title level={2}>个人资料</Typography.Title>
       {error && (
-        <Alert type="error" message={error} style={{ marginBottom: 16 }} />
+        <Alert type="error" title={error} style={{ marginBottom: 16 }} />
       )}
       {message && (
-        <Alert type="success" message={message} style={{ marginBottom: 16 }} />
+        <Alert type="success" title={message} style={{ marginBottom: 16 }} />
       )}
       <Card style={{ maxWidth: 480 }}>
         <Form
@@ -46,7 +46,7 @@ export default function ProfilePage() {
           onFinish={onFinish}
         >
           <Form.Item label="登录名">
-            <Space direction="vertical" size={0}>
+            <Space orientation="vertical" size={0}>
               <Typography.Text>@{auth.user?.username}</Typography.Text>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 创建后不可修改，用于登录与 @ 提及。

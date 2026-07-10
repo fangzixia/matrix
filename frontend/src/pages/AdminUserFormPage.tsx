@@ -71,7 +71,7 @@ export default function AdminUserFormPage() {
         {isNew ? "新建用户" : "编辑用户"}
       </Typography.Title>
       {error && (
-        <Alert type="error" message={error} style={{ marginBottom: 16 }} />
+        <Alert type="error" title={error} style={{ marginBottom: 16 }} />
       )}
       <Card style={{ maxWidth: 560 }}>
         <Form

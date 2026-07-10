@@ -9,7 +9,7 @@ export default function AdminSystemSettingsPage() {
   const isRoot = useAuthStore((s) => s.isRoot());
   const [activeTab, setActiveTab] = useState("model");
   if (!isRoot) {
-    return <Alert type="error" message="仅 root 用户可访问系统配置。" />;
+    return <Alert type="error" title="仅 root 用户可访问系统配置。" />;
   }
   const items = [
     { key: "model", label: "模型", children: <SystemAITab /> },

@@ -413,7 +413,7 @@ export function AppShell() {
                   <Alert
                     type="warning"
                     showIcon
-                    message={notificationError}
+                    title={notificationError}
                     style={{ margin: 8 }}
                   />
                 )}

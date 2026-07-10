@@ -29,7 +29,7 @@ export default function SignInPage() {
         登录
       </Typography.Title>
       {error && (
-        <Alert type="error" message={error} style={{ marginBottom: 16 }} />
+        <Alert type="error" title={error} style={{ marginBottom: 16 }} />
       )}
       <Form layout="vertical" onFinish={onFinish}>
         <Form.Item

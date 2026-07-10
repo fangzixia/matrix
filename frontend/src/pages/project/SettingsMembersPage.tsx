@@ -107,13 +107,13 @@ export default function SettingsMembersPage() {
       sectionTitle="项目成员"
     >
       {error && (
-        <Alert type="error" message={error} showIcon style={{ marginBottom: 16 }} />
+        <Alert type="error" title={error} showIcon style={{ marginBottom: 16 }} />
       )}
       {!perms.canManageMembers && !error && (
         <Alert
           type="info"
           showIcon
-          message="您仅有查看权限。如需邀请或管理成员，请联系项目 Maintainer 或 Owner。"
+          title="您仅有查看权限。如需邀请或管理成员，请联系项目 Maintainer 或 Owner。"
           style={{ marginBottom: 16 }}
         />
       )}
@@ -123,7 +123,7 @@ export default function SettingsMembersPage() {
           {...cardProps}
           style={{ ...cardProps.style, marginBottom: 16 }}
         >
-          <Space direction="vertical" style={{ width: "100%" }} size="middle">
+          <Space orientation="vertical" style={{ width: "100%" }} size="middle">
             <Typography.Text type="secondary">
               按登录名、显示名称或邮箱搜索。
             </Typography.Text>
@@ -131,7 +131,7 @@ export default function SettingsMembersPage() {
               value={userSearch.query}
               options={userSearch.options}
               onSelect={(val) => userSearch.pick(val, setSelectedUser)}
-              onSearch={userSearch.onSearchInput}
+              showSearch={{ onSearch: userSearch.onSearchInput }}
               placeholder="按登录名、显示名称或邮箱搜索"
               notFoundContent={
                 userSearch.loading ? <Spin size="small" /> : null

@@ -36,9 +36,9 @@ export default function SystemMCPTab() {
   if (!loaded)
     return <Spin style={{ display: "block", margin: "24px auto" }} />;
   return (
-    <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-      {error && <Alert type="error" message={error} />}
-      {message && <Alert type="success" message={message} />}
+    <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
+      {error && <Alert type="error" title={error} />}
+      {message && <Alert type="success" title={message} />}
       <Typography.Title level={4}>MCP 服务</Typography.Title>
       <Typography.Text type="secondary">
         支持直接粘贴 Cursor 的 <code>mcp.json</code>（含 <code>mcpServers</code>{" "}

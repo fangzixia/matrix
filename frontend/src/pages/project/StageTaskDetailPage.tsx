@@ -163,7 +163,7 @@ export default function StageTaskDetailPage() {
   }, [panelState.statusLabel, running]);
 
   return (
-    <Space direction="vertical" size="large" style={{ width: "100%" }}>
+    <Space orientation="vertical" size="large" style={{ width: "100%" }}>
       <Breadcrumb
         items={[
           { title: <Link to={`/projects/${projectId}`}>概览</Link> },
@@ -231,7 +231,7 @@ export default function StageTaskDetailPage() {
             type="warning"
             showIcon
             style={{ marginBottom: 12 }}
-            message="实时连接暂时中断，页面会继续轮询刷新运行状态。"
+            title="实时连接暂时中断，页面会继续轮询刷新运行状态。"
           />
         ) : null}
         {viewLoading && !viewState ? (

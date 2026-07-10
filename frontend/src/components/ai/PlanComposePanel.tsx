@@ -57,7 +57,7 @@ export default function PlanComposePanel({
       {error && (
         <Alert
           type="error"
-          message={error}
+          title={error}
           style={{ margin: "8px 24px 0", flexShrink: 0 }}
         />
       )}

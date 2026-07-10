@@ -76,7 +76,7 @@ export default function SettingsRepositoriesPage() {
       sectionTitle="仓库"
     >
       {error && (
-        <Alert type="error" message={error} showIcon style={{ marginBottom: 16 }} />
+        <Alert type="error" title={error} showIcon style={{ marginBottom: 16 }} />
       )}
       <Card title="添加仓库" {...cardProps} style={{ ...cardProps.style, marginBottom: 16 }}>
         <Form

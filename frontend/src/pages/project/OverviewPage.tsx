@@ -113,7 +113,7 @@ export default function OverviewPage() {
           </Space>
         </Flex>
       )}
-      <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+      <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
         <Card title="项目信息" {...cardProps}>
           <Descriptions column={1} size="small" colon>
             <Descriptions.Item label="项目编码">
@@ -132,7 +132,7 @@ export default function OverviewPage() {
             <Alert
               type="warning"
               showIcon
-              message={plansError}
+              title={plansError}
               style={{ marginBottom: 12 }}
             />
           )}
@@ -187,7 +187,7 @@ export default function OverviewPage() {
             <Alert
               type="warning"
               showIcon
-              message={evaluationsError}
+              title={evaluationsError}
               style={{ marginBottom: 12 }}
             />
           )}
@@ -228,7 +228,7 @@ export default function OverviewPage() {
         title={preview?.title}
         open={!!preview}
         onClose={() => setPreview(null)}
-        width={720}
+        size={720}
       >
         {preview && (
           <>

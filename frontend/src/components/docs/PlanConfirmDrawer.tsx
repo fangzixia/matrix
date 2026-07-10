@@ -52,7 +52,7 @@ export default function PlanConfirmDrawer({
       title={`确认计划：${plan?.title || plan?.path || ""}`}
       open={open}
       onClose={onClose}
-      width={640}
+      size={640}
       extra={
         <Space>
           <Button onClick={onClose}>取消</Button>
@@ -63,12 +63,12 @@ export default function PlanConfirmDrawer({
       }
     >
       {error && (
-        <Alert type="error" message={error} style={{ marginBottom: 16 }} />
+        <Alert type="error" title={error} style={{ marginBottom: 16 }} />
       )}
       {plan?.status === "approved" && (
         <Alert
           type="success"
-          message="该计划已批准"
+          title="该计划已批准"
           showIcon
           style={{ marginBottom: 16 }}
         />
@@ -81,7 +81,7 @@ export default function PlanConfirmDrawer({
           计划正文结构完整，无额外待确认项，可直接批准。
         </Typography.Paragraph>
       ) : (
-        <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+        <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
           <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
             批准前请知悉以下内容：
           </Typography.Paragraph>

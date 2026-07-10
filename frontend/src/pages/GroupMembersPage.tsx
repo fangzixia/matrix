@@ -110,16 +110,16 @@ export default function GroupMembersPage() {
       />
       <Typography.Title level={2}>{group?.name || "组成员"}</Typography.Title>
       {error && (
-        <Alert type="error" message={error} style={{ marginBottom: 16 }} />
+        <Alert type="error" title={error} style={{ marginBottom: 16 }} />
       )}
       {canManageMembers && (
         <Card title="添加成员" style={{ maxWidth: 480, marginBottom: 20 }}>
-          <Space direction="vertical" style={{ width: "100%" }} size="middle">
+          <Space orientation="vertical" style={{ width: "100%" }} size="middle">
             <AutoComplete
               value={userSearch.query}
               options={userSearch.options}
               onSelect={(val) => userSearch.pick(val, setSelectedUser)}
-              onSearch={userSearch.onSearchInput}
+              showSearch={{ onSearch: userSearch.onSearchInput }}
               placeholder="按登录名、显示名称或邮箱搜索"
               notFoundContent={
                 userSearch.loading ? <Spin size="small" /> : null
@@ -147,7 +147,7 @@ export default function GroupMembersPage() {
       {!canManageMembers && !loading && (
         <Alert
           type="info"
-          message="您仅有查看权限。如需管理成员，请联系组 Maintainer 或 Owner。"
+          title="您仅有查看权限。如需管理成员，请联系组 Maintainer 或 Owner。"
           style={{ marginBottom: 16 }}
         />
       )}

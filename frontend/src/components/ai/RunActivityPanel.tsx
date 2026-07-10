@@ -56,7 +56,7 @@ function renderTurnBody(
   const tools = turn.tools ?? [];
   const messageBody = turnMessageBody(turn);
   return (
-    <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+    <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
       {turn.thinking ? (
         <Think
           title="思考过程"
@@ -167,7 +167,7 @@ function ToolOutputBlock({
     );
 
   return (
-    <Space direction="vertical" size={4} style={{ width: "100%" }}>
+    <Space orientation="vertical" size={4} style={{ width: "100%" }}>
       {textBlock}
       {isStreaming ? (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>

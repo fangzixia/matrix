@@ -76,7 +76,7 @@ export default function SettingsGeneralPage() {
     navigate("/projects");
   }
   if (!perms.canManageSettings) {
-    return <Alert type="error" message="您没有权限访问项目设置。" />;
+    return <Alert type="error" title="您没有权限访问项目设置。" />;
   }
   return (
     <ProjectSettingsFrame
@@ -84,9 +84,9 @@ export default function SettingsGeneralPage() {
       activeTab="general"
       sectionTitle="常规"
     >
-      <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-        {error && <Alert type="error" message={error} showIcon />}
-        {message && <Alert type="success" message={message} showIcon />}
+      <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
+        {error && <Alert type="error" title={error} showIcon />}
+        {message && <Alert type="success" title={message} showIcon />}
         <Card title="基本信息" {...cardProps} style={{ ...cardProps.style, maxWidth: 720 }}>
           <Form form={form} layout="vertical" onFinish={onFinish}>
             <Form.Item label="项目名称" name="name" rules={[{ required: true }]}>
