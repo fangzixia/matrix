@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as chatApi from "@/api/chat";
 import type { ChatMessageNode } from "@/api/chat";
 import * as runsApi from "@/api/runs";
@@ -19,20 +19,15 @@ import { runDebug, runDebugWarn } from "@/utils/runDebug";
 export interface ChatSessionState {
   id: string;
   title: string;
-  modelId?: string;
   nodes: ChatMessageNode[];
   activeLeafId: string | null;
   updatedAt?: string;
 }
 
-function summaryToSession(
-  summary: chatApi.ChatSessionSummary,
-  defaultModelId?: string,
-): ChatSessionState {
+function summaryToSession(summary: chatApi.ChatSessionSummary): ChatSessionState {
   return {
     id: summary.id,
     title: summary.title || "新对话",
-    modelId: summary.model_id || defaultModelId,
     nodes: [],
     activeLeafId: summary.active_leaf_id ?? null,
     updatedAt: summary.updated_at,
@@ -87,34 +82,11 @@ export function useProjectChat(projectId: string) {
     model_name: "",
     multimodal: false,
     attachment_types: [],
-    models: [],
   });
   const [activityState, setActivityState] = useState<RunViewState | null>(null);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameTargetId, setRenameTargetId] = useState("");
   const [renameValue, setRenameValue] = useState("");
-
-  const activeSession = useMemo(
-    () => sessions.find((s) => s.id === activeSessionId),
-    [sessions, activeSessionId],
-  );
-
-  const sessionModelId =
-    activeSession?.modelId || capabilities.default_model_id;
-
-  const sessionModelCaps = useMemo(
-    () => chatApi.modelCapabilities(capabilities, sessionModelId),
-    [capabilities, sessionModelId],
-  );
-
-  const modelOptions = useMemo(
-    () =>
-      (capabilities.models ?? []).map((m) => ({
-        id: m.id,
-        name: m.name,
-      })),
-    [capabilities.models],
-  );
 
   const applySession = useCallback((state: ChatSessionState) => {
     setSessions((prev) => {
@@ -124,31 +96,24 @@ export function useProjectChat(projectId: string) {
     });
   }, []);
 
-  const createServerSession = useCallback(
-    async (modelId?: string) => {
-      const summary = await chatApi.createChatSession(projectId, {
-        title: "新对话",
-        model_id: modelId,
-      });
-      return summaryToSession(summary, modelId);
-    },
-    [projectId],
-  );
+  const createServerSession = useCallback(async () => {
+    const summary = await chatApi.createChatSession(projectId, {
+      title: "新对话",
+    });
+    return summaryToSession(summary);
+  }, [projectId]);
 
   const refreshSession = useCallback(
     async (sid: string) => {
       const remote = await chatApi.getChatSession(projectId, sid);
-      const state: ChatSessionState = sessionFromApi(
-        remote,
-        capabilities.default_model_id,
-      );
+      const state: ChatSessionState = sessionFromApi(remote);
       applySession(state);
       if (sid === activeSessionId) {
         setItems(sessionItems(state));
       }
       return state;
     },
-    [activeSessionId, applySession, capabilities.default_model_id, projectId],
+    [activeSessionId, applySession, projectId],
   );
 
   const persistSessionMeta = useCallback(
@@ -161,7 +126,6 @@ export function useProjectChat(projectId: string) {
       );
       await chatApi.patchChatSession(projectId, sid, {
         title: next.title,
-        model_id: next.modelId,
       });
     },
     [projectId, sessions],
@@ -182,23 +146,19 @@ export function useProjectChat(projectId: string) {
         if (summaries.length) {
           const first = await chatApi.getChatSession(projectId, summaries[0].id);
           if (cancelled) return;
-          const firstState: ChatSessionState = sessionFromApi(
-            first,
-            caps.default_model_id,
-          );
+          const firstState: ChatSessionState = sessionFromApi(first);
           const rest: ChatSessionState[] = summaries
             .slice(1)
-            .map((s) => summaryToSession(s, caps.default_model_id));
+            .map((s) => summaryToSession(s));
           setSessions([firstState, ...rest]);
           setActiveSessionId(firstState.id);
           setItems(sessionItems(firstState));
         } else {
           const created = await chatApi.createChatSession(projectId, {
             title: "新对话",
-            model_id: caps.default_model_id,
           });
           if (cancelled) return;
-          const empty = summaryToSession(created, caps.default_model_id);
+          const empty = summaryToSession(created);
           setSessions([empty]);
           setActiveSessionId(empty.id);
           setItems([]);
@@ -252,7 +212,7 @@ export function useProjectChat(projectId: string) {
           /* ignore */
         }
       }
-      const created = await createServerSession(capabilities.default_model_id);
+      const created = await createServerSession();
       const { sessions: summaries } = await chatApi.listChatSessions(projectId);
       setSessions((prev) => {
         const byId = new Map(prev.map((s) => [s.id, s]));
@@ -262,12 +222,11 @@ export function useProjectChat(projectId: string) {
             return {
               ...existing,
               title: summary.title || existing.title,
-              modelId: summary.model_id || existing.modelId,
               activeLeafId: summary.active_leaf_id ?? existing.activeLeafId,
               updatedAt: summary.updated_at,
             };
           }
-          return summaryToSession(summary, capabilities.default_model_id);
+          return summaryToSession(summary);
         });
       });
       setActiveSessionId(created.id);
@@ -278,21 +237,12 @@ export function useProjectChat(projectId: string) {
     }
   }, [
     activeSessionId,
-    capabilities.default_model_id,
     createServerSession,
     items.length,
     loading,
     projectId,
     sessions,
   ]);
-
-  const handleSessionModelChange = useCallback(
-    async (modelId: string) => {
-      if (!activeSessionId) return;
-      await persistSessionMeta(activeSessionId, { modelId });
-    },
-    [activeSessionId, persistSessionMeta],
-  );
 
   const openRename = useCallback(
     (sid: string) => {
@@ -339,9 +289,7 @@ export function useProjectChat(projectId: string) {
         return;
       }
       try {
-        const created = await createServerSession(
-          capabilities.default_model_id,
-        );
+        const created = await createServerSession();
         setSessions([created]);
         setActiveSessionId(created.id);
         setItems([]);
@@ -354,7 +302,6 @@ export function useProjectChat(projectId: string) {
     },
     [
       activeSessionId,
-      capabilities.default_model_id,
       createServerSession,
       projectId,
       refreshSession,
@@ -407,7 +354,6 @@ export function useProjectChat(projectId: string) {
       cancelledRef.current = false;
       const sid = activeSessionId;
       const session = sessions.find((s) => s.id === sid);
-      const modelId = session?.modelId || capabilities.default_model_id;
       const nodes = session?.nodes ?? [];
       const activeLeafId = session?.activeLeafId ?? null;
 
@@ -445,7 +391,6 @@ export function useProjectChat(projectId: string) {
           sid,
           text,
           attachments,
-          modelId,
           parentId,
         );
         runId = run.id;
@@ -547,7 +492,6 @@ export function useProjectChat(projectId: string) {
     },
     [
       activeSessionId,
-      capabilities.default_model_id,
       loading,
       persistSessionMeta,
       projectId,
@@ -595,13 +539,9 @@ export function useProjectChat(projectId: string) {
     sessions,
     activeSessionId,
     capabilities,
-    sessionModelId,
-    sessionModelCaps,
-    modelOptions,
     activityState,
     switchSession,
     createNewChat,
-    handleSessionModelChange,
     send,
     resendUserMessage,
     toggleMessageActivity,

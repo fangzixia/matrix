@@ -24,7 +24,6 @@ export interface ChatMessageNode {
 export interface ChatSessionSummary {
   id: string;
   title: string;
-  model_id?: string;
   active_leaf_id?: string | null;
   updated_at?: string;
 }
@@ -34,20 +33,10 @@ export interface ChatSession extends ChatSessionSummary {
   nodes?: ChatMessageNode[];
 }
 
-export interface ChatModelOption {
-  id: string;
-  name: string;
-  multimodal: boolean;
-  attachment_types: string[];
-  default?: boolean;
-}
-
 export interface ChatCapabilities {
   model_name: string;
   multimodal: boolean;
   attachment_types: string[];
-  default_model_id?: string;
-  models?: ChatModelOption[];
 }
 
 export interface ChatRun extends Run {
@@ -76,7 +65,6 @@ export function getChatSession(projectId: string, sessionId: string) {
 export interface CreateChatSessionPayload {
   id?: string;
   title?: string;
-  model_id?: string;
 }
 
 export function createChatSession(
@@ -94,7 +82,6 @@ export function createChatSession(
 
 export interface PatchChatSessionPayload {
   title?: string;
-  model_id?: string;
 }
 
 export function patchChatSession(
@@ -123,39 +110,14 @@ export function sendChatMessage(
   sessionId: string,
   message: string,
   attachments?: ChatAttachment[],
-  modelId?: string,
   parentId?: string | null,
 ) {
   return api<ChatRun>(`/api/projects/${projectId}/chat/sessions/${sessionId}/run`, {
     method: "POST",
     body: JSON.stringify({
       message,
-      model_id: modelId || undefined,
       parent_id: parentId ?? null,
       attachments: attachments?.length ? attachments : undefined,
     }),
   });
-}
-
-export function modelCapabilities(
-  caps: ChatCapabilities,
-  modelId?: string,
-): Pick<ChatCapabilities, "multimodal" | "attachment_types"> & {
-  model_name: string;
-} {
-  const models = caps.models ?? [];
-  const id = modelId || caps.default_model_id;
-  const found = models.find((m) => m.id === id);
-  if (found) {
-    return {
-      model_name: found.name,
-      multimodal: found.multimodal,
-      attachment_types: found.attachment_types ?? [],
-    };
-  }
-  return {
-    model_name: caps.model_name,
-    multimodal: caps.multimodal,
-    attachment_types: caps.attachment_types ?? [],
-  };
 }

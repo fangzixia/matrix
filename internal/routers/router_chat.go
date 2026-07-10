@@ -28,7 +28,7 @@ func registerChatRoutes(api *gin.RouterGroup, d *app.Deps) {
 	api.POST("/projects/:id/chat/sessions", authz, dev, func(c *gin.Context) { createChat(c, d) })
 	// 获取 Chat 会话详情（含消息树）
 	api.GET("/projects/:id/chat/sessions/:sid", authz, guest, func(c *gin.Context) { getChat(c, d) })
-	// 更新会话标题或模型
+	// 更新会话标题
 	api.PATCH("/projects/:id/chat/sessions/:sid", authz, dev, func(c *gin.Context) { patchChat(c, d) })
 	// 获取可用 AI 模型与附件能力
 	api.GET("/projects/:id/chat/capabilities", authz, guest, func(c *gin.Context) { chatCapabilities(c, d) })
@@ -43,14 +43,6 @@ type chatAttachmentDTO struct {
 	MimeType string `json:"mime_type"`
 	Name     string `json:"name"`
 	Data     string `json:"data"`
-}
-
-type chatModelDTO struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	Multimodal      bool     `json:"multimodal"`
-	AttachmentTypes []string `json:"attachment_types"`
-	Default         bool     `json:"default"`
 }
 
 func modelDisplayName(p config.ModelProfile) string {
@@ -72,16 +64,6 @@ func attachmentTypesForProfile(p config.ModelProfile) []string {
 	return types
 }
 
-func toChatModelDTO(p config.ModelProfile) chatModelDTO {
-	return chatModelDTO{
-		ID:              p.ID,
-		Name:            modelDisplayName(p),
-		Multimodal:      p.Multimodal,
-		AttachmentTypes: attachmentTypesForProfile(p),
-		Default:         p.Default,
-	}
-}
-
 func listChat(c *gin.Context, d *app.Deps) {
 	pid := auth.ProjectID(c)
 	sessions, err := d.RunService.ListChatSessions(c.Request.Context(), pid)
@@ -96,9 +78,8 @@ func createChat(c *gin.Context, d *app.Deps) {
 	u, _ := auth.User(c)
 	pid := auth.ProjectID(c)
 	var body struct {
-		ID      string `json:"id"`
-		Title   string `json:"title"`
-		ModelID string `json:"model_id"`
+		ID    string `json:"id"`
+		Title string `json:"title"`
 	}
 	if c.BindJSON(&body) != nil {
 		platformhttp.JSONError(c, 400, "bad_request", "无效请求")
@@ -113,7 +94,7 @@ func createChat(c *gin.Context, d *app.Deps) {
 		}
 		id = parsed
 	}
-	session, err := d.RunService.CreateChatSession(c.Request.Context(), pid, u.ID, id, body.Title, body.ModelID)
+	session, err := d.RunService.CreateChatSession(c.Request.Context(), pid, u.ID, id, body.Title)
 	if err != nil {
 		platformhttp.JSONError(c, 500, "internal_error", err.Error())
 		return
@@ -146,14 +127,13 @@ func patchChat(c *gin.Context, d *app.Deps) {
 		return
 	}
 	var body struct {
-		Title   string `json:"title"`
-		ModelID string `json:"model_id"`
+		Title string `json:"title"`
 	}
 	if c.BindJSON(&body) != nil {
 		platformhttp.JSONError(c, 400, "bad_request", "无效请求")
 		return
 	}
-	session, err := d.RunService.UpdateChatSession(c.Request.Context(), pid, sessionID, body.Title, body.ModelID)
+	session, err := d.RunService.UpdateChatSession(c.Request.Context(), pid, sessionID, body.Title)
 	if err != nil {
 		platformhttp.JSONError(c, 404, "not_found", err.Error())
 		return
@@ -166,18 +146,6 @@ func chatCapabilities(c *gin.Context, d *app.Deps) {
 	if err != nil {
 		platformhttp.JSONError(c, 500, "internal_error", "加载模型配置失败")
 		return
-	}
-	enabled := aiCfg.EnabledModels()
-	models := make([]chatModelDTO, 0, len(enabled))
-	defaultID := ""
-	for _, p := range enabled {
-		models = append(models, toChatModelDTO(p))
-		if p.Default && defaultID == "" {
-			defaultID = p.ID
-		}
-	}
-	if defaultID == "" && len(enabled) > 0 {
-		defaultID = enabled[0].ID
 	}
 	profile, ok := aiCfg.ActiveModelProfile()
 	modelName := ""
@@ -192,8 +160,6 @@ func chatCapabilities(c *gin.Context, d *app.Deps) {
 		"model_name":       modelName,
 		"multimodal":       multimodal,
 		"attachment_types": attachmentTypes,
-		"default_model_id": defaultID,
-		"models":           models,
 	})
 }
 
@@ -212,20 +178,16 @@ func deleteChat(c *gin.Context, d *app.Deps) {
 	c.JSON(200, gin.H{"ok": true})
 }
 
-func resolveChatModelID(ctx context.Context, requestModelID string, d *app.Deps) (string, config.ModelProfile, error) {
-	modelID := strings.TrimSpace(requestModelID)
+func activeChatModel(ctx context.Context, d *app.Deps) (string, config.ModelProfile, error) {
 	aiCfg, err := d.SystemSettings.LoadAIConfig(ctx)
 	if err != nil {
 		return "", config.ModelProfile{}, err
 	}
-	_, profile, err := aiCfg.ResolveModel(modelID)
+	_, profile, err := aiCfg.ResolveModel("")
 	if err != nil {
 		return "", config.ModelProfile{}, err
 	}
-	if modelID == "" {
-		modelID = profile.ID
-	}
-	return modelID, profile, nil
+	return profile.ID, profile, nil
 }
 
 func runChat(c *gin.Context, d *app.Deps) {
@@ -244,8 +206,6 @@ func runChat(c *gin.Context, d *app.Deps) {
 	var body struct {
 		// 消息文本
 		Message string `json:"message"`
-		// 模型 id
-		ModelID string `json:"model_id,omitempty"`
 		// 上次消息 id
 		ParentID *string `json:"parent_id"`
 		// 附件信息
@@ -271,8 +231,8 @@ func runChat(c *gin.Context, d *app.Deps) {
 		platformhttp.JSONError(c, 400, "bad_request", err.Error())
 		return
 	}
-	// 获取模型配置
-	modelID, profile, err := resolveChatModelID(c.Request.Context(), body.ModelID, d)
+	// 使用系统配置的默认模型
+	modelID, profile, err := activeChatModel(c.Request.Context(), d)
 	if err != nil {
 		platformhttp.JSONError(c, 400, "bad_request", err.Error())
 		return

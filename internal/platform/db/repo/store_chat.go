@@ -21,7 +21,6 @@ type CreateSessionParams struct {
 	ID        uuid.UUID
 	ProjectID uuid.UUID
 	Title     string
-	ModelID   string
 	CreatedBy uuid.UUID
 }
 
@@ -29,7 +28,7 @@ type CreateSessionParams struct {
 func (s *ChatStore) CreateSession(ctx context.Context, p CreateSessionParams) (*models.ChatSession, error) {
 	m := models.ChatSession{
 		ID: p.ID, ProjectID: p.ProjectID, Title: p.Title,
-		ModelID: p.ModelID, CreatedBy: p.CreatedBy,
+		CreatedBy: p.CreatedBy,
 	}
 	if err := s.c.chatSession.Create(ctx, &m); err != nil {
 		return nil, err
@@ -48,13 +47,10 @@ func (s *ChatStore) GetSession(ctx context.Context, sessionID uuid.UUID) (*model
 }
 
 // UpdateSession 更新会话元数据。
-func (s *ChatStore) UpdateSession(ctx context.Context, sessionID uuid.UUID, title, modelID string) (*models.ChatSession, error) {
+func (s *ChatStore) UpdateSession(ctx context.Context, sessionID uuid.UUID, title string) (*models.ChatSession, error) {
 	updates := map[string]any{"updated_at": time.Now()}
 	if title != "" {
 		updates["title"] = title
-	}
-	if modelID != "" {
-		updates["model_id"] = modelID
 	}
 	if err := s.c.chatSession.UpdateFields(ctx, sessionID, updates); err != nil {
 		return nil, err

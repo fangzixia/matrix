@@ -101,12 +101,10 @@ export function sessionFromApi(
   session: {
     id: string;
     title?: string;
-    model_id?: string;
     active_leaf_id?: string | null;
     nodes?: ChatMessageNode[];
     updated_at?: string;
   },
-  defaultModelId?: string,
 ) {
   const nodes = session.nodes ?? [];
   const activeLeafId = session.active_leaf_id ?? null;
@@ -116,7 +114,6 @@ export function sessionFromApi(
       session.title ||
       sessionTitleFromBranch(nodes, activeLeafId) ||
       "对话",
-    modelId: session.model_id || defaultModelId,
     nodes,
     activeLeafId,
     updatedAt: session.updated_at,

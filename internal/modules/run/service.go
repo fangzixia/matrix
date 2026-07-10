@@ -266,7 +266,6 @@ type ChatSessionSummaryDTO struct {
 	ID           uuid.UUID `json:"id"`
 	ProjectID    uuid.UUID `json:"project_id"`
 	Title        string    `json:"title"`
-	ModelID      string    `json:"model_id,omitempty"`
 	ActiveLeafID string    `json:"active_leaf_id,omitempty"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
@@ -276,7 +275,6 @@ type ChatSessionDTO struct {
 	ID           uuid.UUID        `json:"id"`
 	ProjectID    uuid.UUID        `json:"project_id"`
 	Title        string           `json:"title"`
-	ModelID      string           `json:"model_id,omitempty"`
 	ActiveLeafID string           `json:"active_leaf_id,omitempty"`
 	Nodes        []ChatMessageDTO `json:"nodes"`
 	UpdatedAt    time.Time        `json:"updated_at"`
@@ -289,7 +287,7 @@ func chatSessionSummaryFromRow(row *models.ChatSession) ChatSessionSummaryDTO {
 	}
 	return ChatSessionSummaryDTO{
 		ID: row.ID, ProjectID: row.ProjectID, Title: row.Title,
-		ModelID: row.ModelID, ActiveLeafID: activeLeaf, UpdatedAt: row.UpdatedAt,
+		ActiveLeafID: activeLeaf, UpdatedAt: row.UpdatedAt,
 	}
 }
 
@@ -307,13 +305,13 @@ func chatSessionDetailFromRow(ctx context.Context, s *Service, row *models.ChatS
 	}
 	return ChatSessionDTO{
 		ID: row.ID, ProjectID: row.ProjectID, Title: row.Title,
-		ModelID: row.ModelID, ActiveLeafID: sm.ActiveLeafID, Nodes: nodes,
+		ActiveLeafID: sm.ActiveLeafID, Nodes: nodes,
 		UpdatedAt: row.UpdatedAt,
 	}, nil
 }
 
 // CreateChatSession 创建空会话。
-func (s *Service) CreateChatSession(ctx context.Context, projectID, userID uuid.UUID, id uuid.UUID, title, modelID string) (*ChatSessionSummaryDTO, error) {
+func (s *Service) CreateChatSession(ctx context.Context, projectID, userID uuid.UUID, id uuid.UUID, title string) (*ChatSessionSummaryDTO, error) {
 	if id == uuid.Nil {
 		id = uuid.New()
 	}
@@ -321,7 +319,7 @@ func (s *Service) CreateChatSession(ctx context.Context, projectID, userID uuid.
 		title = "新对话"
 	}
 	row, err := s.stores.Chat.CreateSession(ctx, repo.CreateSessionParams{
-		ID: id, ProjectID: projectID, Title: title, ModelID: modelID, CreatedBy: userID,
+		ID: id, ProjectID: projectID, Title: title, CreatedBy: userID,
 	})
 	if err != nil {
 		return nil, err
@@ -330,13 +328,12 @@ func (s *Service) CreateChatSession(ctx context.Context, projectID, userID uuid.
 }
 
 // UpdateChatSession 更新会话元数据。
-func (s *Service) UpdateChatSession(ctx context.Context, projectID, sessionID uuid.UUID, title, modelID string) (*ChatSessionSummaryDTO, error) {
+func (s *Service) UpdateChatSession(ctx context.Context, projectID, sessionID uuid.UUID, title string) (*ChatSessionSummaryDTO, error) {
 	if _, err := s.stores.Chat.GetSessionByProject(ctx, projectID, sessionID); err != nil {
 		return nil, errors.New("会话不存在")
 	}
 	titleTrim := strings.TrimSpace(title)
-	modelTrim := strings.TrimSpace(modelID)
-	row, err := s.stores.Chat.UpdateSession(ctx, sessionID, titleTrim, modelTrim)
+	row, err := s.stores.Chat.UpdateSession(ctx, sessionID, titleTrim)
 	if err != nil {
 		return nil, err
 	}

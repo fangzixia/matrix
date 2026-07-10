@@ -4,9 +4,7 @@ import {
   Flex,
   Input,
   Modal,
-  Select,
   Spin,
-  Typography,
   theme,
 } from "antd";
 import type { MenuProps } from "antd";
@@ -52,13 +50,10 @@ export default function ProjectChatWorkspace({
     items,
     sessions,
     activeSessionId,
-    sessionModelId,
-    sessionModelCaps,
-    modelOptions,
+    capabilities,
     activityState,
     switchSession,
     createNewChat,
-    handleSessionModelChange,
     send,
     resendUserMessage,
     toggleMessageActivity,
@@ -118,8 +113,8 @@ export default function ProjectChatWorkspace({
 
   const resolvedWelcomeDescription =
     welcomeDescription ??
-    (sessionModelCaps.model_name
-      ? `当前模型：${sessionModelCaps.model_name}`
+    (capabilities.model_name
+      ? `当前模型：${capabilities.model_name}`
       : "请在系统配置中启用 AI 模型");
 
   if (booting) {
@@ -188,35 +183,10 @@ export default function ProjectChatWorkspace({
           background: token.colorBgContainer,
         }}
       >
-        {modelOptions.length > 0 ? (
-          <Flex
-            align="center"
-            gap={8}
-            style={{
-              padding: "10px 24px",
-              flexShrink: 0,
-              borderBottom: `1px solid ${token.colorBorderSecondary}`,
-              background: token.colorBgContainer,
-            }}
-          >
-            <Typography.Text type="secondary">会话模型</Typography.Text>
-            <Select
-              size="small"
-              style={{ minWidth: 220 }}
-              disabled={loading}
-              value={sessionModelId}
-              options={modelOptions.map((m) => ({
-                value: m.id,
-                label: m.name,
-              }))}
-              onChange={handleSessionModelChange}
-            />
-          </Flex>
-        ) : null}
         {error && (
           <Alert
             type="error"
-            message={error}
+            title={error}
             style={{ margin: "8px 24px 0", flexShrink: 0 }}
           />
         )}
@@ -225,13 +195,13 @@ export default function ProjectChatWorkspace({
           loading={loading}
           projectId={projectId}
           capabilities={{
-            multimodal: sessionModelCaps.multimodal,
-            attachment_types: sessionModelCaps.attachment_types,
+            multimodal: capabilities.multimodal,
+            attachment_types: capabilities.attachment_types,
           }}
-          modelLabel={sessionModelCaps.model_name}
+          modelLabel={capabilities.model_name}
           multimodalHint={
-            sessionModelCaps.multimodal
-              ? `当前模型支持：${sessionModelCaps.attachment_types
+            capabilities.multimodal
+              ? `当前模型支持：${capabilities.attachment_types
                   .map((t) => (t === "image" ? "图片" : "txt/md"))
                   .join("、")}`
               : undefined
