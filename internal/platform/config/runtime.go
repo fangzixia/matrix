@@ -6,13 +6,6 @@ import (
 	"time"
 )
 
-// RuntimeConfig 是进程内运行时配置，由系统配置服务从数据库加载并热更新。
-type RuntimeConfig struct {
-	AI  AIConfig
-	MCP MCPConfig
-	Git GitConfig
-}
-
 // AIConfig 是 LLM 模型、上下文与安全策略。
 type AIConfig struct {
 	Models   []ModelProfile
@@ -91,13 +84,6 @@ type GitAccess struct {
 	SSHKeyPath string `json:"ssh_key_path"`
 }
 
-// DefaultRuntime 返回运行时配置的代码内置默认值（数据库无记录时由 Bootstrap 应用）。
-func DefaultRuntime() *RuntimeConfig {
-	return &RuntimeConfig{
-		MCP: MCPConfig{Servers: map[string]MCPServerConfig{}},
-	}
-}
-
 // ToSpec 将 ModelProfile 转换为运行时 ModelSpec。
 func (p ModelProfile) ToSpec() ModelSpec {
 	return ModelSpec{
@@ -137,15 +123,6 @@ func (a AIConfig) ActiveModelProfile() (ModelProfile, bool) {
 		}
 	}
 	return ModelProfile{}, false
-}
-
-// ActiveModel 返回用户在系统配置中启用的默认模型；未配置时 ok 为 false。
-func (a AIConfig) ActiveModel() (ModelSpec, bool) {
-	p, ok := a.ActiveModelProfile()
-	if !ok {
-		return ModelSpec{}, false
-	}
-	return p.ToSpec(), true
 }
 
 // EnabledModels 返回所有已启用的模型配置。

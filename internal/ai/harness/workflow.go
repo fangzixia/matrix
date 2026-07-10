@@ -21,12 +21,6 @@ type State string
 const (
 	// StatePrepared 表示已准备、尚未执行。
 	StatePrepared State = "prepared"
-	// StateRunning 表示正在执行。
-	StateRunning State = "running"
-	// StateSucceeded 表示执行成功。
-	StateSucceeded State = "succeeded"
-	// StateFailed 表示执行失败。
-	StateFailed State = "failed"
 )
 
 // CoordinatorExecutionNote 追加到任务 prompt，提醒父 Agent 勿直接调用 Worker 工具。
@@ -78,12 +72,6 @@ func (w Workflow) Prompt() string {
 	b.WriteString(userPart(w.UserInput, w.DefaultTask))
 	b.WriteString(CoordinatorExecutionNote)
 	return b.String()
-}
-
-// WithState 返回指定执行状态的任务流副本。
-func (w Workflow) WithState(state State) Workflow {
-	w.State = state
-	return w
 }
 
 // writeList 将列表项写入 Harness 工作流输出。

@@ -8,6 +8,12 @@ import type { RunViewState, StreamMode, ViewEnvelope } from "@/types/runView";
 import { applyEnvelope } from "@/utils/viewReducer";
 import { runDebugWarn } from "@/utils/runDebug";
 
+export {
+  loadRunViewState,
+  startStreamRunViewUntilTerminal,
+} from "@/utils/runViewStreamTask";
+export type { RunFinishedState, StreamRunViewTask } from "@/utils/runViewStreamTask";
+
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
 
 export interface UseRunActivityViewOptions {

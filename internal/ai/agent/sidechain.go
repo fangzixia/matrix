@@ -2,7 +2,6 @@ package agent
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -51,55 +50,4 @@ func (w *SidechainWriter) Append(id ID, record any) {
 	defer f.Close()
 	enc := json.NewEncoder(f)
 	_ = enc.Encode(record)
-}
-
-// ReadTail 读取 sidechain 末尾最多 maxLines 行（用于 UI 展开）。
-func (w *SidechainWriter) ReadTail(id ID, maxLines int) (string, error) {
-	p := w.path(id)
-	if p == "" {
-		return "", fmt.Errorf("sidechain 未配置")
-	}
-	data, err := os.ReadFile(p)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
-		}
-		return "", err
-	}
-	if maxLines <= 0 {
-		return string(data), nil
-	}
-	lines := splitLines(string(data))
-	if len(lines) <= maxLines {
-		return string(data), nil
-	}
-	return joinLines(lines[len(lines)-maxLines:]), nil
-}
-
-// splitLines 按行拆分文本。
-func splitLines(s string) []string {
-	var out []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			out = append(out, s[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		out = append(out, s[start:])
-	}
-	return out
-}
-
-// joinLines 将行列表合并为文本。
-func joinLines(lines []string) string {
-	if len(lines) == 0 {
-		return ""
-	}
-	b := lines[0]
-	for i := 1; i < len(lines); i++ {
-		b += "\n" + lines[i]
-	}
-	return b
 }

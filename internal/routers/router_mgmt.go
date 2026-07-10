@@ -1,7 +1,6 @@
 package routers
 
 import (
-	"encoding/json"
 	"fmt"
 	"matrix/internal/app"
 	"matrix/internal/modules/group"
@@ -45,8 +44,6 @@ func registerMgmtRoutes(api *gin.RouterGroup, d *app.Deps) {
 	api.DELETE("/projects/:id/repositories/:rid", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleMaintainer), func(c *gin.Context) { deleteRepository(c, d) })
 	// 获取 Run 详情
 	api.GET("/projects/:id/runs/:runId", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { getRun(c, d) })
-	// 列出 Run 执行步骤
-	api.GET("/projects/:id/runs/:runId/steps", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { listRunSteps(c, d) })
 	// 获取 Run 审计报告内容
 	api.GET("/projects/:id/runs/:runId/audit", auth.RequireAuth(d.Sessions), auth.RequireProject(d.IAM, iam.RoleGuest), func(c *gin.Context) { getRunAudit(c, d) })
 	// 列出当前用户通知
@@ -296,21 +293,6 @@ func getRun(c *gin.Context, d *app.Deps) {
 	c.JSON(200, rn)
 }
 
-// listRunSteps 列出RunSteps。
-func listRunSteps(c *gin.Context, d *app.Deps) {
-	pid := auth.ProjectID(c)
-	rid, ok := paramUUID(c, "runId")
-	if !ok {
-		return
-	}
-	steps, err := d.RunService.ListStepsForProject(c.Request.Context(), pid, rid)
-	if err != nil {
-		platformhttp.JSONError(c, 500, "internal", err.Error())
-		return
-	}
-	c.JSON(200, gin.H{"steps": steps})
-}
-
 // getRunAudit 获取RunAudit。
 func getRunAudit(c *gin.Context, d *app.Deps) {
 	pid := auth.ProjectID(c)
@@ -394,37 +376,13 @@ func streamNotifications(c *gin.Context, d *app.Deps) {
 			if !open {
 				return
 			}
-			eventName := events.EventAgentStream
-			var data []byte
-			if msg.Type == "notification" && msg.Output != "" {
-				eventName = events.EventNotification
-				data = []byte(msg.Output)
-			} else {
-				data, _ = json.Marshal(msg)
+			if msg.Type != "notification" || msg.Output == "" {
+				continue
 			}
-			fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", eventName, data)
+			fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", events.EventNotification, msg.Output)
 			flusher.Flush()
 		case <-c.Request.Context().Done():
 			return
 		}
 	}
-}
-
-// repoNameForQuery 从查询参数解析并校验仓库名称。
-func repoNameForQuery(c *gin.Context, d *app.Deps, pid uuid.UUID) (string, bool) {
-	rid := c.Query("repository_id")
-	if rid == "" {
-		return "", true
-	}
-	id, err := uuid.Parse(rid)
-	if err != nil {
-		platformhttp.JSONError(c, 400, "bad_request", "无效的仓库 ID")
-		return "", false
-	}
-	r, err := d.Repositories.GetForProject(c.Request.Context(), pid, id)
-	if err != nil {
-		platformhttp.JSONError(c, 404, "not_found", "仓库不存在")
-		return "", false
-	}
-	return r.Name, true
 }

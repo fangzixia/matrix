@@ -9,11 +9,10 @@ import (
 	"matrix/internal/ai/audit"
 	"matrix/internal/ai/query"
 	"matrix/internal/ai/stream"
-	"sync"
 	"time"
 )
 
-// StreamHub 将 Worker 流式消息、进度与嵌套 Async 通道接到上层 UI。
+// StreamHub 将 Worker 流式消息与进度接到上层 UI。
 type StreamHub struct {
 	SessionID string
 	EmitUI    func(stream.Message)
@@ -22,8 +21,6 @@ type StreamHub struct {
 	Registry  *agent.Registry
 	Sidechain *agent.SidechainWriter
 	Audit     *audit.Writer
-	mu        sync.Mutex
-	nested    map[agent.ID]*AsyncSupport
 	inner     query.StreamSink
 }
 
@@ -43,7 +40,6 @@ func NewStreamHub(
 		OnDone:    onDone,
 		Registry:  registry,
 		Sidechain: sidechain,
-		nested:    make(map[agent.ID]*AsyncSupport),
 		inner:     inner,
 	}
 }
@@ -175,21 +171,6 @@ func appendRecentActivity(items []agent.ToolActivity, act agent.ToolActivity) []
 		items = items[len(items)-maxRecentActivities:]
 	}
 	return items
-}
-
-// EnsureWorkerAsync 为 Worker（及嵌套子 Worker）分配独立 AsyncSupport。
-func (h *StreamHub) EnsureWorkerAsync(id agent.ID) *AsyncSupport {
-	if h == nil {
-		return NewAsyncSupport()
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if a, ok := h.nested[id]; ok {
-		return a
-	}
-	a := NewAsyncSupport()
-	h.nested[id] = a
-	return a
 }
 
 // NotifySpawn 注册后通知 UI。

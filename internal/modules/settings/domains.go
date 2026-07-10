@@ -20,12 +20,3 @@ type AISettings struct {
 type MCPSettings struct {
 	MCPServers map[string]MCPServerSettings `json:"mcp_servers"`
 }
-
-// Settings 聚合视图（仅用于内存 apply，不整包持久化）。
-type Settings struct {
-	Models     []ModelProfileSettings       `json:"models"`
-	Context    ContextSettings              `json:"context"`
-	Security   SecuritySettings             `json:"security"`
-	MCPServers map[string]MCPServerSettings `json:"mcp_servers"`
-	Git        GitSettings                  `json:"git"`
-}

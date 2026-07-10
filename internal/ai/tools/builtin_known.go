@@ -18,16 +18,6 @@ func loadBuiltinToolNames() {
 	})
 }
 
-// KnownBuiltinToolNames 返回 DefaultRegistry 中的内置工具名（只读副本）。
-func KnownBuiltinToolNames() []string {
-	loadBuiltinToolNames()
-	out := make([]string, 0, len(builtinToolNamesSet))
-	for n := range builtinToolNamesSet {
-		out = append(out, n)
-	}
-	return out
-}
-
 // IsKnownBuiltinTool 报告 name 是否为 Matrix 内置 Worker 工具（来自 DefaultRegistry）。
 func IsKnownBuiltinTool(name string) bool {
 	loadBuiltinToolNames()

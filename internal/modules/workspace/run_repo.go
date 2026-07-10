@@ -164,7 +164,11 @@ func (s *Service) CreateRunRepo(ctx context.Context, projectID uuid.UUID, runID 
 			"run_id", runID, "attempt", attempt, "max_attempts", gitCloneAttempts,
 			"branch", branch, "git_url", gitURL,
 		)
-		_, err := runGitClone(ctx, gitURL, branch, repoDir, s.git)
+		gitCfg, err := s.settings.LoadGitConfig(ctx)
+		if err != nil {
+			return "", err
+		}
+		_, err = runGitClone(ctx, gitURL, branch, repoDir, gitCfg)
 		if err == nil {
 			logging.Info("workspace: git clone 成功", "run_id", runID, "attempt", attempt)
 			return repoDir, nil
@@ -176,15 +180,6 @@ func (s *Service) CreateRunRepo(ctx context.Context, projectID uuid.UUID, runID 
 		_ = os.RemoveAll(sandboxDir)
 	}
 	return "", &SourceFetchError{Attempts: gitCloneAttempts, Cause: lastErr}
-}
-
-// RemoveRunRepo 删除 Run 沙箱目录。
-func (s *Service) RemoveRunRepo(ctx context.Context, projectID uuid.UUID, runID uuid.UUID) error {
-	key, err := s.ProjectWorkspaceKey(ctx, projectID)
-	if err != nil {
-		return err
-	}
-	return os.RemoveAll(storage.RunSandboxDir(s.paths, key, runID.String()))
 }
 
 func runGitClone(ctx context.Context, gitURL, branch, repoDir string, gitCfg config.GitConfig) ([]byte, error) {

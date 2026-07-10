@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"matrix/internal/ai/agent"
 	"matrix/internal/ai/harness"
-	"matrix/internal/ai/ports"
 	"matrix/internal/ai/query"
+	"matrix/internal/ai/tools"
 	"matrix/internal/modules/eval"
 	"matrix/internal/modules/run/view"
 	"matrix/internal/modules/workspace"
@@ -21,18 +21,6 @@ import (
 
 	"github.com/google/uuid"
 )
-
-// StepDTO 是流水线步骤 API 返回的数据传输对象。
-type StepDTO struct {
-	ID            uuid.UUID  `json:"id"`
-	RunID         uuid.UUID  `json:"run_id"`
-	Kind          string     `json:"kind"`
-	Sequence      int        `json:"sequence"`
-	Status        string     `json:"status"`
-	OutputSummary string     `json:"output_summary,omitempty"`
-	StartedAt     *time.Time `json:"started_at,omitempty"`
-	FinishedAt    *time.Time `json:"finished_at,omitempty"`
-}
 
 // GetAuditForProject 返回项目内 Run 审计日志。
 func (s *Service) GetAuditForProject(ctx context.Context, projectID, runID uuid.UUID) (string, error) {
@@ -52,30 +40,6 @@ func (s *Service) readAuditFile(m models.Run) (string, error) {
 		return "", err
 	}
 	return string(b), nil
-}
-
-func (s *Service) listSteps(ctx context.Context, runID uuid.UUID) ([]StepDTO, error) {
-	rows, err := s.stores.Run.ListSteps(ctx, runID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]StepDTO, len(rows))
-	for i := range rows {
-		out[i] = StepDTO{
-			ID: rows[i].ID, RunID: rows[i].RunID, Kind: rows[i].Kind, Sequence: rows[i].Sequence,
-			Status: rows[i].Status, OutputSummary: rows[i].OutputSummary,
-			StartedAt: rows[i].StartedAt, FinishedAt: rows[i].FinishedAt,
-		}
-	}
-	return out, nil
-}
-
-// ListStepsForProject 返回项目内 Run 步骤列表。
-func (s *Service) ListStepsForProject(ctx context.Context, projectID, runID uuid.UUID) ([]StepDTO, error) {
-	if _, err := s.loadProjectRun(ctx, projectID, runID); err != nil {
-		return nil, err
-	}
-	return s.listSteps(ctx, runID)
 }
 
 // GetToolLogForProject 返回项目内 Run 工具 spill 日志。
@@ -143,10 +107,6 @@ func (s *Service) ExecuteRun(ctx context.Context, runID uuid.UUID) error {
 		return err
 	}
 
-	if err := s.refreshAIRuntime(ctx); err != nil {
-		logging.Agent("run: 刷新 AI 配置失败", "run_id", runID, "error", err.Error())
-		return fmt.Errorf("刷新 AI 配置失败: %w", err)
-	}
 	runStart := time.Now()
 	logging.Agent("run: 开始执行",
 		"run_id", runID, "kind", m.Kind, "model_id", m.ModelID,
@@ -157,7 +117,7 @@ func (s *Service) ExecuteRun(ctx context.Context, runID uuid.UUID) error {
 		logging.Agent("run: 更新运行状态失败", "run_id", runID, "error", err.Error())
 		return err
 	}
-	if s.notifier != nil && shouldNotifyRun(m.Kind) {
+	if s.notifier != nil && Kind(m.Kind).IsHarness() {
 		s.notifier.NotifyRunStatus(ctx, m.CreatedBy, m.ProjectID, runID, m.Kind, "running", m.Title)
 	}
 	if err := s.viewStore.BeginRun(ctx, runID.String(), m.ProjectID.String(), m.Kind, m.Kind); err != nil {
@@ -186,7 +146,8 @@ func (s *Service) runBodyByKind(ctx context.Context, m *models.Run) error {
 	case KindBuild:
 		return s.executeBuildLoop(ctx, m)
 	default:
-		return s.executeRunStage(ctx, m, &kind)
+		var sess *agentSession
+		return s.executeRunStage(ctx, m, &kind, &sess)
 	}
 }
 
@@ -211,7 +172,7 @@ func (s *Service) finalizeRun(ctx context.Context, runID uuid.UUID, m models.Run
 	if runErr == nil && Kind(m.Kind) == KindChat && m.ChatSessionID != nil && m.ChatUserMessageID != nil {
 		s.ensureChatAssistantMessage(ctx, *m.ChatSessionID, *m.ChatUserMessageID, runID)
 	}
-	if s.notifier != nil && shouldNotifyRun(m.Kind) {
+	if s.notifier != nil && Kind(m.Kind).IsHarness() {
 		s.notifier.NotifyRunStatus(ctx, m.CreatedBy, m.ProjectID, runID, m.Kind, status, m.Title)
 	}
 	if err := s.finishRunView(ctx, runID, status, finished.Output, errMsg); err != nil {
@@ -329,16 +290,19 @@ func (s *Service) cloneRunRepo(ctx context.Context, m *models.Run) (string, erro
 
 const buildMaxRounds = 5
 
-// executeBuildLoop 执行 build 阶段的闭环迭代。
+// executeBuildLoop 执行 build 阶段的闭环迭代（共享 agentSession）。
 func (s *Service) executeBuildLoop(ctx context.Context, m *models.Run) error {
+	var sess *agentSession
 	for round := 1; round <= buildMaxRounds; round++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := s.executeRunStage(ctx, m, new(KindImplement)); err != nil {
+		implKind := KindImplement
+		if err := s.executeRunStage(ctx, m, &implKind, &sess); err != nil {
 			return fmt.Errorf("构建第 %d 轮编码: %w", round, err)
 		}
-		if err := s.executeRunStage(ctx, m, new(KindVerify)); err != nil {
+		verifyKind := KindVerify
+		if err := s.executeRunStage(ctx, m, &verifyKind, &sess); err != nil {
 			return fmt.Errorf("构建第 %d 轮验证: %w", round, err)
 		}
 		docsRoot, err := s.workspace.DocsRoot(ctx, m.ProjectID)
@@ -362,108 +326,109 @@ func (s *Service) executeBuildLoop(ctx context.Context, m *models.Run) error {
 	return nil
 }
 
-// executeRunStage 执行单次 AI 阶段（chat / plan / implement / verify）并持久化结果。
-func (s *Service) executeRunStage(ctx context.Context, m *models.Run, kind *Kind) error {
-	req, err := s.buildRunRequest(ctx, m, kind)
-	if err != nil {
-		return err
+// executeRunStage 执行单次 AI 阶段；sess 非 nil 时复用会话基础设施（build 多轮）。
+func (s *Service) executeRunStage(ctx context.Context, m *models.Run, kind *Kind, sess **agentSession) error {
+	if m.SandboxPath == "" {
+		return fmt.Errorf("run 仓库未就绪")
 	}
-	logging.Agent("run: AI 阶段就绪",
-		"run_id", m.ID, "kind", kind,
-		"message_count", len(req.Messages),
-		"sandbox_dir", req.SandboxDir,
-		"model", req.Model.Model,
-		"chat_session_id", m.ChatSessionID,
-		"chat_user_message_id", m.ChatUserMessageID,
-	)
-	if len(req.Messages) == 0 {
-		logging.Agent("run: LLM 输入消息为空", "run_id", m.ID, "kind", kind)
-	}
-	sink := s.viewStore.Sink(m.ID.String(), m.ProjectID.String())
-	onSubagent := func(snap agent.Snapshot) {
-		s.viewStore.OnSubagent(ctx, m.ID.String(), snap)
-	}
-	req.OnSubagentUpdate = onSubagent
-	req.OnSubagentDone = onSubagent
-	result, runErr := s.runtime.Run(ctx, req, sink)
-	logging.Agent("run: runtime.Run 返回",
-		"run_id", m.ID, "kind", kind,
-		"run_err", runErr != nil,
-		"result_err", result.Err,
-		"output_len", len(runOutputFromResult(result)),
-		"stop_reason", result.StopReason,
-		"turn_count", result.TurnCount,
-	)
-	if runErr == nil && result.Err == nil {
-		output := runOutputFromResult(result)
-		if output != "" {
-			_ = s.stores.Run.UpdateOutput(ctx, m.ID, output)
-		}
-	}
-	if runErr != nil {
-		return runErr
-	}
-	if result.Err != nil {
-		return result.Err
-	}
-	docsRoot, err := s.workspace.DocsRoot(ctx, m.ProjectID)
-	if err != nil {
-		return err
-	}
-	s.indexHarnessOutputs(ctx, m, kind, docsRoot)
-	return nil
-}
 
-func (s *Service) buildRunRequest(ctx context.Context, m *models.Run, kind *Kind) (ports.RunRequest, error) {
 	projectCode, err := s.workspace.ProjectWorkspaceKey(ctx, m.ProjectID)
 	if err != nil {
-		return ports.RunRequest{}, err
+		return err
 	}
-	modelCfg, profile, err := s.runtimeCfg.AI.ResolveModel(m.ModelID)
-	if err != nil {
-		return ports.RunRequest{}, err
+
+	if *sess == nil {
+		aiCfg, err := s.settings.LoadAIConfig(ctx)
+		if err != nil {
+			return fmt.Errorf("加载 AI 配置失败: %w", err)
+		}
+		mcpCfg, err := s.settings.LoadMCPConfig(ctx)
+		if err != nil {
+			return fmt.Errorf("加载 MCP 配置失败: %w", err)
+		}
+		modelSpec, profile, err := aiCfg.ResolveModel(m.ModelID)
+		if err != nil {
+			return err
+		}
+		if modelSpec.APIKey == "" {
+			return errors.New("未配置 API Key")
+		}
+		runID := m.ID.String()
+		sink := s.viewStore.Sink(runID, m.ProjectID.String())
+		onSubagent := func(snap agent.Snapshot) {
+			s.viewStore.OnSubagent(ctx, runID, snap)
+		}
+		sessionsDir := storageProjectSessions(s.paths, projectCode)
+		*sess = s.newAgentSession(aiCfg, mcpCfg, modelSpec, profile, m.SandboxPath, sessionsDir, runID, sink, onSubagent)
 	}
-	if m.SandboxPath == "" {
-		return ports.RunRequest{}, fmt.Errorf("run 仓库未就绪")
-	}
-	sandboxDir := m.SandboxPath
+	session := *sess
+
 	docsRoot, err := s.workspace.DocsRoot(ctx, m.ProjectID)
 	if err != nil {
-		return ports.RunRequest{}, err
+		return err
 	}
 	planAbsPath := s.harnessPlanFilePath(m.ProjectID, m.FilePath, kind)
 	evalFilePath := s.harnessEvalAbsPath(m.ProjectID, docsRoot, m, kind)
+
 	var messages []query.Message
 	if *kind == KindChat {
 		messages, err = s.buildChatRunMessages(ctx, m)
 		if err != nil {
-			return ports.RunRequest{}, err
+			return err
 		}
 	} else {
-		messages = BuildHarnessMessages(kind, m.Title, m.FilePath, planAbsPath, evalFilePath, sandboxDir, docsRoot, m.SourceSandboxRunID.String())
+		messages = harness.BuildMessages(
+			kind.String(), m.Title, m.FilePath, planAbsPath, evalFilePath,
+			m.SandboxPath, docsRoot, m.SourceSandboxRunID.String(),
+		)
 	}
+	if len(messages) == 0 {
+		return errors.New("消息不能为空")
+	}
+
+	logging.Agent("run: AI 阶段就绪",
+		"run_id", m.ID, "kind", kind,
+		"message_count", len(messages),
+		"sandbox_dir", m.SandboxPath,
+		"model", session.model,
+	)
+
 	docSandbox, err := s.workspace.DocSandboxDir(ctx, m.ProjectID)
 	if err != nil {
-		return ports.RunRequest{}, err
+		return err
 	}
 	matrixDir, err := s.workspace.MatrixDir(ctx, m.ProjectID, m.ID)
 	if err != nil {
-		return ports.RunRequest{}, err
+		return err
 	}
-	allowCommandMCP := s.runtimeCfg.AI.Security.AllowCommandMCP
-	return ports.RunRequest{
-		RunID: m.ID.String(), Kind: kind.String(), Messages: messages,
-		SandboxDir: sandboxDir, ExtraSandboxDirs: []string{docSandbox}, MatrixDir: matrixDir,
-		SessionsDir: storageProjectSessions(s.paths, projectCode),
-		Model: ports.ModelConfig{
-			BaseURL: modelCfg.BaseURL, APIKey: modelCfg.APIKey,
-			Model: modelCfg.Model, Name: profile.Name, MaxTokens: modelCfg.MaxTokens,
-		},
-		MCP: mcpConfigsToPorts(s.runtimeCfg.MCP.Servers, allowCommandMCP),
-		Policy: ports.RuntimePolicy{
-			AllowShell: s.runtimeCfg.AI.Security.AllowShell, AllowCommandMCP: allowCommandMCP,
-		},
-	}, nil
+
+	runCtx, cleanup := s.attachRunCancel(ctx, m.ID.String(), m.SandboxPath, []string{docSandbox}, matrixDir)
+	defer cleanup()
+
+	start := time.Now()
+	result, runErr := session.runPhase(runCtx, *kind, messages)
+	durationMs := time.Since(start).Milliseconds()
+	output := runOutput(result)
+	logging.Agent("run: AI 阶段结束",
+		"run_id", m.ID, "kind", kind,
+		"stop_reason", result.StopReason,
+		"turn_count", result.TurnCount,
+		"output_len", len(output),
+		"duration_ms", durationMs,
+		"has_error", runErr != nil,
+	)
+	if runErr != nil {
+		logging.Agent("run: LLM 调用失败",
+			"run_id", m.ID, "stop_reason", result.StopReason,
+			"error", runErr.Error(), "duration_ms", durationMs,
+		)
+		return runErr
+	}
+	if output != "" {
+		_ = s.stores.Run.UpdateOutput(ctx, m.ID, output)
+	}
+	s.indexHarnessOutputs(ctx, m, kind, docsRoot)
+	return nil
 }
 
 // harnessEvalAbsPath 返回 Harness 阶段使用的评测报告绝对路径（按 PLAN 名自动查找最新 EVAL）。
@@ -525,15 +490,50 @@ func (s *Service) indexHarnessOutputs(ctx context.Context, m *models.Run, kind *
 	}
 }
 
-func runOutputFromResult(result ports.RunResult) string {
-	output := result.Output
-	if output == "" && len(result.Messages) > 0 {
-		output = result.Messages[len(result.Messages)-1].Content
+func runOutput(result query.Result) string {
+	if result.Answer != "" {
+		return result.Answer
 	}
-	return output
+	if len(result.Messages) > 0 {
+		return result.Messages[len(result.Messages)-1].Content
+	}
+	return ""
 }
 
 // storageProjectSessions 返回项目会话审计目录路径。
 func storageProjectSessions(paths storage.Paths, projectKey string) string {
 	return storage.ProjectSessionsDir(paths, projectKey)
+}
+
+func (s *Service) cancelAgentRun(runID string) {
+	s.runCancelMu.Lock()
+	cancel, ok := s.runCancels[runID]
+	s.runCancelMu.Unlock()
+	if ok && cancel != nil {
+		cancel()
+	}
+}
+
+func (s *Service) attachRunCancel(ctx context.Context, runID, sandboxDir string, extraSandbox []string, matrixDir string) (context.Context, func()) {
+	runCtx, cancel := context.WithCancel(ctx)
+	runCtx = logging.With(runCtx, logging.Fields{
+		logging.FieldRunID:     runID,
+		logging.FieldSessionID: runID,
+	})
+	runCtx = tools.WithSandbox(runCtx, sandboxDir)
+	if len(extraSandbox) > 0 {
+		runCtx = tools.WithExtraSandboxRoots(runCtx, extraSandbox)
+	}
+	if matrixDir != "" {
+		runCtx = tools.WithMatrixDir(runCtx, matrixDir)
+	}
+	s.runCancelMu.Lock()
+	s.runCancels[runID] = cancel
+	s.runCancelMu.Unlock()
+	return runCtx, func() {
+		s.runCancelMu.Lock()
+		delete(s.runCancels, runID)
+		s.runCancelMu.Unlock()
+		cancel()
+	}
 }

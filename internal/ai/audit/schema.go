@@ -32,36 +32,3 @@ type SessionMeta struct {
 	DurationMs  int64  `json:"duration_ms,omitempty"`
 	Error       string `json:"error,omitempty"`
 }
-
-// SessionIndex 是 Bridge / ListSessions 的列表项。
-type SessionIndex struct {
-	SessionID  string `json:"session_id"`
-	StartedAt  string `json:"started_at"`
-	EndedAt    string `json:"ended_at,omitempty"`
-	StopReason string `json:"stop_reason,omitempty"`
-	TurnCount  int    `json:"turn_count"`
-	Path       string `json:"path"`
-}
-
-// ExportOptions 控制 ReadSession 的行为。
-type ExportOptions struct {
-	MaxEvents int // 0 表示读取全部事件
-}
-
-// ExportBundle 是 ReadSession 为 Bridge 导出返回的数据包。
-type ExportBundle struct {
-	Meta      SessionMeta `json:"meta"`
-	Events    []Event     `json:"events"`
-	JSONLPath string      `json:"jsonl_path"`
-	MetaPath  string      `json:"meta_path"`
-	Subagents string      `json:"subagents_dir,omitempty"`
-}
-
-// DiagnosticDTO 是面向 Wails 的导出载荷。
-type DiagnosticDTO struct {
-	SessionID   string      `json:"session_id"`
-	Meta        SessionMeta `json:"meta"`
-	EventsTail  []Event     `json:"events_tail"`
-	LLMMarkdown string      `json:"llm_markdown"`
-	JSONLPath   string      `json:"jsonl_path"`
-}

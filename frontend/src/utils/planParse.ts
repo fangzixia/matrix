@@ -78,19 +78,6 @@ export function confirmDisplayGroups(
   return groups;
 }
 
-/** @deprecated 使用 confirmDisplayGroups */
-export function confirmDisplayItems(
-  items: PlanSectionItems,
-): Array<{ section: string; text: string }> {
-  const rows: Array<{ section: string; text: string }> = [];
-  for (const group of confirmDisplayGroups(items)) {
-    for (const text of group.items) {
-      rows.push({ section: group.section, text });
-    }
-  }
-  return rows;
-}
-
 function extractSectionAny(content: string, headings: string[]): string {
   for (const heading of headings) {
     const section = extractSection(content, heading);

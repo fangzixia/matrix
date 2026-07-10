@@ -234,10 +234,7 @@ export default function StagePage() {
       })),
     [plans],
   );
-  const stageTasks = useMemo(
-    () => runs.filter((r) => r.kind === kind),
-    [runs, kind],
-  );
+  const stageTasks = runs;
 
   function openPreview(
     path: string,

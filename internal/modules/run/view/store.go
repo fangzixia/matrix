@@ -3,7 +3,6 @@ package view
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"matrix/internal/ai/agent"
 	"matrix/internal/ai/stream"
 	"matrix/internal/platform/db/models"
@@ -130,22 +129,6 @@ func (s *Store) SetStatusLabel(ctx context.Context, runID, label string) {
 	}
 }
 
-// PublishStep 更新流水线步骤状态并持久化。
-func (s *Store) PublishStep(ctx context.Context, runID string, _ string, _ string, kind string, _ int, status string) {
-	s.mu.Lock()
-	sess := s.runs[runID]
-	if sess != nil && sess.projector != nil {
-		sess.projector.state.StatusLabel = fmt.Sprintf("%s · %s", kind, status)
-		sess.seq++
-		sess.projector.state.Seq = sess.seq
-	}
-	row := s.persistRowLocked(runID, sess)
-	s.mu.Unlock()
-	if row.RunID != uuid.Nil {
-		_ = s.saveRow(ctx, row)
-	}
-}
-
 // OnSubagent 更新子 Agent 快照并持久化。
 func (s *Store) OnSubagent(ctx context.Context, runID string, snap agent.Snapshot) {
 	s.mu.Lock()
@@ -212,22 +195,6 @@ func (s *Store) apply(ctx context.Context, runID, projectID string, msg stream.M
 	row := s.persistRowLocked(runID, sess)
 	s.mu.Unlock()
 	return s.saveRow(ctx, row)
-}
-
-func (s *Store) withSeq(runID string, env Envelope) Envelope {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sess := s.runs[runID]
-	if sess == nil {
-		sess = &runSession{projector: NewProjector(runID, "")}
-		s.runs[runID] = sess
-	}
-	sess.seq++
-	env.Seq = sess.seq
-	if sess.projector != nil {
-		sess.projector.state.Seq = sess.seq
-	}
-	return env
 }
 
 func (s *Store) persistRowLocked(runID string, sess *runSession) models.RunView {

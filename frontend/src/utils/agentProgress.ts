@@ -250,11 +250,3 @@ export function deriveTurnTitle(turn: TurnView): string {
   if (messageLine) return truncateRunes(messageLine, 80);
   return "思考中…";
 }
-
-/** @deprecated 请使用 deriveTurnTitle(turn) */
-export function formatTurnLabel(_turn: number, summary?: string): string {
-  if (summary && !isGenericTurnSummary(summary)) {
-    return summary;
-  }
-  return "思考中…";
-}

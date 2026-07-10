@@ -2,14 +2,10 @@ package settings
 
 import "time"
 
-// defaultSettings 返回系统配置各域的 UI/合并默认值（数据库无记录时使用）。
-func defaultSettings() Settings {
-	return Settings{
-		Models:     nil,
-		Context:    defaultContextSettings(),
-		Security:   defaultSecuritySettings(),
-		MCPServers: map[string]MCPServerSettings{},
-		Git:        defaultGitSettings(),
+func defaultAISettings() AISettings {
+	return AISettings{
+		Context:  defaultContextSettings(),
+		Security: defaultSecuritySettings(),
 	}
 }
 

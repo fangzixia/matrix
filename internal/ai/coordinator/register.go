@@ -1,7 +1,6 @@
 package coordinator
 
 import (
-	"matrix/internal/ai/agent"
 	"matrix/internal/ai/tools"
 )
 
@@ -29,17 +28,7 @@ func CloneWorkerRegistry(base *tools.Registry) *tools.Registry {
 	return out
 }
 
-// BuildWorkerRegistry 构造 Worker 工具表；嵌套开启时为该 Worker 注册 agent/send_message/task_stop。
-func BuildWorkerRegistry(base *tools.Registry, cfg Config, workerID agent.ID) *tools.Registry {
-	out := CloneWorkerRegistry(base)
-	if !cfg.EnableNestedAgents || workerID == "" {
-		return out
-	}
-	nested := cfg
-	nested.SpawnerAgentID = workerID
-	if cfg.StreamHub != nil {
-		nested.Async = cfg.StreamHub.EnsureWorkerAsync(workerID)
-	}
-	RegisterTools(out, nested)
-	return out
+// BuildWorkerRegistry 构造 Worker 工具表（不含 Coordinator 编排工具）。
+func BuildWorkerRegistry(base *tools.Registry) *tools.Registry {
+	return CloneWorkerRegistry(base)
 }

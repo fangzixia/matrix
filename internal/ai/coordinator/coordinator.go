@@ -95,10 +95,6 @@ type Config struct {
 	RunControl *RunControl
 	// StreamHub 将 Worker 过程消息推到 UI，并更新 Registry 进度（可选）。
 	StreamHub *StreamHub
-	// EnableNestedAgents 为 true 时 Worker 可再派生子 Agent（独立 Async + 编排工具）。
-	EnableNestedAgents bool
-	// SpawnerAgentID 为调用 agent 工具的 Agent（嵌套 Worker）；空表示 Coordinator 顶层派生。
-	SpawnerAgentID agent.ID
 	// SessionID 与父会话流式 channel 对齐（Worker RunSession 用）。
 	SessionID string
 	// Audit 会话诊断写入器（与父 query.Config.Audit 共享）。
@@ -179,7 +175,6 @@ func makeAgentExecute(cfg Config) func(context.Context, map[string]any) (string,
 		if mt, ok := args["max_turns"].(float64); ok && mt > 0 {
 			maxTurns = int(mt)
 		}
-		parentAgentID := cfg.SpawnerAgentID
 		parentToolUseID := tools.ToolCallIDFromContext(ctx)
 		tools.EmitStatus(ctx, fmt.Sprintf("Worker: %s …", description))
 		id := agent.NewID()
@@ -188,7 +183,7 @@ func makeAgentExecute(cfg Config) func(context.Context, map[string]any) (string,
 			Description:     description,
 			SystemPrompt:    sysPrompt,
 			Status:          agent.StatusRunning,
-			ParentAgentID:   parentAgentID,
+			ParentAgentID:   "",
 			ParentToolUseID: parentToolUseID,
 			CreatedAt:       time.Now(),
 		}
@@ -197,10 +192,10 @@ func makeAgentExecute(cfg Config) func(context.Context, map[string]any) (string,
 		if cfg.StreamHub != nil {
 			cfg.StreamHub.NotifySpawn(rec)
 		}
-		workerReg := BuildWorkerRegistry(cfg.ToolRegistry, cfg, id)
+		workerReg := BuildWorkerRegistry(cfg.ToolRegistry)
 		var workerSink query.StreamSink = stream.NopSink{}
 		if cfg.StreamHub != nil {
-			workerSink = cfg.StreamHub.WorkerSink(string(id), string(parentAgentID), parentToolUseID)
+			workerSink = cfg.StreamHub.WorkerSink(string(id), "", parentToolUseID)
 		}
 		subCfg := buildWorkerConfig(cfg, workerReg, sysPrompt, maxTurns, prompt, string(id), workerSink)
 
@@ -263,13 +258,6 @@ func buildWorkerConfig(
 			{Role: query.RoleUser, Content: tools.FormatHarnessUserMessage(cfg.SandboxDir, "", prompt, "")},
 		},
 	})
-	if cfg.EnableNestedAgents && cfg.StreamHub != nil {
-		wid := agent.ID(logLabel)
-		async := cfg.StreamHub.EnsureWorkerAsync(wid)
-		asyncResults, hasPending := async.QueryConfigFields()
-		qc.AsyncResults = asyncResults
-		qc.HasPendingAsync = hasPending
-	}
 	return qc
 }
 
@@ -330,7 +318,7 @@ func makeSendMessageExecute(cfg Config) func(context.Context, map[string]any) (s
 		history := make([]query.Message, len(rec.Transcript))
 		copy(history, rec.Transcript)
 		history = append(history, query.Message{Role: query.RoleUser, Content: message})
-		workerReg := BuildWorkerRegistry(cfg.ToolRegistry, cfg, agentID)
+		workerReg := BuildWorkerRegistry(cfg.ToolRegistry)
 		var workerSink query.StreamSink = stream.NopSink{}
 		if cfg.StreamHub != nil {
 			workerSink = cfg.StreamHub.WorkerSink(string(agentID), string(rec.ParentAgentID), rec.ParentToolUseID)

@@ -3,8 +3,8 @@ import * as chatApi from "@/api/chat";
 import type { ChatMessageNode } from "@/api/chat";
 import * as runsApi from "@/api/runs";
 import type { AiMessage, ChatAttachment } from "@/components/ai/MatrixAiChat";
-import { useRunViewStream } from "@/hooks/useRunViewStream";
-import type { RunViewState } from "@/types/runView";
+import type { RunViewState, StreamMode } from "@/types/runView";
+import { startStreamRunViewUntilTerminal } from "@/utils/runViewStreamTask";
 import {
   branchThroughNode,
   branchToItems,
@@ -44,7 +44,36 @@ function sessionItems(session: ChatSessionState): AiMessage[] {
 }
 
 export function useProjectChat(projectId: string) {
-  const { streamTask, stop } = useRunViewStream();
+  const stopRef = useRef<(() => void) | null>(null);
+  const streamTask = useCallback(
+    async (
+      pid: string,
+      runId: string,
+      mode: StreamMode,
+      onDelta: (text: string, full: string) => void,
+      onViewState?: (state: RunViewState) => void,
+    ) => {
+      stopRef.current?.();
+      const task = startStreamRunViewUntilTerminal(
+        pid,
+        runId,
+        mode,
+        onDelta,
+        onViewState,
+      );
+      stopRef.current = task.stop;
+      try {
+        return await task.promise;
+      } finally {
+        stopRef.current = null;
+      }
+    },
+    [],
+  );
+  const stop = useCallback(() => {
+    stopRef.current?.();
+    stopRef.current = null;
+  }, []);
   const activeRunIdRef = useRef<string | null>(null);
   const cancelledRef = useRef(false);
 

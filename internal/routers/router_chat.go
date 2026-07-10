@@ -1,6 +1,7 @@
 package routers
 
 import (
+	"context"
 	"strings"
 
 	"matrix/internal/ai/query"
@@ -161,7 +162,12 @@ func patchChat(c *gin.Context, d *app.Deps) {
 }
 
 func chatCapabilities(c *gin.Context, d *app.Deps) {
-	enabled := d.Runtime.AI.EnabledModels()
+	aiCfg, err := d.SystemSettings.LoadAIConfig(c.Request.Context())
+	if err != nil {
+		platformhttp.JSONError(c, 500, "internal_error", "加载模型配置失败")
+		return
+	}
+	enabled := aiCfg.EnabledModels()
 	models := make([]chatModelDTO, 0, len(enabled))
 	defaultID := ""
 	for _, p := range enabled {
@@ -173,7 +179,7 @@ func chatCapabilities(c *gin.Context, d *app.Deps) {
 	if defaultID == "" && len(enabled) > 0 {
 		defaultID = enabled[0].ID
 	}
-	profile, ok := d.Runtime.AI.ActiveModelProfile()
+	profile, ok := aiCfg.ActiveModelProfile()
 	modelName := ""
 	multimodal := false
 	attachmentTypes := []string{}
@@ -206,9 +212,13 @@ func deleteChat(c *gin.Context, d *app.Deps) {
 	c.JSON(200, gin.H{"ok": true})
 }
 
-func resolveChatModelID(requestModelID string, d *app.Deps) (string, config.ModelProfile, error) {
+func resolveChatModelID(ctx context.Context, requestModelID string, d *app.Deps) (string, config.ModelProfile, error) {
 	modelID := strings.TrimSpace(requestModelID)
-	_, profile, err := d.Runtime.AI.ResolveModel(modelID)
+	aiCfg, err := d.SystemSettings.LoadAIConfig(ctx)
+	if err != nil {
+		return "", config.ModelProfile{}, err
+	}
+	_, profile, err := aiCfg.ResolveModel(modelID)
 	if err != nil {
 		return "", config.ModelProfile{}, err
 	}
@@ -262,7 +272,7 @@ func runChat(c *gin.Context, d *app.Deps) {
 		return
 	}
 	// 获取模型配置
-	modelID, profile, err := resolveChatModelID(body.ModelID, d)
+	modelID, profile, err := resolveChatModelID(c.Request.Context(), body.ModelID, d)
 	if err != nil {
 		platformhttp.JSONError(c, 400, "bad_request", err.Error())
 		return

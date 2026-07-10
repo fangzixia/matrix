@@ -3,6 +3,7 @@ package run
 import (
 	"encoding/json"
 	"fmt"
+	"matrix/internal/ai/harness"
 	"strings"
 )
 
@@ -10,9 +11,9 @@ import (
 type Kind string
 
 const (
-	KindPlan      Kind = "plan"
-	KindImplement Kind = "implement"
-	KindVerify    Kind = "verify"
+	KindPlan      Kind = Kind(harness.KindPlan)
+	KindImplement Kind = Kind(harness.KindImplement)
+	KindVerify    Kind = Kind(harness.KindVerify)
 	KindBuild     Kind = "build"
 	KindChat      Kind = "chat"
 )
@@ -52,8 +53,8 @@ func (k *Kind) String() string {
 }
 
 // IsHarness 报告是否为流水线阶段（含 build 编排入口；build 执行时循环 implement/verify）。
-func (k *Kind) IsHarness() bool {
-	return *k == KindPlan || *k == KindImplement || *k == KindVerify || *k == KindBuild
+func (k Kind) IsHarness() bool {
+	return k == KindPlan || k == KindImplement || k == KindVerify || k == KindBuild
 }
 
 // RequiresApprovedPlan 报告启动该阶段是否需要已批准的计划文件。
@@ -64,10 +65,4 @@ func RequiresApprovedPlan(kind *Kind) bool {
 // RequiresPlanFile 报告启动该阶段时是否必须设置 file_path。
 func RequiresPlanFile(kind *Kind) bool {
 	return *kind == KindImplement || *kind == KindVerify || *kind == KindBuild
-}
-
-// shouldNotifyRun 判断 Run 状态变更是否应发送通知，也是 UI 阶段列表的 kind 白名单。
-func shouldNotifyRun(kind string) bool {
-	k := Kind(kind)
-	return k.IsHarness()
 }

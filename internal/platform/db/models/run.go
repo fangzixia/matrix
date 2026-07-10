@@ -40,27 +40,6 @@ func (r *Run) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
-// RunStep 是 Run 内的流水线或 Harness 步骤。
-type RunStep struct {
-	ID            uuid.UUID `gorm:"type:uuid;primaryKey"`
-	RunID         uuid.UUID `gorm:"type:uuid;index;not null"`
-	Kind          string    `gorm:"size:32;not null"`
-	Sequence      int       `gorm:"not null"`
-	Status        string    `gorm:"size:32;not null"`
-	OutputSummary string    `gorm:"type:text"`
-	StartedAt     *time.Time
-	FinishedAt    *time.Time
-	CreatedAt     time.Time
-}
-
-// BeforeCreate 在 RunStep 入库前生成 UUID 主键。
-func (s *RunStep) BeforeCreate(tx *gorm.DB) error {
-	if s.ID == uuid.Nil {
-		s.ID = uuid.New()
-	}
-	return nil
-}
-
 // RunView 是 Run 活动视图的持久化快照。
 type RunView struct {
 	RunID     uuid.UUID `gorm:"type:uuid;primaryKey"`

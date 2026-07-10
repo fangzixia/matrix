@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import * as runsApi from "@/api/runs";
 import type { Run } from "@/api/runs";
-import { isStageKind } from "@/utils/stage";
 
 import type { RunKind, StageKind } from "@/types/runKind";
 
@@ -25,11 +24,7 @@ export const useRunStore = create<RunState>((set) => ({
     try {
       const res = await runsApi.listRuns(projectId, kind);
       if (seq !== fetchSeq) return;
-      const runs =
-        kind && isStageKind(kind)
-          ? res.runs.filter((r) => r.kind === kind)
-          : res.runs;
-      set({ runs });
+      set({ runs: res.runs });
     } finally {
       if (seq === fetchSeq) set({ loading: false });
     }

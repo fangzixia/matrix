@@ -6,8 +6,6 @@ interface AuthState {
   user: User | null;
   loading: boolean;
   initialized: boolean;
-  isLoggedIn: () => boolean;
-  isAdmin: () => boolean;
   isRoot: () => boolean;
   fetchMe: () => Promise<void>;
   login: (username: string, password: string) => Promise<void>;
@@ -19,8 +17,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   loading: false,
   initialized: false,
-  isLoggedIn: () => !!get().user,
-  isAdmin: () => !!get().user?.is_admin,
   isRoot: () => !!get().user?.is_root,
   setUser: (user) => set({ user }),
   fetchMe: async () => {

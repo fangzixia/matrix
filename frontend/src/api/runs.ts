@@ -21,18 +21,6 @@ export interface Run {
   created_at: string;
 }
 
-/** Run 内步骤 */
-export interface RunStep {
-  id: string;
-  run_id: string;
-  kind: RunKind | StageKind;
-  sequence: number;
-  status: string;
-  output_summary?: string;
-  started_at?: string;
-  finished_at?: string;
-}
-
 export function listRuns(projectId: string, kind?: RunKind | StageKind) {
   const q = kind ? `?kind=${encodeURIComponent(kind)}` : "";
   return api<{ runs: Run[] }>(`/api/projects/${projectId}/runs${q}`);
@@ -56,12 +44,6 @@ export function startRun(
 
 export function getRun(projectId: string, runId: string) {
   return api<Run>(`/api/projects/${projectId}/runs/${runId}`);
-}
-
-export function listRunSteps(projectId: string, runId: string) {
-  return api<{ steps: RunStep[] }>(
-    `/api/projects/${projectId}/runs/${runId}/steps`,
-  );
 }
 
 export function cancelRun(projectId: string, runId: string) {

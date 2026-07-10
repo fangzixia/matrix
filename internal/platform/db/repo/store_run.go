@@ -102,11 +102,6 @@ func (s *RunStore) FindLatestSandboxForPlan(
 	return s.c.run.FindLatestSandboxForPlan(ctx, projectID, repositoryID, planPath, excludeRunID, kinds)
 }
 
-// ListSteps 列出 Run 步骤。
-func (s *RunStore) ListSteps(ctx context.Context, runID uuid.UUID) ([]models.RunStep, error) {
-	return s.c.runStep.ListByRunID(ctx, runID)
-}
-
 // SaveView 持久化 Run 视图快照。
 func (s *RunStore) SaveView(ctx context.Context, row *models.RunView) error {
 	return s.c.runView.Save(ctx, row)

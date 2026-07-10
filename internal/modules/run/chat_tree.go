@@ -1,14 +1,10 @@
 package run
 
 import (
-	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"matrix/internal/ai/query"
-
-	"github.com/google/uuid"
 )
 
 const chatMessagesVersion = 2
@@ -110,60 +106,6 @@ func ValidateParent(sm SessionMessages, parentID string) error {
 	return nil
 }
 
-// ValidateSessionMessages 校验消息树结构（唯一 id、合法 parent 引用）。
-func ValidateSessionMessages(sm SessionMessages) error {
-	ids := make(map[string]struct{}, len(sm.Nodes))
-	for _, n := range sm.Nodes {
-		if strings.TrimSpace(n.ID) == "" {
-			return errors.New("消息 id 不能为空")
-		}
-		if _, dup := ids[n.ID]; dup {
-			return fmt.Errorf("重复的消息 id：%s", n.ID)
-		}
-		ids[n.ID] = struct{}{}
-	}
-	for _, n := range sm.Nodes {
-		if n.ParentID == nil || *n.ParentID == "" {
-			continue
-		}
-		if _, ok := ids[*n.ParentID]; !ok {
-			return fmt.Errorf("节点 %s 的 parent_id 无效：%s", n.ID, *n.ParentID)
-		}
-	}
-	if sm.ActiveLeafID != "" {
-		if _, ok := ids[sm.ActiveLeafID]; !ok {
-			return fmt.Errorf("active_leaf_id 不存在：%s", sm.ActiveLeafID)
-		}
-	}
-	return nil
-}
-
-// AppendNode 追加节点并将 active_leaf_id 更新为新节点。
-func AppendNode(sm SessionMessages, node ChatMessageNode) SessionMessages {
-	if sm.Version == 0 {
-		sm.Version = chatMessagesVersion
-	}
-	sm.Nodes = append(sm.Nodes, node)
-	sm.ActiveLeafID = node.ID
-	return sm
-}
-
-// NewUserNode 创建待持久化的用户消息节点。
-func NewUserNode(parentID string, content string, attachments []query.MessageAttachment) ChatMessageNode {
-	node := ChatMessageNode{
-		ID:          uuid.New().String(),
-		Role:        "user",
-		Content:     content,
-		Attachments: attachments,
-		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
-	}
-	parentID = strings.TrimSpace(parentID)
-	if parentID != "" {
-		node.ParentID = &parentID
-	}
-	return node
-}
-
 // HistoryForParent 返回挂到 parentID 时应传给 LLM 的历史消息。
 func HistoryForParent(sm SessionMessages, parentID string) ([]query.Message, error) {
 	ancestors, err := WalkAncestors(sm, parentID)
@@ -171,16 +113,4 @@ func HistoryForParent(sm SessionMessages, parentID string) ([]query.Message, err
 		return nil, err
 	}
 	return NodesToQueryMessages(ancestors), nil
-}
-
-// UpsertNode 按 id 更新或追加节点；若节点已存在则替换，否则追加。
-func UpsertNode(sm SessionMessages, node ChatMessageNode) SessionMessages {
-	for i := range sm.Nodes {
-		if sm.Nodes[i].ID == node.ID {
-			sm.Nodes[i] = node
-			sm.ActiveLeafID = node.ID
-			return sm
-		}
-	}
-	return AppendNode(sm, node)
 }

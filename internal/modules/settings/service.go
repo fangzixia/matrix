@@ -1,4 +1,4 @@
-// Package settings 管理系统级运行参数：按业务域分表存储，启动时加载并热更新内存配置。
+// Package settings 管理系统级运行参数：按业务域分表存储，按需从数据库读取。
 package settings
 
 import (
@@ -8,9 +8,7 @@ import (
 	"matrix/internal/platform/config"
 	"matrix/internal/platform/db/repo"
 	"matrix/internal/platform/gitutil"
-	"matrix/internal/platform/logging"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -72,66 +70,38 @@ type GitSettings struct {
 	DefaultSSHKeyPath string      `json:"default_ssh_key_path,omitempty"`
 }
 
-// Hooks 配置变更回调，用于同步 Git 到依赖服务。
-type Hooks struct {
-	OnGitUpdate func(config.GitConfig)
-}
-
-// Service 系统配置读写：DB 持久化 + 内存 runtime 热更新。
+// Service 系统配置读写：按域持久化到 DB，运行时按需读取。
 type Service struct {
-	stores  *repo.Stores
-	runtime *config.RuntimeConfig
-	hooks   Hooks
-	mu      sync.Mutex
+	stores *repo.Stores
 }
 
 // NewService 创建系统配置服务实例。
-func NewService(stores *repo.Stores, runtime *config.RuntimeConfig) *Service {
-	return &Service{stores: stores, runtime: runtime}
-}
-
-// Runtime 返回当前进程内运行时配置（只读引用，由 apply 热更新）。
-func (s *Service) Runtime() *config.RuntimeConfig {
-	return s.runtime
-}
-
-// SetHooks 注册配置变更回调，用于同步 Git 到依赖服务。
-func (s *Service) SetHooks(h Hooks) {
-	s.hooks = h
-}
-
-// Bootstrap 启动时从数据库按域加载并应用到内存配置；数据库无记录时使用系统默认值。
-func (s *Service) Bootstrap(ctx context.Context) error {
-	stored, err := s.loadAllStored(ctx)
-	if err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if stored == nil {
-		s.apply(defaultSettings(), true)
-		return nil
-	}
-	s.apply(*stored, true)
-	return nil
+func NewService(stores *repo.Stores) *Service {
+	return &Service{stores: stores}
 }
 
 // --- AI ---
 
+// loadAISettings 读取 AI 域配置，无记录时返回默认值。
+func (s *Service) loadAISettings(ctx context.Context) (AISettings, error) {
+	stored, err := s.loadDomainAI(ctx)
+	if err != nil {
+		return AISettings{}, err
+	}
+	if stored != nil {
+		return *stored, nil
+	}
+	return defaultAISettings(), nil
+}
+
 // GetAI 读取 AI 系统设置。
 func (s *Service) GetAI(ctx context.Context) (*AISettings, error) {
-	stored, err := s.loadDomainAI(ctx)
+	st, err := s.loadAISettings(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if stored != nil {
-		s.decorateAIForGet(stored)
-		return stored, nil
-	}
-	def := defaultSettings()
-	return &AISettings{
-		Models: def.Models, Context: def.Context, Security: def.Security,
-	}, nil
+	maskModelProfiles(&st.Models)
+	return &st, nil
 }
 
 // SaveAI 保存 AI 系统设置。
@@ -144,9 +114,6 @@ func (s *Service) SaveAI(ctx context.Context, in AISettings) (*AISettings, error
 		return nil, err
 	}
 	if err := s.saveDomain(ctx, DomainAI, merged); err != nil {
-		return nil, err
-	}
-	if err := s.ReloadRuntime(ctx); err != nil {
 		return nil, err
 	}
 	return s.GetAI(ctx)
@@ -166,8 +133,7 @@ func (s *Service) GetMCP(ctx context.Context) (*MCPSettings, error) {
 		}
 		return stored, nil
 	}
-	full := defaultSettings()
-	return &MCPSettings{MCPServers: full.MCPServers}, nil
+	return &MCPSettings{MCPServers: map[string]MCPServerSettings{}}, nil
 }
 
 // SaveMCP 保存 MCP 系统设置。
@@ -177,9 +143,6 @@ func (s *Service) SaveMCP(ctx context.Context, servers map[string]MCPServerSetti
 	}
 	payload := MCPSettings{MCPServers: servers}
 	if err := s.saveDomain(ctx, DomainMCP, payload); err != nil {
-		return nil, err
-	}
-	if err := s.ReloadRuntime(ctx); err != nil {
 		return nil, err
 	}
 	return s.GetMCP(ctx)
@@ -198,8 +161,7 @@ func (s *Service) GetGit(ctx context.Context) (*GitSettings, error) {
 		enrichGitHints(stored)
 		return stored, nil
 	}
-	full := defaultSettings()
-	git := full.Git
+	git := defaultGitSettings()
 	normalizeGitSettings(&git)
 	enrichGitHints(&git)
 	return &git, nil
@@ -221,19 +183,20 @@ func (s *Service) SaveGit(ctx context.Context, in GitSettings) (*GitSettings, er
 	if err := s.saveDomain(ctx, DomainGit, merged); err != nil {
 		return nil, err
 	}
-	if err := s.ReloadRuntime(ctx); err != nil {
-		return nil, err
-	}
 	return s.GetGit(ctx)
 }
 
 // TestGit 测试 Git 连通性。
 func (s *Service) TestGit(ctx context.Context, gitURL string) (string, error) {
-	timeout := s.runtime.Git.CloneTimeout
+	gitCfg, err := s.LoadGitConfig(ctx)
+	if err != nil {
+		return "", err
+	}
+	timeout := gitCfg.CloneTimeout
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	return gitutil.TestConnection(ctx, s.runtime.Git, gitURL, timeout)
+	return gitutil.TestConnection(ctx, gitCfg, gitURL, timeout)
 }
 
 // --- 存储层 ---
@@ -287,74 +250,66 @@ func (s *Service) loadDomainGit(ctx context.Context) (*GitSettings, error) {
 	return &st, nil
 }
 
-// loadAllStored 从数据库加载全部系统配置域。
-func (s *Service) loadAllStored(ctx context.Context) (*Settings, error) {
-	ai, _ := s.loadDomainAI(ctx)
-	mcp, _ := s.loadDomainMCP(ctx)
-	git, _ := s.loadDomainGit(ctx)
-	if ai == nil && mcp == nil && git == nil {
-		return nil, nil
-	}
-	base := defaultSettings()
-	if ai != nil {
-		base.Models = ai.Models
-		base.Context = ai.Context
-		base.Security = ai.Security
-	}
-	if mcp != nil {
-		base.MCPServers = mcp.MCPServers
-	}
-	if git != nil {
-		base.Git = *git
-		stripGitHints(&base.Git)
-	}
-	return &base, nil
-}
-
-// ReloadRuntime 从数据库重新加载全部系统配置并热更新内存 runtime（Save* 后调用）。
-func (s *Service) ReloadRuntime(ctx context.Context) error {
-	stored, err := s.loadAllStored(ctx)
+// LoadAIConfig 从数据库读取 AI 运行时配置。
+func (s *Service) LoadAIConfig(ctx context.Context) (config.AIConfig, error) {
+	st, err := s.loadAISettings(ctx)
 	if err != nil {
-		return err
+		return config.AIConfig{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if stored != nil {
-		s.apply(*stored, false)
-	}
-	s.logAIReload()
-	return nil
+	return aiConfigFromSettings(st), nil
 }
 
-// ReloadAI 从数据库重新加载 AI 域配置（含 API Key），供 Run 启动前刷新 stale 内存。
-func (s *Service) ReloadAI(ctx context.Context) error {
-	stored, err := s.loadDomainAI(ctx)
+// LoadMCPConfig 从数据库读取 MCP 运行时配置。
+func (s *Service) LoadMCPConfig(ctx context.Context) (config.MCPConfig, error) {
+	stored, err := s.loadDomainMCP(ctx)
 	if err != nil {
-		return err
+		return config.MCPConfig{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	servers := map[string]MCPServerSettings{}
+	if stored != nil && stored.MCPServers != nil {
+		servers = stored.MCPServers
+	}
+	return config.MCPConfig{Servers: toMCPServers(servers)}, nil
+}
+
+// LoadGitConfig 从数据库读取 Git 运行时配置。
+func (s *Service) LoadGitConfig(ctx context.Context) (config.GitConfig, error) {
+	stored, err := s.loadDomainGit(ctx)
+	if err != nil {
+		return config.GitConfig{}, err
+	}
+	git := defaultGitSettings()
 	if stored != nil {
-		s.applyAI(*stored)
+		git = *stored
+		stripGitHints(&git)
 	}
-	s.logAIReload()
-	return nil
+	return toGitConfig(git), nil
 }
 
-func (s *Service) logAIReload() {
-	if p, ok := s.runtime.AI.ActiveModelProfile(); ok {
-		logging.Info("settings: 已从数据库重载 AI 运行时配置",
-			"default_model", p.Name,
-			"model", p.Model,
-			"model_count", len(s.runtime.AI.Models),
-		)
-		return
-	}
-	logging.Info("settings: AI runtime reloaded from database", "model_count", len(s.runtime.AI.Models))
-}
+func aiConfigFromSettings(st AISettings) config.AIConfig {
+	normalizeModelProfiles(&st.Models)
+	defCtx := defaultContextSettings()
+	defSec := defaultSecuritySettings()
 
-// decorateAIForGet 为 API 返回的 AI 配置脱敏 API Key。
-func (s *Service) decorateAIForGet(*AISettings) {}
+	cfg := config.AIConfig{Models: toConfigModels(st.Models)}
+	cfg.Context.AutoCompactThreshold = st.Context.AutoCompactThreshold
+	if cfg.Context.AutoCompactThreshold <= 0 {
+		cfg.Context.AutoCompactThreshold = defCtx.AutoCompactThreshold
+	}
+	cfg.Context.KeepRecentMessages = st.Context.KeepRecentMessages
+	if cfg.Context.KeepRecentMessages <= 0 {
+		cfg.Context.KeepRecentMessages = defCtx.KeepRecentMessages
+	}
+
+	cfg.Security.AllowShell = st.Security.AllowShell
+	cfg.Security.AllowCommandMCP = st.Security.AllowCommandMCP
+	if d, err := time.ParseDuration(st.Security.ShellTimeout); err == nil && d > 0 {
+		cfg.Security.ShellTimeout = d
+	} else if d, err := time.ParseDuration(defSec.ShellTimeout); err == nil {
+		cfg.Security.ShellTimeout = d
+	}
+	return cfg
+}
 
 // mergeAIInput 合并用户提交的 AI 配置与存量密钥。
 func (s *Service) mergeAIInput(ctx context.Context, in AISettings) (AISettings, error) {
@@ -368,39 +323,6 @@ func (s *Service) mergeAIInput(ctx context.Context, in AISettings) (AISettings, 
 	}
 	normalizeModelProfiles(&out.Models)
 	return out, nil
-}
-
-func (s *Service) applyAI(st AISettings) {
-	normalizeModelProfiles(&st.Models)
-	s.runtime.AI.Models = toConfigModels(st.Models)
-	if st.Context.AutoCompactThreshold > 0 {
-		s.runtime.AI.Context.AutoCompactThreshold = st.Context.AutoCompactThreshold
-	}
-	if st.Context.KeepRecentMessages > 0 {
-		s.runtime.AI.Context.KeepRecentMessages = st.Context.KeepRecentMessages
-	}
-	s.runtime.AI.Security.AllowShell = st.Security.AllowShell
-	s.runtime.AI.Security.AllowCommandMCP = st.Security.AllowCommandMCP
-	if d, err := time.ParseDuration(st.Security.ShellTimeout); err == nil && d > 0 {
-		s.runtime.AI.Security.ShellTimeout = d
-	}
-}
-
-// apply 应用。
-func (s *Service) apply(st Settings, _ bool) {
-	s.applyAI(AISettings{Models: st.Models, Context: st.Context, Security: st.Security})
-	if st.MCPServers != nil {
-		s.runtime.MCP.Servers = toMCPServers(st.MCPServers)
-	} else {
-		s.runtime.MCP.Servers = map[string]config.MCPServerConfig{}
-	}
-	s.runtime.Git = toGitConfig(st.Git)
-	if d, err := time.ParseDuration(st.Git.CloneTimeout); err == nil && d > 0 {
-		s.runtime.Git.CloneTimeout = d
-	}
-	if s.hooks.OnGitUpdate != nil {
-		s.hooks.OnGitUpdate(s.runtime.Git)
-	}
 }
 
 // normalizeGitSettings 规范化 Git 设置字段。
@@ -432,21 +354,6 @@ func toGitConfig(g GitSettings) config.GitConfig {
 			}
 		}
 	}
-	return out
-}
-
-// fromGitConfig 将 config.GitConfig 转换为 GitSettings。
-func fromGitConfig(g config.GitConfig) GitSettings {
-	out := GitSettings{
-		SSHKeyPath:   g.SSHKeyPath,
-		CloneTimeout: g.CloneTimeout.String(),
-	}
-	for _, a := range g.Accesses {
-		out.Accesses = append(out.Accesses, GitAccess{
-			ID: a.ID, Name: a.Name, Host: a.Host, SSHKeyPath: a.SSHKeyPath,
-		})
-	}
-	normalizeGitSettings(&out)
 	return out
 }
 
@@ -497,25 +404,6 @@ func toMCPServers(in map[string]MCPServerSettings) map[string]config.MCPServerCo
 	out := make(map[string]config.MCPServerConfig, len(in))
 	for name, srv := range in {
 		out[name] = config.MCPServerConfig{
-			Command:  srv.Command,
-			Args:     append([]string(nil), srv.Args...),
-			URL:      srv.URL,
-			Disabled: srv.Disabled,
-			Headers:  srv.Headers,
-			Env:      srv.Env,
-		}
-	}
-	return out
-}
-
-// fromMCPServers 将 config MCP 映射转换为 MCPServerSettings。
-func fromMCPServers(in map[string]config.MCPServerConfig) map[string]MCPServerSettings {
-	if in == nil {
-		return map[string]MCPServerSettings{}
-	}
-	out := make(map[string]MCPServerSettings, len(in))
-	for name, srv := range in {
-		out[name] = MCPServerSettings{
 			Command:  srv.Command,
 			Args:     append([]string(nil), srv.Args...),
 			URL:      srv.URL,

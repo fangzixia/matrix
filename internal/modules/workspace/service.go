@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"matrix/internal/modules/project"
 	"matrix/internal/modules/repository"
-	"matrix/internal/platform/config"
+	"matrix/internal/modules/settings"
 	"matrix/internal/platform/storage"
 
 	"github.com/google/uuid"
@@ -14,20 +14,15 @@ import (
 
 // Service 管理 Run 级 Git 工作区与项目文档目录。
 type Service struct {
-	paths storage.Paths
-	git   config.GitConfig
-	repos *repository.Service
-	keys  *project.Service
+	paths    storage.Paths
+	settings *settings.Service
+	repos    *repository.Service
+	keys     *project.Service
 }
 
 // NewService 创建工作区服务实例。
-func NewService(paths storage.Paths, git config.GitConfig, repos *repository.Service) *Service {
-	return &Service{paths: paths, git: git, repos: repos}
-}
-
-// UpdateGit 更新工作区 Git 远程配置。
-func (s *Service) UpdateGit(git config.GitConfig) {
-	s.git = git
+func NewService(paths storage.Paths, settings *settings.Service, repos *repository.Service) *Service {
+	return &Service{paths: paths, settings: settings, repos: repos}
 }
 
 // SetProjectKeyResolver 注入项目工作区目录键解析器。

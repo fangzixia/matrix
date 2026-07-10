@@ -34,11 +34,6 @@ func (r *ProjectRepoResolver) CopyRepo(ctx context.Context, projectID uuid.UUID,
 	return r.WS.CopyRepo(ctx, projectID, sourceRepoDir, runID)
 }
 
-// RemoveRunRepo 删除 Run 沙箱目录。
-func (r *ProjectRepoResolver) RemoveRunRepo(ctx context.Context, projectID uuid.UUID, runID uuid.UUID) error {
-	return r.WS.RemoveRunRepo(ctx, projectID, runID)
-}
-
 func (r *ProjectRepoResolver) gitConfigFor(ctx context.Context, projectID uuid.UUID, repoID *uuid.UUID) (gitURL, branch string, err error) {
 	if repoID != nil && r.Repos != nil {
 		repo, err := r.Repos.GetForProject(ctx, projectID, *repoID)

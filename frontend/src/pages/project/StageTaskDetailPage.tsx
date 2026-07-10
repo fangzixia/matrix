@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -8,19 +8,16 @@ import {
   Descriptions,
   Empty,
   Flex,
-  Progress,
   Result,
   Space,
   Spin,
   Statistic,
-  Steps,
   Tag,
   Typography,
 } from "antd";
 import RunActivityPanel from "@/components/ai/RunActivityPanel";
 import { runStatusPollIntervalMs } from "@/api/runView";
 import * as runsApi from "@/api/runs";
-import type { RunStep } from "@/api/runs";
 import type { RunViewState } from "@/types/runView";
 import { runStatusLabels, stageTitles } from "@/locales/zh-CN";
 import { isStageKind, stageKindFromPath } from "@/utils/stage";
@@ -33,13 +30,6 @@ function statusColor(status: string) {
   if (status === "cancelled") return "warning";
   if (status === "running") return "processing";
   return "default";
-}
-
-function stepStatus(status: string): "wait" | "process" | "finish" | "error" {
-  if (status === "running") return "process";
-  if (status === "succeeded") return "finish";
-  if (status === "failed" || status === "cancelled") return "error";
-  return "wait";
 }
 
 function formatDuration(ms?: number) {
@@ -66,8 +56,6 @@ export default function StageTaskDetailPage() {
   const stageTitle = stageTitles[kind] || kind;
   const currentRun = useRunStore((s) => s.current);
   const setCurrent = useRunStore((s) => s.setCurrent);
-  const [steps, setSteps] = useState<RunStep[]>([]);
-  const [stepsError, setStepsError] = useState("");
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const running =
     currentRun?.status === "running" ||
@@ -82,17 +70,6 @@ export default function StageTaskDetailPage() {
     live: running,
     mode: "detail",
   });
-
-
-  async function loadSteps() {
-    setStepsError("");
-    try {
-      const res = await runsApi.listRunSteps(projectId, taskId);
-      setSteps(res.steps ?? []);
-    } catch (e) {
-      setStepsError(e instanceof Error ? e.message : "步骤加载失败");
-    }
-  }
 
   async function refreshRun() {
     const run = await runsApi.getRun(projectId, taskId);
@@ -122,7 +99,7 @@ export default function StageTaskDetailPage() {
     async function load() {
       const run = await refreshRun();
       if (cancelled) return;
-      await Promise.all([reloadView(), loadSteps()]);
+      await reloadView();
       if (cancelled) return;
       const active =
         run.status === "running" ||
@@ -130,7 +107,6 @@ export default function StageTaskDetailPage() {
         run.status === "pending";
       if (active) {
         pollTimerRef.current = setInterval(async () => {
-          await loadSteps();
           const updated = await runsApi.getRun(projectId, taskId);
           setCurrent(updated);
           if (["running", "queued", "pending"].includes(updated.status)) {
@@ -174,24 +150,8 @@ export default function StageTaskDetailPage() {
     if (currentRun.status === "failed") return "任务执行失败";
     return runStatusLabels[currentRun.status] || currentRun.status;
   }, [currentRun]);
-  const stepProgress = useMemo(() => {
-    if (steps.length <= 1) return null;
-    const finished = steps.filter((s) => s.status === "succeeded").length;
-    return Math.round((finished / steps.length) * 100);
-  }, [steps]);
   const runningExtra = useMemo(() => {
     if (!running) return null;
-    if (stepProgress != null) {
-      return (
-        <Progress
-          percent={stepProgress}
-          status="active"
-          size="small"
-          style={{ width: 160 }}
-          aria-label={`阶段进度 ${stepProgress}%`}
-        />
-      );
-    }
     return (
       <Space size="small">
         <Spin size="small" />
@@ -200,7 +160,7 @@ export default function StageTaskDetailPage() {
         </Typography.Text>
       </Space>
     );
-  }, [panelState.statusLabel, running, stepProgress]);
+  }, [panelState.statusLabel, running]);
 
   return (
     <Space direction="vertical" size="large" style={{ width: "100%" }}>
@@ -261,17 +221,6 @@ export default function StageTaskDetailPage() {
           )}
         </Descriptions>
       )}
-      {steps.length > 1 && (
-        <Steps
-          size="small"
-          items={steps.map((s) => ({
-            title: s.kind || `步骤 ${s.sequence}`,
-            description: s.output_summary,
-            status: stepStatus(s.status),
-          }))}
-        />
-      )}
-      {stepsError && <Alert type="warning" showIcon message={stepsError} />}
       <Card
         title="运行过程"
         extra={runningExtra}

@@ -1,11 +1,10 @@
-// Package run 管理 AI 运行生命周期：启动、执行、步骤/事件持久化与沙箱隔离。
+// Package run 管理 AI 运行生命周期：启动、执行、视图投影与沙箱隔离。
 package run
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"matrix/internal/ai/ports"
 	"matrix/internal/ai/query"
 	"matrix/internal/modules/artifact"
 	"matrix/internal/modules/notification"
@@ -13,10 +12,8 @@ import (
 	"matrix/internal/modules/run/view"
 	"matrix/internal/modules/settings"
 	"matrix/internal/modules/workspace"
-	"matrix/internal/platform/config"
 	"matrix/internal/platform/db/models"
 	"matrix/internal/platform/db/repo"
-	"matrix/internal/platform/events"
 	"matrix/internal/platform/logging"
 	"matrix/internal/platform/storage"
 	"strings"
@@ -29,27 +26,27 @@ import (
 // Service 管理 AI 运行生命周期：启动、执行、视图投影与沙箱隔离。
 type Service struct {
 	stores       *repo.Stores
-	runtime      *Runtime
-	hub          *events.Hub
 	viewStore    *view.Store
 	paths        storage.Paths
-	runtimeCfg   *config.RuntimeConfig
+	settings     *settings.Service
 	workspace    *workspace.ProjectRepoResolver
 	notifier     *notification.Service
 	plans        *plan.Service
 	artifacts    *artifact.Service
 	lifecycleCtx context.Context
 	lifecycleMu  sync.RWMutex
-	aiReloader   *settings.Service
+	runCancelMu  sync.Mutex
+	runCancels   map[string]context.CancelFunc
 }
 
 // NewService 创建 Run 服务实例。
-func NewService(stores *repo.Stores, rt *Runtime, hub *events.Hub, paths storage.Paths, runtime *config.RuntimeConfig, ws *workspace.ProjectRepoResolver) *Service {
+func NewService(stores *repo.Stores, paths storage.Paths, sysSettings *settings.Service, ws *workspace.ProjectRepoResolver) *Service {
 	return &Service{
-		stores: stores, runtime: rt, hub: hub,
+		stores:    stores,
 		viewStore: view.NewStore(stores.Run),
-		paths:     paths, runtimeCfg: runtime,
-		workspace: ws,
+		paths:     paths, settings: sysSettings,
+		workspace:  ws,
+		runCancels: make(map[string]context.CancelFunc),
 	}
 }
 
@@ -80,16 +77,6 @@ func (s *Service) SetPlans(p *plan.Service) { s.plans = p }
 
 // SetArtifacts 注入评测产物索引服务。
 func (s *Service) SetArtifacts(a *artifact.Service) { s.artifacts = a }
-
-// SetAIRuntimeReloader 注入 AI 配置热加载器，Run 启动前从 DB 刷新模型 Key。
-func (s *Service) SetAIRuntimeReloader(r *settings.Service) { s.aiReloader = r }
-
-func (s *Service) refreshAIRuntime(ctx context.Context) error {
-	if s.aiReloader == nil {
-		return nil
-	}
-	return s.aiReloader.ReloadAI(ctx)
-}
 
 // SetLifecycle 注册进程退出时的 Run 生命周期钩子。
 func (s *Service) SetLifecycle(ctx context.Context) {
@@ -134,7 +121,7 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID, kind string) ([
 	q := s.stores.Run
 	rows, err := func() ([]models.Run, error) {
 		if kind != "" {
-			if !shouldNotifyRun(kind) {
+			if !Kind(kind).IsHarness() {
 				return []models.Run{}, nil
 			}
 		}
@@ -205,36 +192,9 @@ func (s *Service) Start(ctx context.Context, projectID, userID uuid.UUID, in Sta
 	if err != nil {
 		return nil, err
 	}
-	s.dispatchExecute(runID, &kind)
-	return new(toRunDTO(m)), nil
-}
-
-// dispatchExecute 在 Run 记录已持久化后立即执行。
-func (s *Service) dispatchExecute(runID uuid.UUID, kind *Kind) {
-	execCtx := s.runCtx()
 	logging.Agent("run: 开始执行", "run_id", runID, "kind", kind)
-	go func() { _ = s.ExecuteRun(execCtx, runID) }()
-}
-
-// mcpConfigsToPorts 将 MCP YAML 配置转换为运行时端口配置。
-func mcpConfigsToPorts(servers map[string]config.MCPServerConfig, allowCommandMCP bool) []ports.MCPServerConfig {
-	if len(servers) == 0 {
-		return nil
-	}
-	out := make([]ports.MCPServerConfig, 0, len(servers))
-	for name, s := range servers {
-		if s.Disabled {
-			continue
-		}
-		if !allowCommandMCP && s.Command != "" {
-			continue
-		}
-		out = append(out, ports.MCPServerConfig{
-			Name: name, Command: s.Command, Args: s.Args, URL: s.URL,
-			Headers: s.Headers, Env: s.Env, Disabled: s.Disabled,
-		})
-	}
-	return out
+	go func() { _ = s.ExecuteRun(s.runCtx(), runID) }()
+	return new(toRunDTO(m)), nil
 }
 
 // CancelForProject 取消项目内指定 Run。
@@ -247,16 +207,13 @@ func (s *Service) CancelForProject(ctx context.Context, projectID, runID uuid.UU
 }
 
 func (s *Service) cancelRunModel(ctx context.Context, m *models.Run) error {
-	_ = s.runtime.Cancel(m.ID.String())
+	s.cancelAgentRun(m.ID.String())
 	fin := time.Now()
 	if err := s.stores.Run.Cancel(ctx, m.ID, fin); err != nil {
 		return err
 	}
 	return s.finishRunView(ctx, m.ID, "cancelled", "", "任务已取消")
 }
-
-// Hub 返回通知 SSE 事件 Hub（非 Run 视图流）。
-func (s *Service) Hub() *events.Hub { return s.hub }
 
 // StreamCatchUpSinceForProject 从项目内 Run 读取视图事件。
 func (s *Service) StreamCatchUpSinceForProject(

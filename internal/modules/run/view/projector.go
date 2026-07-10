@@ -50,50 +50,39 @@ func (p *Projector) State() RunViewState {
 	return cloneState(p.state)
 }
 
-// Apply 处理一条内部消息并返回待发出的 AG-UI 事件。
-func (p *Projector) Apply(msg stream.Message) []Envelope {
-	var out []Envelope
-	now := time.Now().UnixMilli()
-
+// Apply 处理一条内部 stream 消息并更新 RunViewState。
+func (p *Projector) Apply(msg stream.Message) {
 	switch msg.Type {
 	case stream.TypeProgress:
-		out = append(out, p.applyProgress(msg, now)...)
+		p.applyProgress(msg)
 	case stream.TypeStreamEvent:
-		out = append(out, p.applyStreamEvent(msg, now)...)
+		p.applyStreamEvent(msg)
 	case stream.TypeAssistant:
-		out = append(out, p.applyAssistant(msg)...)
+		p.applyAssistant(msg)
 	case stream.TypeResult:
 		p.applyResult(msg)
 	case stream.TypeSubAgentUpdate, stream.TypeSubAgentDone:
 		p.applySubagentSnapshot(msg.Snapshot)
-		out = append(out, p.emitActivitySnapshot(now))
 	}
 
 	p.syncReplyText()
 	if p.shouldEmitSnapshot() {
-		out = append(out, p.emitStateSnapshot(now))
 		p.lastSnap = time.Now()
 	}
-	return out
 }
 
 // OnSubagent 由 coordinator 直接更新子 Agent 快照。
-func (p *Projector) OnSubagent(snap agent.Snapshot) []Envelope {
+func (p *Projector) OnSubagent(snap agent.Snapshot) {
 	p.setSubagentFromSnapshot(snap)
 	p.state.StatusLabel = subagentStatusLabel(snap)
-	now := time.Now().UnixMilli()
-	return []Envelope{
-		p.emitActivitySnapshot(now),
-		p.emitStateSnapshot(now),
-	}
+	p.lastSnap = time.Time{}
 }
 
-func (p *Projector) applyProgress(msg stream.Message, now int64) []Envelope {
+func (p *Projector) applyProgress(msg stream.Message) {
 	if msg.Data == nil {
-		return nil
+		return
 	}
 	data := msg.Data
-	var out []Envelope
 
 	switch data.Type {
 	case stream.DataTurnProgress:
@@ -107,7 +96,6 @@ func (p *Projector) applyProgress(msg stream.Message, now int64) []Envelope {
 			p.ensureCoordinatorTurn(turnNum, data.Summary)
 		}
 		p.state.StatusLabel = activity.TurnThinkingLabel(turnNum, data.Transition)
-		out = append(out, p.emitActivitySnapshot(now))
 
 	case stream.DataToolOutputDelta:
 		turn := p.resolveToolTurn(msg, msg.ToolUseID)
@@ -133,7 +121,7 @@ func (p *Projector) applyProgress(msg stream.Message, now int64) []Envelope {
 				turn = p.activeTurn(msg)
 			}
 			if turn == nil {
-				return out
+				return
 			}
 			if !isProvisionalToolID(toolUseID) {
 				p.reconcileProvisionalTools(turn, data.ToolName, toolUseID)
@@ -143,44 +131,34 @@ func (p *Projector) applyProgress(msg stream.Message, now int64) []Envelope {
 				tool.Preview = tool.Preview + data.Delta
 			}
 			p.refreshTurnSummary(turn)
-			out = append(out, Envelope{
-				Type: EventTOOLCallArgs, RunID: p.runID, Timestamp: now,
-				Payload: ToolCallArgsPayload{ToolCallID: toolUseID, Delta: data.Delta},
-			})
 		} else if data.Status == "started" {
 			toolUseID := msg.ToolUseID
 			if toolUseID == "" {
-				return out
+				return
 			}
 			turn := p.resolveToolTurn(msg, toolUseID)
 			if turn == nil {
 				turn = p.activeTurn(msg)
 			}
 			if turn == nil {
-				return out
+				return
 			}
 			p.reconcileProvisionalTools(turn, data.ToolName, toolUseID)
 			p.upsertToolInTurn(turn, toolUseID, data.ToolName, "loading", data.ServerName, data.Message, 0)
 			p.refreshTurnSummary(turn)
 			p.rememberCoordinatorToolTurn(msg, toolUseID)
 			p.state.StatusLabel = activity.ToolActivityLabel(data.ToolName, "started")
-			out = append(out, Envelope{
-				Type: EventTOOLCallStart, RunID: p.runID, Timestamp: now,
-				Payload: ToolCallStartPayload{
-					ToolCallID: toolUseID, ToolCallName: data.ToolName, ServerName: data.ServerName,
-				},
-			})
 		} else if data.Status == "completed" || data.Status == "failed" {
 			toolUseID := msg.ToolUseID
 			if toolUseID == "" {
-				return out
+				return
 			}
 			turn := p.resolveToolTurn(msg, toolUseID)
 			if turn == nil {
 				turn = p.activeTurn(msg)
 			}
 			if turn == nil {
-				return out
+				return
 			}
 			status := mapToolStatus(data.Status)
 			if data.ToolName == "" {
@@ -194,35 +172,21 @@ func (p *Projector) applyProgress(msg stream.Message, now int64) []Envelope {
 				tool.OutputStreaming = false
 			}
 			p.refreshTurnSummary(turn)
-			p.lastSnap = time.Time{} // 工具终态立即触发快照，避免 500ms 节流 + SSE 轮询延迟
-			if toolUseID != "" {
-				out = append(out,
-					Envelope{Type: EventTOOLCallEnd, RunID: p.runID, Timestamp: now,
-						Payload: ToolCallEndPayload{ToolCallID: toolUseID}},
-					Envelope{Type: EventTOOLCallResult, RunID: p.runID, Timestamp: now,
-						Payload: ToolCallResultPayload{
-							ToolCallID: toolUseID, Status: data.Status,
-							Preview: truncateStr(data.Message, 500), ElapsedMs: data.ElapsedTimeMs,
-							LogURL: p.toolLogURL(toolUseID),
-						}},
-				)
-			}
+			p.lastSnap = time.Time{}
 			p.state.StatusLabel = activity.TurnWithToolsLabel(turn.Turn, countFinishedTools(turn.Tools))
 		}
 	}
-	return out
 }
 
-func (p *Projector) applyStreamEvent(msg stream.Message, now int64) []Envelope {
+func (p *Projector) applyStreamEvent(msg stream.Message) {
 	if msg.Event == nil {
-		return nil
+		return
 	}
 	turn := p.activeTurn(msg)
 	if turn == nil {
-		return nil
+		return
 	}
 	ev := msg.Event
-	var out []Envelope
 
 	switch ev.Type {
 	case stream.EventMessageStart:
@@ -231,61 +195,34 @@ func (p *Projector) applyStreamEvent(msg stream.Message, now int64) []Envelope {
 		if p.messageID == "" {
 			p.messageID = uuid.NewString()
 		}
-		out = append(out, Envelope{
-			Type: EventTEXTMessageStart, RunID: p.runID, Timestamp: now,
-			Payload: TextMessageStartPayload{
-				MessageID: p.messageID, Scope: string(msg.Scope), AgentID: msg.AgentID,
-			},
-		})
 	case stream.EventMessageStop:
 		turn.MessageStreaming = false
 		turn.ThinkingStreaming = false
-		if p.messageID != "" {
-			out = append(out, Envelope{
-				Type: EventTEXTMessageEnd, RunID: p.runID, Timestamp: now,
-				Payload: TextMessageEndPayload{MessageID: p.messageID},
-			})
-			out = append(out, Envelope{
-				Type: EventREASONINGMessageEnd, RunID: p.runID, Timestamp: now,
-				Payload: TextMessageEndPayload{MessageID: p.messageID},
-			})
-		}
 	case stream.EventContentBlockDelta:
 		if ev.Delta == nil {
-			return out
+			return
 		}
-		mid := p.messageID
-		if mid == "" {
-			mid = uuid.NewString()
-			p.messageID = mid
+		if p.messageID == "" {
+			p.messageID = uuid.NewString()
 		}
 		if ev.Delta.Type == stream.DeltaThinking && ev.Delta.Thinking != "" {
 			turn.Thinking += ev.Delta.Thinking
 			p.refreshTurnSummary(turn)
-			out = append(out, Envelope{
-				Type: EventREASONINGMessageContent, RunID: p.runID, Timestamp: now,
-				Payload: TextDeltaPayload{MessageID: mid, Delta: ev.Delta.Thinking},
-			})
 		}
 		if ev.Delta.Type == stream.DeltaText && ev.Delta.Text != "" {
 			turn.Message += ev.Delta.Text
 			p.refreshTurnSummary(turn)
-			out = append(out, Envelope{
-				Type: EventTEXTMessageContent, RunID: p.runID, Timestamp: now,
-				Payload: TextDeltaPayload{MessageID: mid, Delta: ev.Delta.Text},
-			})
 		}
 	}
-	return out
 }
 
-func (p *Projector) applyAssistant(msg stream.Message) []Envelope {
+func (p *Projector) applyAssistant(msg stream.Message) {
 	if msg.Assistant == nil {
-		return nil
+		return
 	}
 	turn := p.activeTurn(msg)
 	if turn == nil {
-		return nil
+		return
 	}
 	var thinking, text string
 	for _, block := range msg.Assistant.Content {
@@ -305,7 +242,6 @@ func (p *Projector) applyAssistant(msg stream.Message) []Envelope {
 	turn.ThinkingStreaming = false
 	turn.MessageStreaming = false
 	p.refreshTurnSummary(turn)
-	return nil
 }
 
 func (p *Projector) applyResult(msg stream.Message) {
@@ -442,22 +378,6 @@ func (p *Projector) syncReplyText() {
 
 func (p *Projector) shouldEmitSnapshot() bool {
 	return time.Since(p.lastSnap) >= 500*time.Millisecond
-}
-
-func (p *Projector) emitStateSnapshot(now int64) Envelope {
-	return Envelope{
-		Type: EventSTATESnapshot, RunID: p.runID, Timestamp: now,
-		Payload: cloneState(p.state),
-	}
-}
-
-func (p *Projector) emitActivitySnapshot(now int64) Envelope {
-	return Envelope{
-		Type: EventACTIVITYSnapshot, RunID: p.runID, Timestamp: now,
-		Payload: ActivitySnapshotPayload{
-			Subagents: p.state.Subagents, StatusLabel: p.state.StatusLabel,
-		},
-	}
 }
 
 func (p *Projector) toolLogURL(toolUseID string) string {

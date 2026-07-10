@@ -23,8 +23,6 @@ const (
 	EventTOOLCallResult          = "TOOL_CALL_RESULT"
 	EventACTIVITYSnapshot        = "ACTIVITY_SNAPSHOT"
 	EventSTATESnapshot           = "STATE_SNAPSHOT"
-	EventSTEPStarted             = "STEP_STARTED"
-	EventSTEPFinished            = "STEP_FINISHED"
 )
 
 // Mode 是 SSE 订阅通道模式。
@@ -112,14 +110,6 @@ type ToolCallResultPayload struct {
 type ActivitySnapshotPayload struct {
 	Subagents   map[string]SubagentView `json:"subagents,omitempty"`
 	StatusLabel string                  `json:"statusLabel,omitempty"`
-}
-
-// StepPayload 流水线步骤。
-type StepPayload struct {
-	StepID   string `json:"stepId"`
-	Kind     string `json:"kind"`
-	Sequence int    `json:"sequence"`
-	Status   string `json:"status,omitempty"`
 }
 
 // AllowedInChat 判断事件是否允许 chat 通道。

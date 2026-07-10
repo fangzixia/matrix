@@ -61,11 +61,6 @@ func (r *RunRepo) UpdateFields(ctx context.Context, runID uuid.UUID, updates map
 	return r.db.WithContext(ctx).Model(&models.Run{}).Where("id = ?", runID).Updates(updates).Error
 }
 
-// UpdateModel 更新 Run 模型指定字段。
-func (r *RunRepo) UpdateModel(ctx context.Context, m *models.Run, updates map[string]any) error {
-	return r.db.WithContext(ctx).Model(m).Updates(updates).Error
-}
-
 // MarkRunning 将 Run 标记为运行中。
 func (r *RunRepo) MarkRunning(ctx context.Context, runID uuid.UUID, now time.Time) error {
 	return r.UpdateFields(ctx, runID, map[string]any{

@@ -59,17 +59,12 @@ func Run(ctx context.Context, opts Options) error {
 	if err := identity.BootstrapAdmin(ctx, stores, cfg.Auth); err != nil {
 		return err
 	}
-	runtime := config.DefaultRuntime()
-	sysSettings := settings.NewService(stores, runtime)
-	if err := sysSettings.Bootstrap(ctx); err != nil {
-		return fmt.Errorf("system settings: %w", err)
-	}
-	deps := app.NewDeps(cfg, runtime, paths, db, loggers.System, sysSettings)
+	sysSettings := settings.NewService(stores)
+	deps := app.NewDeps(cfg, paths, db, loggers.System, sysSettings)
 	if err := deps.Repositories.MigrateLegacyProjects(ctx); err != nil {
 		loggers.System.Warn("迁移旧版仓库绑定失败", "err", err)
 	}
 	deps.RunService.SetLifecycle(ctx) // 进程退出时取消进行中的 Run
-	defer deps.Close()
 	engine := platformhttp.NewEngine(loggers.Access, loggers.System, dev)
 	routers.Register(engine, deps, opts.StaticFS)
 	loggers.System.Info("HTTP 服务监听中", "addr", cfg.Server.Addr)
