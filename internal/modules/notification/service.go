@@ -5,11 +5,11 @@ import (
 	"context"
 	"fmt"
 	"matrix/internal/platform/db/models"
+	"matrix/internal/platform/db/repo"
 	"matrix/internal/platform/events"
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 // DTO 是通知 API 返回的数据传输对象。
@@ -26,23 +26,19 @@ type DTO struct {
 
 // Service 管理站内通知的持久化与 SSE 实时推送。
 type Service struct {
-	db  *gorm.DB
-	hub *events.Hub
+	stores *repo.Stores
+	hub    *events.Hub
 }
 
 // NewService 创建通知服务实例。
-func NewService(db *gorm.DB, hub *events.Hub) *Service {
-	return &Service{db: db, hub: hub}
+func NewService(stores *repo.Stores, hub *events.Hub) *Service {
+	return &Service{stores: stores, hub: hub}
 }
 
 // List 返回列表。
 func (s *Service) List(ctx context.Context, userID uuid.UUID, limit int) ([]DTO, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	var rows []models.Notification
-	if err := s.db.WithContext(ctx).Where("user_id = ?", userID).
-		Order("created_at desc").Limit(limit).Find(&rows).Error; err != nil {
+	rows, err := s.stores.Notification.ListByUser(ctx, userID, limit)
+	if err != nil {
 		return nil, err
 	}
 	out := make([]DTO, len(rows))
@@ -54,35 +50,26 @@ func (s *Service) List(ctx context.Context, userID uuid.UUID, limit int) ([]DTO,
 
 // UnreadCount 返回未读通知数量。
 func (s *Service) UnreadCount(ctx context.Context, userID uuid.UUID) (int64, error) {
-	var n int64
-	err := s.db.WithContext(ctx).Model(&models.Notification{}).
-		Where("user_id = ? AND read_at IS NULL", userID).Count(&n).Error
-	return n, err
+	return s.stores.Notification.UnreadCount(ctx, userID)
 }
 
 // MarkRead 标记单条通知为已读。
 func (s *Service) MarkRead(ctx context.Context, userID, id uuid.UUID) error {
-	now := time.Now()
-	return s.db.WithContext(ctx).Model(&models.Notification{}).
-		Where("id = ? AND user_id = ?", id, userID).
-		Update("read_at", now).Error
+	return s.stores.Notification.MarkRead(ctx, userID, id)
 }
 
 // MarkAllRead 标记全部通知为已读。
 func (s *Service) MarkAllRead(ctx context.Context, userID uuid.UUID) error {
-	now := time.Now()
-	return s.db.WithContext(ctx).Model(&models.Notification{}).
-		Where("user_id = ? AND read_at IS NULL", userID).
-		Update("read_at", now).Error
+	return s.stores.Notification.MarkAllRead(ctx, userID)
 }
 
 // Create 创建记录。
 func (s *Service) Create(ctx context.Context, userID uuid.UUID, kind, title, body, link string) (*DTO, error) {
-	m := models.Notification{UserID: userID, Kind: kind, Title: title, Body: body, Link: link}
-	if err := s.db.WithContext(ctx).Create(&m).Error; err != nil {
+	m, err := s.stores.Notification.Create(ctx, userID, kind, title, body, link)
+	if err != nil {
 		return nil, err
 	}
-	d := toDTO(&m)
+	d := toDTO(m)
 	if s.hub != nil {
 		s.hub.PublishNotification(userID.String(), map[string]any{
 			"type": "notification", "notification": d,
@@ -91,7 +78,7 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, kind, title, bod
 	return &d, nil
 }
 
-// NotifyRunStatus 在四阶段任务状态变更时推送通知。
+// NotifyRunStatus 在流水线阶段任务状态变更时推送通知。
 func (s *Service) NotifyRunStatus(ctx context.Context, userID uuid.UUID, projectID, runID uuid.UUID, runKind, status, title string) {
 	link := fmt.Sprintf("/projects/%s/%s/%s", projectID, runKind, runID)
 	body := fmt.Sprintf("任务 %s", status)

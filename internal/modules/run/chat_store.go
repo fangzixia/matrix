@@ -9,15 +9,15 @@ import (
 
 	"matrix/internal/ai/query"
 	"matrix/internal/platform/db/models"
+	"matrix/internal/platform/db/repo"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 // LoadSessionTree 从 chat_messages 表加载会话消息树。
 func (s *Service) LoadSessionTree(ctx context.Context, session *models.ChatSession) (SessionMessages, error) {
-	var rows []models.ChatMessage
-	if err := s.db.WithContext(ctx).Where("session_id = ?", session.ID).Order("created_at asc").Find(&rows).Error; err != nil {
+	rows, err := s.stores.Chat.ListMessages(ctx, session.ID)
+	if err != nil {
 		return SessionMessages{}, err
 	}
 	nodes := make([]ChatMessageNode, 0, len(rows))
@@ -38,8 +38,7 @@ func modelToChatNode(row models.ChatMessage) ChatMessageNode {
 		Content: row.Content,
 	}
 	if row.ParentID != nil {
-		pid := row.ParentID.String()
-		node.ParentID = &pid
+		node.ParentID = new(row.ParentID.String())
 	}
 	if row.RunID != nil {
 		node.RunID = row.RunID.String()
@@ -76,11 +75,11 @@ func (s *Service) HistoryForParentDB(ctx context.Context, sessionID uuid.UUID, p
 }
 
 func (s *Service) loadSessionTreeByID(ctx context.Context, sessionID uuid.UUID) (SessionMessages, error) {
-	var session models.ChatSession
-	if err := s.db.WithContext(ctx).First(&session, "id = ?", sessionID).Error; err != nil {
+	session, err := s.stores.Chat.GetSession(ctx, sessionID)
+	if err != nil {
 		return SessionMessages{}, err
 	}
-	return s.LoadSessionTree(ctx, &session)
+	return s.LoadSessionTree(ctx, session)
 }
 
 // ValidateParentDB 校验 parent_id 是否属于会话。
@@ -103,23 +102,9 @@ func (s *Service) InsertChatUserMessage(ctx context.Context, sessionID uuid.UUID
 		}
 		parentUUID = &pid
 	}
-	row := models.ChatMessage{
-		ID:          messageID,
-		SessionID:   sessionID,
-		ParentID:    parentUUID,
-		Role:        "user",
-		Content:     content,
-		Attachments: encodeAttachments(attachments),
-		CreatedAt:   time.Now(),
-	}
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&row).Error; err != nil {
-			return err
-		}
-		return tx.Model(&models.ChatSession{}).Where("id = ?", sessionID).Updates(map[string]any{
-			"active_leaf_id": messageID,
-			"updated_at":     time.Now(),
-		}).Error
+	return s.stores.Chat.InsertUserMessage(ctx, repo.InsertUserMessageParams{
+		SessionID: sessionID, MessageID: messageID, ParentID: parentUUID,
+		Content: content, Attachments: encodeAttachments(attachments),
 	})
 }
 
@@ -128,24 +113,8 @@ func (s *Service) InsertChatAssistantMessage(ctx context.Context, sessionID, use
 	if strings.TrimSpace(content) == "" {
 		content = "（无回复）"
 	}
-	assistantID := uuid.New()
-	row := models.ChatMessage{
-		ID:        assistantID,
-		SessionID: sessionID,
-		ParentID:  &userMessageID,
-		Role:      "assistant",
-		Content:   content,
-		RunID:     &runID,
-		CreatedAt: time.Now(),
-	}
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&row).Error; err != nil {
-			return err
-		}
-		return tx.Model(&models.ChatSession{}).Where("id = ?", sessionID).Updates(map[string]any{
-			"active_leaf_id": assistantID,
-			"updated_at":     time.Now(),
-		}).Error
+	return s.stores.Chat.InsertAssistantMessage(ctx, repo.InsertAssistantMessageParams{
+		SessionID: sessionID, AssistantID: uuid.New(), UserMessageID: userMessageID,
+		RunID: runID, Content: content,
 	})
-	return assistantID, err
 }

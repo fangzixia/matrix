@@ -97,10 +97,6 @@ export default function StageTaskDetailPage() {
   async function refreshRun() {
     const run = await runsApi.getRun(projectId, taskId);
     if (run.kind !== kind) {
-      if (run.kind === "pipeline" && kind === "build") {
-        setCurrent(run);
-        return run;
-      }
       if (isStageKind(run.kind)) {
         navigate(`/projects/${projectId}/${run.kind}/${taskId}`, {
           replace: true,

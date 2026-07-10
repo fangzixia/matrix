@@ -4,6 +4,7 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"matrix/internal/modules/project"
 	"matrix/internal/modules/repository"
 	"matrix/internal/platform/config"
 	"matrix/internal/platform/storage"
@@ -16,7 +17,7 @@ type Service struct {
 	paths storage.Paths
 	git   config.GitConfig
 	repos *repository.Service
-	keys  ProjectKeyResolver
+	keys  *project.Service
 }
 
 // NewService 创建工作区服务实例。
@@ -30,7 +31,7 @@ func (s *Service) UpdateGit(git config.GitConfig) {
 }
 
 // SetProjectKeyResolver 注入项目工作区目录键解析器。
-func (s *Service) SetProjectKeyResolver(r ProjectKeyResolver) {
+func (s *Service) SetProjectKeyResolver(r *project.Service) {
 	s.keys = r
 }
 

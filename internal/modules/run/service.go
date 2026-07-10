@@ -1,4 +1,4 @@
-// Package run 管理 AI 运行生命周期：入队、执行、步骤/事件持久化与沙箱隔离。
+// Package run 管理 AI 运行生命周期：启动、执行、步骤/事件持久化与沙箱隔离。
 package run
 
 import (
@@ -8,12 +8,14 @@ import (
 	"matrix/internal/ai/ports"
 	"matrix/internal/ai/query"
 	"matrix/internal/modules/artifact"
-	"matrix/internal/modules/pipeline"
+	"matrix/internal/modules/notification"
 	"matrix/internal/modules/plan"
 	"matrix/internal/modules/run/view"
+	"matrix/internal/modules/settings"
 	"matrix/internal/modules/workspace"
 	"matrix/internal/platform/config"
 	"matrix/internal/platform/db/models"
+	"matrix/internal/platform/db/repo"
 	"matrix/internal/platform/events"
 	"matrix/internal/platform/logging"
 	"matrix/internal/platform/storage"
@@ -22,91 +24,56 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
-// JobEnqueuer 将 Run 入队到异步任务队列。
-type JobEnqueuer interface {
-	Enqueue(ctx context.Context, runID uuid.UUID) error
-}
-
-// TxJobEnqueuer 支持在 Run 创建事务内入队，避免 Run 与 Job 状态不一致。
-type TxJobEnqueuer interface {
-	EnqueueTx(ctx context.Context, tx *gorm.DB, runID uuid.UUID) error
-}
-
-// RunNotifier 在 Run 状态变更时向用户发送通知。
-type RunNotifier interface {
-	NotifyRunStatus(ctx context.Context, userID uuid.UUID, projectID, runID uuid.UUID, runKind, status, title string)
-}
-
-// AIRuntimeReloader 在 Run 启动前从数据库刷新 AI 模型配置（含 API Key）。
-type AIRuntimeReloader interface {
-	ReloadAI(ctx context.Context) error
-}
-
-// RunSandbox 扩展工作区解析，支持 Run 级独立仓库沙箱与文档目录。
-type RunSandbox interface {
-	ProjectWorkspaceKey(ctx context.Context, projectID uuid.UUID) (string, error)
-	CreateRunRepo(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID, runID uuid.UUID) (sandboxPath string, err error)
-	CopyRepo(ctx context.Context, projectID uuid.UUID, sourceRepoDir string, runID uuid.UUID) (sandboxPath string, err error)
-	RemoveRunRepo(ctx context.Context, projectID uuid.UUID, runID uuid.UUID) error
-	DocsRoot(ctx context.Context, projectID uuid.UUID) (string, error)
-	ResolveDocPath(projectID uuid.UUID, logicalPath string) (string, error)
-	SanitizeDocLogicalPath(logicalPath string) (string, error)
-	DocSandboxDir(ctx context.Context, projectID uuid.UUID) (string, error)
-	MatrixDir(ctx context.Context, projectID, runID uuid.UUID) (string, error)
-}
-
-// Service 管理 AI 运行生命周期：入队、执行、视图投影与沙箱隔离。
+// Service 管理 AI 运行生命周期：启动、执行、视图投影与沙箱隔离。
 type Service struct {
-	db           *gorm.DB
+	stores       *repo.Stores
 	runtime      *Runtime
 	hub          *events.Hub
 	viewStore    *view.Store
 	paths        storage.Paths
 	runtimeCfg   *config.RuntimeConfig
-	workspace    RunSandbox
-	jobs         JobEnqueuer
-	notifier     RunNotifier
-	pipeline     *pipeline.Service
+	workspace    *workspace.ProjectRepoResolver
+	notifier     *notification.Service
 	plans        *plan.Service
 	artifacts    *artifact.Service
 	lifecycleCtx context.Context
 	lifecycleMu  sync.RWMutex
-	aiReloader   AIRuntimeReloader
+	aiReloader   *settings.Service
 }
 
 // NewService 创建 Run 服务实例。
-func NewService(db *gorm.DB, rt *Runtime, hub *events.Hub, paths storage.Paths, runtime *config.RuntimeConfig, ws RunSandbox) *Service {
+func NewService(stores *repo.Stores, rt *Runtime, hub *events.Hub, paths storage.Paths, runtime *config.RuntimeConfig, ws *workspace.ProjectRepoResolver) *Service {
 	return &Service{
-		db: db, runtime: rt, hub: hub,
-		viewStore: view.NewStore(db),
+		stores: stores, runtime: rt, hub: hub,
+		viewStore: view.NewStore(stores.Run),
 		paths:     paths, runtimeCfg: runtime,
 		workspace: ws,
 	}
 }
 
+// StartRunRequest 是 POST /runs 的请求体。
+type StartRunRequest struct {
+	Kind     Kind   `json:"kind"`
+	Message  string `json:"message"`
+	FilePath string `json:"file_path"`
+}
+
 // StartInput 是启动一次 Run 或 Chat 的请求参数。
 type StartInput struct {
-	Kind              string
+	Kind              Kind
 	Title             string
 	Message           string
 	FilePath          string
-	EvalFilePath      string
 	ModelID           string
 	RepositoryID      *uuid.UUID
-	Stages            []string
-	Sync              bool
 	ChatSessionID     *uuid.UUID
 	ChatUserMessageID *uuid.UUID
 }
 
-// SetJobEnqueuer 注入异步任务入队器。
-func (s *Service) SetJobEnqueuer(j JobEnqueuer) { s.jobs = j }
-
 // SetNotifier 注入 Run 状态通知器。
-func (s *Service) SetNotifier(n RunNotifier) { s.notifier = n }
+func (s *Service) SetNotifier(n *notification.Service) { s.notifier = n }
 
 // SetPlans 注入计划文档索引服务。
 func (s *Service) SetPlans(p *plan.Service) { s.plans = p }
@@ -114,11 +81,8 @@ func (s *Service) SetPlans(p *plan.Service) { s.plans = p }
 // SetArtifacts 注入评测产物索引服务。
 func (s *Service) SetArtifacts(a *artifact.Service) { s.artifacts = a }
 
-// SetPipeline 注入流水线服务。
-func (s *Service) SetPipeline(p *pipeline.Service) { s.pipeline = p }
-
 // SetAIRuntimeReloader 注入 AI 配置热加载器，Run 启动前从 DB 刷新模型 Key。
-func (s *Service) SetAIRuntimeReloader(r AIRuntimeReloader) { s.aiReloader = r }
+func (s *Service) SetAIRuntimeReloader(r *settings.Service) { s.aiReloader = r }
 
 func (s *Service) refreshAIRuntime(ctx context.Context) error {
 	if s.aiReloader == nil {
@@ -150,11 +114,10 @@ type RunDTO struct {
 	ID                 uuid.UUID  `json:"id"`
 	ProjectID          uuid.UUID  `json:"project_id"`
 	RepositoryID       *uuid.UUID `json:"repository_id,omitempty"`
-	Kind               string     `json:"kind"`
+	Kind               Kind       `json:"kind"`
 	Status             string     `json:"status"`
 	Title              string     `json:"title,omitempty"`
 	FilePath           string     `json:"file_path,omitempty"`
-	EvalFilePath       string     `json:"eval_file_path,omitempty"`
 	AuditPath          string     `json:"audit_path,omitempty"`
 	SandboxPath        string     `json:"sandbox_path,omitempty"`
 	ErrorMessage       string     `json:"error_message,omitempty"`
@@ -166,17 +129,18 @@ type RunDTO struct {
 	AssistantMessageID string     `json:"assistant_message_id,omitempty"`
 }
 
-// List 返回列表；kind 为四阶段之一时严格过滤，chat/task/pipeline 等不会混入阶段列表。
+// List 返回列表；kind 为流水线阶段之一时严格过滤，chat 等不会混入阶段列表。
 func (s *Service) List(ctx context.Context, projectID uuid.UUID, kind string) ([]RunDTO, error) {
-	q := s.db.WithContext(ctx).Where("project_id = ?", projectID)
-	if kind != "" {
-		if !shouldNotifyRun(kind) {
-			return []RunDTO{}, nil
+	q := s.stores.Run
+	rows, err := func() ([]models.Run, error) {
+		if kind != "" {
+			if !shouldNotifyRun(kind) {
+				return []models.Run{}, nil
+			}
 		}
-		q = q.Where("kind = ?", kind)
-	}
-	var rows []models.Run
-	if err := q.Order("created_at desc").Find(&rows).Error; err != nil {
+		return q.ListByProject(ctx, projectID, kind)
+	}()
+	if err != nil {
 		return nil, err
 	}
 	out := make([]RunDTO, len(rows))
@@ -196,59 +160,30 @@ func (s *Service) GetForProject(ctx context.Context, projectID, id uuid.UUID) (*
 }
 
 func (s *Service) loadProjectRun(ctx context.Context, projectID, runID uuid.UUID) (*models.Run, error) {
-	var m models.Run
-	if err := s.db.WithContext(ctx).Where("id = ? AND project_id = ?", runID, projectID).First(&m).Error; err != nil {
-		return nil, err
-	}
-	return &m, nil
+	return s.stores.Run.GetByProject(ctx, projectID, runID)
 }
 
 // Start 启动 Run。
 func (s *Service) Start(ctx context.Context, projectID, userID uuid.UUID, in StartInput) (*RunDTO, error) {
-	modelID := strings.TrimSpace(in.ModelID)
-	// 检查模型有效性
-	if _, _, err := s.runtimeCfg.AI.ResolveModel(modelID); err != nil {
-		return nil, err
-	}
 	kind := in.Kind
-	if kind == "" {
-		kind = "task"
-	}
-	if len(in.Stages) > 0 || kind == "pipeline" {
-		kind = "pipeline"
-	}
 	title := in.Title
 	if title == "" {
 		title = in.Message
 	}
 	runID := uuid.New()
-	status := "queued"
-	var startedAt *time.Time
-	if in.Sync {
-		status = "running"
-		startedAt = new(time.Now())
-	}
+	status := "running"
+	startedAt := new(time.Now())
 	filePath, err := s.workspace.SanitizeDocLogicalPath(strings.TrimSpace(in.FilePath))
 	if err != nil {
 		return nil, fmt.Errorf("file_path: %w", err)
 	}
-	evalFilePath, err := s.workspace.SanitizeDocLogicalPath(strings.TrimSpace(in.EvalFilePath))
-	if err != nil {
-		return nil, fmt.Errorf("eval_file_path: %w", err)
-	}
-	if evalFilePath != "" && kind != "build" {
-		return nil, errors.New("eval_file_path 仅用于 build 阶段")
-	}
 	if filePath != "" && !strings.HasPrefix(filePath, workspace.DocsPlansRel+"/") {
 		return nil, errors.New("file_path 必须在 docs/plans/ 下")
 	}
-	if evalFilePath != "" && !strings.HasPrefix(evalFilePath, workspace.DocsEvaluationsRel+"/") {
-		return nil, errors.New("eval_file_path 必须在 docs/evaluations/ 下")
-	}
-	if RequiresPlanFile(kind) && filePath == "" {
+	if RequiresPlanFile(&kind) && filePath == "" {
 		return nil, errors.New("请选择计划文件")
 	}
-	if RequiresApprovedPlan(kind) && filePath != "" && s.plans != nil {
+	if RequiresApprovedPlan(&kind) && filePath != "" && s.plans != nil {
 		ok, err := s.plans.IsApproved(ctx, projectID, filePath)
 		if err != nil {
 			return nil, err
@@ -261,57 +196,23 @@ func (s *Service) Start(ctx context.Context, projectID, userID uuid.UUID, in Sta
 	if err != nil {
 		return nil, err
 	}
-	m := models.Run{
+	m, err := s.stores.Run.Start(ctx, repo.StartParams{
 		ID: runID, ProjectID: projectID, RepositoryID: in.RepositoryID,
-		Kind: kind, Status: status, ModelID: modelID, CreatedBy: userID, Title: title,
-		FilePath: filePath, EvalFilePath: evalFilePath,
-		StartedAt:     startedAt,
-		AuditPath:     storage.RunAuditFile(s.paths, projectCode, runID.String()),
-		ChatSessionID: in.ChatSessionID, ChatUserMessageID: in.ChatUserMessageID,
-	}
-	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&m).Error; err != nil {
-			return err
-		}
-		if kind == "pipeline" && s.pipeline != nil {
-			stages := s.pipeline.ResolveStages(in.Stages)
-			for i, stageKind := range stages {
-				step := models.RunStep{
-					RunID: runID, Kind: stageKind, Sequence: i + 1, Status: "pending",
-				}
-				if err := tx.Create(&step).Error; err != nil {
-					return err
-				}
-			}
-		}
-		if !in.Sync && s.jobs != nil {
-			txJobs, ok := s.jobs.(TxJobEnqueuer)
-			if !ok {
-				return errors.New("job enqueuer does not support transactional enqueue")
-			}
-			return txJobs.EnqueueTx(ctx, tx, runID)
-		}
-		return nil
-	}); err != nil {
+		Kind: string(kind), Status: status, ModelID: in.ModelID, CreatedBy: userID, Title: title,
+		FilePath: filePath, AuditPath: storage.RunAuditFile(s.paths, projectCode, runID.String()),
+		StartedAt: startedAt, ChatSessionID: in.ChatSessionID, ChatUserMessageID: in.ChatUserMessageID,
+	})
+	if err != nil {
 		return nil, err
 	}
-	queued := !in.Sync && s.jobs != nil
-	s.dispatchExecute(runID, kind, queued, in.ChatSessionID, in.ChatUserMessageID)
-	return new(toRunDTO(&m)), nil
+	s.dispatchExecute(runID, &kind)
+	return new(toRunDTO(m)), nil
 }
 
-// dispatchExecute 在 Run 记录已持久化后启动执行（队列 or 进程内 goroutine）。
-func (s *Service) dispatchExecute(runID uuid.UUID, kind string, queued bool, chatSessionID, chatUserMessageID *uuid.UUID) {
-	if queued {
-		logging.Agent("run: 等待执行中...",
-			"run_id", runID, "kind", kind,
-			"chat_session_id", chatSessionID,
-			"chat_user_message_id", chatUserMessageID,
-		)
-		return
-	}
+// dispatchExecute 在 Run 记录已持久化后立即执行。
+func (s *Service) dispatchExecute(runID uuid.UUID, kind *Kind) {
 	execCtx := s.runCtx()
-	logging.Agent("run: 进程内执行", "run_id", runID, "kind", kind)
+	logging.Agent("run: 开始执行", "run_id", runID, "kind", kind)
 	go func() { _ = s.ExecuteRun(execCtx, runID) }()
 }
 
@@ -348,7 +249,7 @@ func (s *Service) CancelForProject(ctx context.Context, projectID, runID uuid.UU
 func (s *Service) cancelRunModel(ctx context.Context, m *models.Run) error {
 	_ = s.runtime.Cancel(m.ID.String())
 	fin := time.Now()
-	if err := s.db.WithContext(ctx).Model(m).Updates(map[string]any{"status": "cancelled", "finished_at": fin}).Error; err != nil {
+	if err := s.stores.Run.Cancel(ctx, m.ID, fin); err != nil {
 		return err
 	}
 	return s.finishRunView(ctx, m.ID, "cancelled", "", "任务已取消")
@@ -462,44 +363,33 @@ func (s *Service) CreateChatSession(ctx context.Context, projectID, userID uuid.
 	if strings.TrimSpace(title) == "" {
 		title = "新对话"
 	}
-	m := models.ChatSession{
-		ID: id, ProjectID: projectID, Title: title,
-		ModelID: modelID, CreatedBy: userID,
-	}
-	if err := s.db.WithContext(ctx).Create(&m).Error; err != nil {
+	row, err := s.stores.Chat.CreateSession(ctx, repo.CreateSessionParams{
+		ID: id, ProjectID: projectID, Title: title, ModelID: modelID, CreatedBy: userID,
+	})
+	if err != nil {
 		return nil, err
 	}
-	dto := chatSessionSummaryFromRow(&m)
-	return &dto, nil
+	return new(chatSessionSummaryFromRow(row)), nil
 }
 
 // UpdateChatSession 更新会话元数据。
 func (s *Service) UpdateChatSession(ctx context.Context, projectID, sessionID uuid.UUID, title, modelID string) (*ChatSessionSummaryDTO, error) {
-	var row models.ChatSession
-	if err := s.db.WithContext(ctx).Where("id = ? AND project_id = ?", sessionID, projectID).First(&row).Error; err != nil {
+	if _, err := s.stores.Chat.GetSessionByProject(ctx, projectID, sessionID); err != nil {
 		return nil, errors.New("会话不存在")
 	}
-	updates := map[string]any{"updated_at": time.Now()}
-	if strings.TrimSpace(title) != "" {
-		updates["title"] = strings.TrimSpace(title)
-	}
-	if strings.TrimSpace(modelID) != "" {
-		updates["model_id"] = strings.TrimSpace(modelID)
-	}
-	if err := s.db.WithContext(ctx).Model(&row).Updates(updates).Error; err != nil {
+	titleTrim := strings.TrimSpace(title)
+	modelTrim := strings.TrimSpace(modelID)
+	row, err := s.stores.Chat.UpdateSession(ctx, sessionID, titleTrim, modelTrim)
+	if err != nil {
 		return nil, err
 	}
-	if err := s.db.WithContext(ctx).First(&row, "id = ?", sessionID).Error; err != nil {
-		return nil, err
-	}
-	dto := chatSessionSummaryFromRow(&row)
-	return &dto, nil
+	return new(chatSessionSummaryFromRow(row)), nil
 }
 
 // ListChatSessions 返回项目 Chat 会话列表（仅元数据）。
 func (s *Service) ListChatSessions(ctx context.Context, projectID uuid.UUID) ([]ChatSessionSummaryDTO, error) {
-	var rows []models.ChatSession
-	if err := s.db.WithContext(ctx).Where("project_id = ?", projectID).Order("updated_at desc").Find(&rows).Error; err != nil {
+	rows, err := s.stores.Chat.ListSessionsByProject(ctx, projectID)
+	if err != nil {
 		return nil, err
 	}
 	out := make([]ChatSessionSummaryDTO, len(rows))
@@ -511,11 +401,11 @@ func (s *Service) ListChatSessions(ctx context.Context, projectID uuid.UUID) ([]
 
 // GetChatSession 返回单个 Chat 会话（含消息树）。
 func (s *Service) GetChatSession(ctx context.Context, projectID, sessionID uuid.UUID) (*ChatSessionDTO, error) {
-	var row models.ChatSession
-	if err := s.db.WithContext(ctx).Where("id = ? AND project_id = ?", sessionID, projectID).First(&row).Error; err != nil {
+	row, err := s.stores.Chat.GetSessionByProject(ctx, projectID, sessionID)
+	if err != nil {
 		return nil, err
 	}
-	dto, err := chatSessionDetailFromRow(ctx, s, &row)
+	dto, err := chatSessionDetailFromRow(ctx, s, row)
 	if err != nil {
 		return nil, err
 	}
@@ -524,23 +414,7 @@ func (s *Service) GetChatSession(ctx context.Context, projectID, sessionID uuid.
 
 // DeleteChatSession 删除指定 Chat 会话及其消息。
 func (s *Service) DeleteChatSession(ctx context.Context, projectID, sessionID uuid.UUID) error {
-	var row models.ChatSession
-	if err := s.db.WithContext(ctx).Where("id = ? AND project_id = ?", sessionID, projectID).First(&row).Error; err != nil {
-		return errors.New("会话不存在")
-	}
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("session_id = ?", sessionID).Delete(&models.ChatMessage{}).Error; err != nil {
-			return err
-		}
-		res := tx.Delete(&row)
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return errors.New("会话不存在")
-		}
-		return nil
-	})
+	return s.stores.Chat.DeleteSession(ctx, projectID, sessionID)
 }
 
 // toRunDTO 将 Run 模型转换为 API DTO。
@@ -551,8 +425,8 @@ func toRunDTO(m *models.Run) RunDTO {
 	}
 	return RunDTO{
 		ID: m.ID, ProjectID: m.ProjectID, RepositoryID: m.RepositoryID,
-		Kind: m.Kind, Status: m.Status, Title: m.Title,
-		FilePath: m.FilePath, EvalFilePath: m.EvalFilePath,
+		Kind: Kind(m.Kind), Status: m.Status, Title: m.Title,
+		FilePath:     m.FilePath,
 		AuditPath:    m.AuditPath,
 		SandboxPath:  m.SandboxPath,
 		ErrorMessage: errMsg, Output: m.Output, StartedAt: m.StartedAt,

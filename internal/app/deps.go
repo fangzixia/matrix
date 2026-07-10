@@ -2,16 +2,12 @@
 package app
 
 import (
-	"context"
 	"log/slog"
-	"matrix/internal/app/worker"
 	"matrix/internal/modules/artifact"
 	"matrix/internal/modules/group"
 	"matrix/internal/modules/iam"
 	"matrix/internal/modules/identity"
-	"matrix/internal/modules/job"
 	"matrix/internal/modules/notification"
-	"matrix/internal/modules/pipeline"
 	"matrix/internal/modules/plan"
 	"matrix/internal/modules/project"
 	"matrix/internal/modules/repository"
@@ -19,6 +15,7 @@ import (
 	"matrix/internal/modules/settings"
 	"matrix/internal/modules/workspace"
 	"matrix/internal/platform/config"
+	"matrix/internal/platform/db/repo"
 	"matrix/internal/platform/events"
 	"matrix/internal/platform/storage"
 
@@ -44,8 +41,6 @@ type Deps struct {
 	Workspace      *workspace.Service             // 工作区（Run 级仓库与文档）
 	WorkspaceRepo  *workspace.ProjectRepoResolver // Run 沙箱解析
 	RunService     *run.Service                   // AI Run/Chat
-	Jobs           *job.Service                   // 任务队列
-	Pipeline       *pipeline.Service              // 流水线阶段
 	Notifications  *notification.Service          // 通知
 	Plans          *plan.Service                  // 计划文档
 	Artifacts      *artifact.Service              // 评测产物
@@ -53,42 +48,38 @@ type Deps struct {
 	SystemSettings *settings.Service              // 系统级配置（DB）
 }
 
-// NewDeps 组装应用依赖图（数据库、IAM、Run 队列、通知等）。
+// NewDeps 组装应用依赖图（数据库、IAM、Run、通知等）。
 // runtime 须已在 SystemSettings.Bootstrap 中从数据库加载。
 func NewDeps(cfg *config.Config, runtime *config.RuntimeConfig, paths storage.Paths, db *gorm.DB, log *slog.Logger, sysSettings *settings.Service) *Deps {
+	stores := repo.New(db)
 	hub := events.NewHub()
-	users := identity.NewUserRepo(db)
-	sessions := identity.NewSessionService(db, cfg.Auth.Session)
+	users := identity.NewUserRepo(stores)
+	sessions := identity.NewSessionService(stores, cfg.Auth.Session)
 	auth := identity.NewAuthService(users, sessions)
-	projects := project.NewService(db)
-	repos := repository.NewService(db)
-	groups := group.NewService(db)
-	ws := workspace.NewService(paths, runtime.Git, repos)
+	projects := project.NewService(stores)
+	gitRepos := repository.NewService(stores)
+	groups := group.NewService(stores)
+	ws := workspace.NewService(paths, runtime.Git, gitRepos)
 	ws.SetProjectKeyResolver(projects)
-	resolver := &workspace.ProjectRepoResolver{Projects: projects, Repos: repos, WS: ws}
+	resolver := &workspace.ProjectRepoResolver{Projects: projects, Repos: gitRepos, WS: ws}
 	rt := run.NewRuntime(runtime)
-	pipe := pipeline.NewService(runtime.Pipeline)
 	sysSettings.SetHooks(settings.Hooks{
-		OnGitUpdate:      ws.UpdateGit,
-		OnPipelineUpdate: pipe.UpdateConfig,
+		OnGitUpdate: ws.UpdateGit,
 	})
-	jobs := job.NewService(db, runtime.Worker.MaxAttempts)
-	notifications := notification.NewService(db, hub)
-	plans := plan.NewService(db, ws)
-	artifactsSvc := artifact.NewService(db, ws)
-	runs := run.NewService(db, rt, hub, paths, runtime, resolver)
-	runs.SetJobEnqueuer(jobs)
+	notifications := notification.NewService(stores, hub)
+	plans := plan.NewService(stores, ws)
+	artifactsSvc := artifact.NewService(stores, ws)
+	runs := run.NewService(stores, rt, hub, paths, runtime, resolver)
 	runs.SetNotifier(notifications)
-	runs.SetPipeline(pipe)
 	runs.SetPlans(plans)
 	runs.SetArtifacts(artifactsSvc)
 	runs.SetAIRuntimeReloader(sysSettings)
 	return &Deps{
 		Config: cfg, Runtime: runtime, Paths: paths, DB: db, Log: log, Hub: hub,
 		Auth: auth, Users: users, Sessions: sessions,
-		IAM: iam.NewEnforcer(db), Members: iam.NewMemberService(db),
-		Projects: projects, Repositories: repos, Groups: groups,
-		Workspace: ws, WorkspaceRepo: resolver, RunService: runs, Jobs: jobs, Pipeline: pipe, Notifications: notifications,
+		IAM: iam.NewEnforcer(stores.IAM), Members: iam.NewMemberService(stores.IAM),
+		Projects: projects, Repositories: gitRepos, Groups: groups,
+		Workspace: ws, WorkspaceRepo: resolver, RunService: runs, Notifications: notifications,
 		Plans: plans, Artifacts: artifactsSvc,
 		RunRuntime: rt, SystemSettings: sysSettings,
 	}
@@ -99,18 +90,4 @@ func (d *Deps) Close() {
 	if d.RunRuntime != nil {
 		d.RunRuntime.Close()
 	}
-}
-
-// StartJobWorker 在 Web 进程内启动嵌入式任务消费者（与 HTTP 服务同进程）。
-func (d *Deps) StartJobWorker(ctx context.Context) {
-	if d.Jobs == nil || d.RunService == nil || !d.Runtime.Worker.Enabled {
-		return
-	}
-	wid := worker.ID()
-	d.Log.Info("嵌入式任务 Worker 启动中",
-		"worker_id", wid,
-		"concurrency", d.Runtime.Worker.Concurrency,
-		"poll_interval", d.Runtime.Worker.PollInterval,
-	)
-	go d.Jobs.RunWorker(ctx, wid, d.Runtime.Worker.PollInterval, d.Runtime.Worker.Concurrency, d.RunService)
 }

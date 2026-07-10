@@ -16,9 +16,8 @@ func (s *Service) buildChatRunMessages(ctx context.Context, m *models.Run) ([]qu
 	if m.ChatSessionID == nil || m.ChatUserMessageID == nil {
 		return nil, errors.New("chat run 缺少 session 关联")
 	}
-	var userRow models.ChatMessage
-	if err := s.db.WithContext(ctx).First(&userRow, "id = ? AND session_id = ?",
-		*m.ChatUserMessageID, *m.ChatSessionID).Error; err != nil {
+	userRow, err := s.stores.Chat.GetUserMessage(ctx, *m.ChatSessionID, *m.ChatUserMessageID)
+	if err != nil {
 		return nil, fmt.Errorf("未找到用户消息: %w", err)
 	}
 	parentID := ""

@@ -1,4 +1,4 @@
-/** 子 Agent / Run 活动进度文案（方案 B：活动导向） */
+/** Worker / Run 活动进度文案 */
 
 import type { ToolView, TurnView } from "@/types/runView";
 
@@ -17,7 +17,6 @@ export function formatAgentProgress(
   status?: string,
 ): string {
   if (!progress) return "";
-  const turn = typeof progress.turn === "number" ? progress.turn : 0;
   const currentTool =
     typeof progress.current_tool === "string" ? progress.current_tool : "";
   const lastActivity =
@@ -42,31 +41,30 @@ export function formatAgentProgress(
 
   if (
     transition === "stop_hook_blocking" &&
-    turn > 0 &&
     !currentTool
   ) {
-    return `第 ${turn} 轮 · 校验未通过，正在重试…`;
+    return "校验未通过，正在重试…";
   }
 
   if (toolUseCount > 0 && !currentTool) {
-    if (turn <= 1) return `已调用 ${toolUseCount} 个工具`;
-    return `第 ${turn} 轮 · 已调用 ${toolUseCount} 个工具`;
+    return `已调用 ${toolUseCount} 个工具`;
   }
 
   if (lastActivity) return lastActivity;
 
-  if (turn <= 1) return "思考中…";
-  if (turn > 0) return `第 ${turn} 轮 · 思考中…`;
-  return "";
+  return "思考中…";
 }
 
-const GENERIC_TURN_SUMMARY = /^第 \d+ 轮$/;
+const GENERIC_TURN_SUMMARY = /^第 \d+ 轮( · .+)?$/;
+const GENERIC_ACTIVITY_LABELS = new Set(["思考中…", "等待 Worker 完成…"]);
 
 /** 识别无意义的占位 summary。 */
 export function isGenericTurnSummary(summary?: string): boolean {
-  if (!summary?.trim()) return true;
-  if (summary.includes("跃迁:")) return true;
-  return GENERIC_TURN_SUMMARY.test(summary.trim());
+  const s = summary?.trim();
+  if (!s) return true;
+  if (s.includes("跃迁:")) return true;
+  if (GENERIC_ACTIVITY_LABELS.has(s)) return true;
+  return GENERIC_TURN_SUMMARY.test(s);
 }
 
 function firstLine(text: string): string {
@@ -125,6 +123,9 @@ function intentFromLiveOutput(liveOutput: string): string {
   if (line.startsWith("子 Agent:") || line.startsWith("子 Agent：")) {
     return line.replace(/^子 Agent[:：]\s*/, "").trim();
   }
+  if (line.startsWith("Worker:") || line.startsWith("Worker：")) {
+    return line.replace(/^Worker[:：]\s*/, "").trim();
+  }
   if (
     line.startsWith("$ ") ||
     line.startsWith("PS> ") ||
@@ -156,6 +157,10 @@ function intentFromPartialJSON(name: string, preview: string): string {
     const val = m[1];
     switch (key) {
       case "description":
+        if (name === "agent") {
+          return `委派 Worker「${truncateRunes(val, 60)}」`;
+        }
+        return truncateRunes(val, 80);
       case "query":
       case "prompt":
         return truncateRunes(val, 80);
@@ -179,7 +184,12 @@ function intentFromPreview(name: string, preview: string): string {
   try {
     const args = JSON.parse(preview) as Record<string, unknown>;
     const desc = stringArg(args, "description");
-    if (desc) return truncateRunes(desc, 80);
+    if (desc) {
+      if (name === "agent") {
+        return `委派 Worker「${truncateRunes(desc, 60)}」`;
+      }
+      return truncateRunes(desc, 80);
+    }
 
     const path = [stringArg(args, "target_path"), stringArg(args, "path"), stringArg(args, "file_path")].find(Boolean);
     if (
@@ -238,16 +248,13 @@ export function deriveTurnTitle(turn: TurnView): string {
   }
   const messageLine = firstLine(turn.message ?? "");
   if (messageLine) return truncateRunes(messageLine, 80);
-  if ((turn.thinking ?? "").trim()) return "思考中…";
-  if (turn.turn > 0) return `第 ${turn.turn} 轮`;
-  return "进行中";
+  return "思考中…";
 }
 
 /** @deprecated 请使用 deriveTurnTitle(turn) */
-export function formatTurnLabel(turn: number, summary?: string): string {
+export function formatTurnLabel(_turn: number, summary?: string): string {
   if (summary && !isGenericTurnSummary(summary)) {
     return summary;
   }
-  if (turn > 0) return `第 ${turn} 轮`;
-  return "进行中";
+  return "思考中…";
 }

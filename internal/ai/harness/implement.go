@@ -1,7 +1,9 @@
 package harness
 
 const implementPreset = `【编码实现】
-根据计划文档在工作区内完成实现与必要自测，满足全部验收标准。若存在与计划对应的评测报告，请参考其中未通过项与修复建议。`
+根据计划文档在工作区内完成实现与必要自测。以计划文档「附录：技术验收标准」为实现与自测依据（若计划无附录章节，则使用「验收标准」章节）；正文为用户向说明，供理解背景与范围。若存在与计划对应的评测报告，请参考其中未通过项与修复建议。
+
+implement 面向附录 AC 完成开发与开发者自测（单测/构建）；verify 将以系统用户身份独立做黑盒验收，impl 自测不能替代 verify。`
 
 // NewImplementWorkflow 创建「编码实现」流水线工作流。
 func NewImplementWorkflow(userInput, planPath, evalPath string) Workflow {
@@ -19,7 +21,7 @@ func NewImplementWorkflow(userInput, planPath, evalPath string) Workflow {
 			"必要的测试或验证输出",
 		},
 		Acceptance: []string{
-			"逐条满足计划验收标准",
+			"逐条满足计划附录（或验收标准）中的 AC",
 			"相关测试或构建命令已执行并报告结果",
 		},
 		Recovery: []string{

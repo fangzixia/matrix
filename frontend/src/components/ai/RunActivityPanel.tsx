@@ -106,7 +106,7 @@ function workerTurnsToChainItems(
 ): ThoughtChainItemType[] {
   return turns.map((wt) => ({
     key: wt.key,
-    title: deriveTurnTitle(wt) || `子 Agent ${wt.turn}`,
+    title: deriveTurnTitle(wt) || "Worker",
     icon: <RobotOutlined />,
     status: workerTurnStatus(wt),
     blink: running && workerTurnStatus(wt) === "loading",
@@ -241,7 +241,7 @@ function toolToChainItem(
   } else if (isAgentTool && tool.status === "loading" && !hasWorkers) {
     itemContent = (
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-        子 Agent 启动中…
+        Worker 启动中…
       </Typography.Text>
     );
   }
@@ -326,7 +326,7 @@ function turnHeader(turn: TurnView) {
   return (
     <Space size="small">
       <Tag color={turn.scope === "worker" ? "purple" : "blue"}>
-        {turn.scope === "worker" ? "子 Agent" : "主 Agent"}
+        {turn.scope === "worker" ? "Worker" : "协调者"}
       </Tag>
       <span>{deriveTurnTitle(turn)}</span>
     </Space>
@@ -389,7 +389,7 @@ export default function RunActivityPanel({
     () =>
       subagentList.map((snap) => ({
         key: snap.id,
-        title: snap.description || `子 Agent ${snap.id.slice(0, 8)}`,
+        title: snap.description || `Worker ${snap.id.slice(0, 8)}`,
         icon: <RobotOutlined />,
         status:
           snap.status === "running"

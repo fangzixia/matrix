@@ -28,7 +28,7 @@ import {
   stageTitles,
 } from "@/locales/zh-CN";
 
-import { isStageKind, stageKindFromPath } from "@/utils/stage";
+import { isStageKind, requiresApprovedPlan, requiresPlanFile, RunKind, stageKindFromPath } from "@/utils/stage";
 import DocFileSelect, {
   type DocFileOption,
 } from "@/components/docs/DocFileSelect";
@@ -39,18 +39,18 @@ import PlanConfirmDrawer from "@/components/docs/PlanConfirmDrawer";
 const PLAN_PROMPTS: ChatPromptItem[] = [
   {
     key: "write",
-    label: "基于代码库编写实现计划",
-    description: "调研源码并输出含验收标准的计划文档",
+    label: "帮我整理一份产品计划",
+    description: "说明要做什么、谁能用、怎么验收",
   },
   {
     key: "acceptance",
-    label: "补充验收标准与风险项",
-    description: "完善计划中的范围、风险与澄清项",
+    label: "补充验收场景与风险项",
+    description: "完善计划中的范围、风险与待确认项",
   },
   {
     key: "review",
     label: "审查现有计划文档",
-    description: "检查计划完整性、一致性与可执行性",
+    description: "检查计划是否清晰、完整、易于理解",
   },
 ];
 
@@ -193,11 +193,7 @@ export default function StagePage() {
   const fetchRuns = useRunStore((s) => s.fetchRuns);
   const [message, setMessage] = useState("");
   const [filePath, setFilePath] = useState("");
-  const [evalPath, setEvalPath] = useState("");
   const [plans, setPlans] = useState<projectsApi.PlanItem[]>([]);
-  const [evaluations, setEvaluations] = useState<projectsApi.EvaluationItem[]>(
-    [],
-  );
   const [docsError, setDocsError] = useState("");
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState("");
@@ -226,18 +222,6 @@ export default function StagePage() {
       );
   }, [id]);
 
-  useEffect(() => {
-    if (kind !== "build") return;
-    projectsApi
-      .listEvaluations(id)
-      .then((res) => {
-        setEvaluations(res.evaluations ?? []);
-      })
-      .catch((e) =>
-        setDocsError(e instanceof Error ? e.message : "评测报告加载失败"),
-      );
-  }, [id, kind]);
-
   const kindHint = harnessKindHints[kind];
   const title = stageTitles[kind] || kind;
   const planOptions: DocFileOption[] = useMemo(
@@ -249,16 +233,6 @@ export default function StagePage() {
         content: r.content,
       })),
     [plans],
-  );
-  const evalOptions: DocFileOption[] = useMemo(
-    () =>
-      evaluations.map((r) => ({
-        value: r.path,
-        label: r.title || r.path,
-        path: r.path,
-        content: r.content,
-      })),
-    [evaluations],
   );
   const stageTasks = useMemo(
     () => runs.filter((r) => r.kind === kind),
@@ -280,14 +254,11 @@ export default function StagePage() {
 
   async function startTask() {
     setStartError("");
-    if (
-      (kind === "implement" || kind === "verify" || kind === "build") &&
-      !filePath
-    ) {
+    if (requiresPlanFile(kind) && !filePath) {
       setStartError("请选择计划文件");
       return;
     }
-    if (requiresApprovedPlan && filePath) {
+    if (requiresApprovedPlan(kind) && filePath) {
       const selected = plans.find((p) => p.path === filePath);
       if (selected && selected.status !== "approved") {
         setStartError("计划尚未批准，请先在编写计划页确认计划");
@@ -297,15 +268,8 @@ export default function StagePage() {
     setStarting(true);
     try {
       const taskMessage = message || `${runKindLabels[kind]}任务`;
-      const run = await runsApi.startRun(
-        id,
-        taskMessage,
-        kind,
-        filePath,
-        kind === "build" ? evalPath : "",
-      );
+      const run = await runsApi.startRun(id, taskMessage, kind, filePath);
       setMessage("");
-      setEvalPath("");
       navigate(`/projects/${id}/${kind}/${run.id}`);
     } catch (e) {
       setStartError(e instanceof Error ? e.message : "启动失败");
@@ -314,10 +278,7 @@ export default function StagePage() {
     }
   }
 
-  const needsPlanFile =
-    kind === "implement" || kind === "verify" || kind === "build";
-  const requiresApprovedPlan =
-    kind === "implement" || kind === "verify" || kind === "build";
+  const needsPlanFile = requiresPlanFile(kind);
 
   const refreshPlanData = useCallback(() => {
     fetchRuns(id, "plan");
@@ -334,7 +295,7 @@ export default function StagePage() {
     [plans, filePath],
   );
 
-  if (kind === "plan") {
+  if (kind === RunKind.Plan) {
     return (
       <>
         {docsError && (
@@ -469,21 +430,6 @@ export default function StagePage() {
                 placeholder="计划文件路径（必填）"
               />
             ))}
-          {kind === "build" && evalOptions.length > 0 && (
-            <Space.Compact style={{ width: "100%" }}>
-              <DocFileSelect
-                options={evalOptions}
-                value={evalPath}
-                onChange={setEvalPath}
-                placeholder="选择基准评测报告（可选）"
-              />
-              {evalPath && (
-                <Button onClick={() => openPreview(evalPath, evaluations)}>
-                  预览
-                </Button>
-              )}
-            </Space.Compact>
-          )}
           <Button type="primary" loading={starting} onClick={startTask}>
             启动
           </Button>

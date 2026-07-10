@@ -10,8 +10,6 @@ func defaultSettings() Settings {
 		Security:   defaultSecuritySettings(),
 		MCPServers: map[string]MCPServerSettings{},
 		Git:        defaultGitSettings(),
-		Worker:     defaultWorkerSettings(),
-		Pipeline:   defaultPipelineSettings(),
 	}
 }
 
@@ -28,20 +26,4 @@ func defaultSecuritySettings() SecuritySettings {
 
 func defaultGitSettings() GitSettings {
 	return GitSettings{CloneTimeout: (300 * time.Second).String()}
-}
-
-func defaultWorkerSettings() WorkerSettings {
-	return WorkerSettings{
-		Enabled:      true,
-		PollInterval: (2 * time.Second).String(),
-		MaxAttempts:  3,
-		Concurrency:  2,
-	}
-}
-
-func defaultPipelineSettings() PipelineSettings {
-	return PipelineSettings{
-		DefaultStages:   []string{"plan", "build"},
-		PullBeforeStage: true,
-	}
 }

@@ -4,11 +4,10 @@ package iam
 import (
 	"context"
 	"errors"
-	"matrix/internal/platform/db/models"
+	"matrix/internal/platform/db/repo"
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 // Role 是项目成员角色。
@@ -47,12 +46,12 @@ func ValidateRole(role Role) error {
 
 // Enforcer 校验用户对项目的有效角色与访问权限。
 type Enforcer struct {
-	db *gorm.DB
+	iam *repo.IAMStore
 }
 
 // NewEnforcer 创建 Enforcer。
-func NewEnforcer(db *gorm.DB) *Enforcer {
-	return &Enforcer{db: db}
+func NewEnforcer(iam *repo.IAMStore) *Enforcer {
+	return &Enforcer{iam: iam}
 }
 
 // EffectiveRole 计算用户在项目中的有效角色。
@@ -82,17 +81,16 @@ func (e *Enforcer) EffectiveRole(ctx context.Context, userID, projectID uuid.UUI
 
 // GroupInheritedRole 返回用户通过组继承的项目角色。
 func (e *Enforcer) GroupInheritedRole(ctx context.Context, userID, projectID uuid.UUID) (Role, bool, error) {
-	var p models.Project
-	if err := e.db.WithContext(ctx).Select("group_id", "owner_id").First(&p, "id = ?", projectID).Error; err != nil {
+	groupID, ownerID, err := e.iam.GetProjectGroupAndOwner(ctx, projectID)
+	if err != nil {
 		return "", false, err
 	}
-	if p.GroupID == nil {
+	if groupID == nil {
 		return "", false, nil
 	}
-	var m models.GroupMember
-	err := e.db.WithContext(ctx).Where("group_id = ? AND user_id = ?", *p.GroupID, userID).First(&m).Error
-	if err == gorm.ErrRecordNotFound {
-		if p.OwnerID == userID {
+	m, err := e.iam.GetGroupMember(ctx, *groupID, userID)
+	if e.iam.MemberNotFound(err) {
+		if ownerID == userID {
 			return RoleOwner, true, nil
 		}
 		return "", false, nil
@@ -105,11 +103,10 @@ func (e *Enforcer) GroupInheritedRole(ctx context.Context, userID, projectID uui
 
 // GroupRole 返回用户在指定组中的角色。
 func (e *Enforcer) GroupRole(ctx context.Context, userID, groupID uuid.UUID) (Role, bool, error) {
-	var m models.GroupMember
-	err := e.db.WithContext(ctx).Where("group_id = ? AND user_id = ?", groupID, userID).First(&m).Error
-	if err == gorm.ErrRecordNotFound {
-		var g models.Group
-		if err2 := e.db.WithContext(ctx).First(&g, "id = ?", groupID).Error; err2 == nil && g.OwnerID == userID {
+	m, err := e.iam.GetGroupMember(ctx, groupID, userID)
+	if e.iam.MemberNotFound(err) {
+		g, err2 := e.iam.GetGroup(ctx, groupID)
+		if err2 == nil && g.OwnerID == userID {
 			return RoleOwner, true, nil
 		}
 		return "", false, nil
@@ -134,14 +131,7 @@ func (e *Enforcer) CanAccessGroup(ctx context.Context, userID, groupID uuid.UUID
 
 // ProjectVisibility 返回项目的可见性设置。
 func (e *Enforcer) ProjectVisibility(ctx context.Context, projectID uuid.UUID) (string, error) {
-	var p models.Project
-	if err := e.db.WithContext(ctx).Select("visibility").First(&p, "id = ?", projectID).Error; err != nil {
-		return "", err
-	}
-	if p.Visibility == "" {
-		return "private", nil
-	}
-	return p.Visibility, nil
+	return e.iam.GetProjectVisibility(ctx, projectID)
 }
 
 // CanAccess 校验用户是否满足项目最低角色要求（含组继承的有效角色）。
@@ -168,11 +158,10 @@ func (e *Enforcer) CanAccess(ctx context.Context, userID, projectID uuid.UUID, m
 
 // ProjectRole 返回用户在项目中的直接成员角色。
 func (e *Enforcer) ProjectRole(ctx context.Context, userID, projectID uuid.UUID) (Role, bool, error) {
-	var m models.ProjectMember
-	err := e.db.WithContext(ctx).Where("project_id = ? AND user_id = ?", projectID, userID).First(&m).Error
-	if err == gorm.ErrRecordNotFound {
-		var p models.Project
-		if err2 := e.db.WithContext(ctx).First(&p, "id = ?", projectID).Error; err2 == nil && p.OwnerID == userID {
+	m, err := e.iam.GetProjectMember(ctx, projectID, userID)
+	if e.iam.MemberNotFound(err) {
+		p, err2 := e.iam.GetProject(ctx, projectID)
+		if err2 == nil && p.OwnerID == userID {
 			return RoleOwner, true, nil
 		}
 		return "", false, nil
@@ -192,11 +181,11 @@ func (e *Enforcer) CanProject(ctx context.Context, userID, projectID uuid.UUID, 
 func (e *Enforcer) Can(ctx context.Context, userID uuid.UUID, action, resourceType string, resourceID string) (bool, error) {
 	switch resourceType {
 	case "admin":
-		var u models.User
-		if err := e.db.WithContext(ctx).First(&u, "id = ?", userID).Error; err != nil {
+		isAdmin, err := e.iam.IsAdmin(ctx, userID)
+		if err != nil {
 			return false, err
 		}
-		return u.IsAdmin, nil
+		return isAdmin, nil
 	case "project":
 		pid, err := uuid.Parse(resourceID)
 		if err != nil {
@@ -229,12 +218,12 @@ func roleForAction(action string) Role {
 
 // MemberService 管理项目成员的增删改查。
 type MemberService struct {
-	db *gorm.DB
+	iam *repo.IAMStore
 }
 
 // NewMemberService 创建 MemberService。
-func NewMemberService(db *gorm.DB) *MemberService {
-	return &MemberService{db: db}
+func NewMemberService(iam *repo.IAMStore) *MemberService {
+	return &MemberService{iam: iam}
 }
 
 // MemberDTO 是项目成员列表项。
@@ -249,14 +238,14 @@ type MemberDTO struct {
 
 // List 返回列表。
 func (s *MemberService) List(ctx context.Context, projectID uuid.UUID) ([]MemberDTO, error) {
-	var rows []models.ProjectMember
-	if err := s.db.WithContext(ctx).Where("project_id = ?", projectID).Find(&rows).Error; err != nil {
+	rows, err := s.iam.ListProjectMembers(ctx, projectID)
+	if err != nil {
 		return nil, err
 	}
 	out := make([]MemberDTO, 0, len(rows))
 	for _, r := range rows {
-		var u models.User
-		if err := s.db.WithContext(ctx).First(&u, "id = ?", r.UserID).Error; err != nil {
+		u, err := s.iam.GetUser(ctx, r.UserID)
+		if err != nil {
 			continue
 		}
 		out = append(out, MemberDTO{
@@ -272,8 +261,7 @@ func (s *MemberService) Add(ctx context.Context, projectID, userID uuid.UUID, ro
 	if err := ValidateRole(role); err != nil {
 		return err
 	}
-	m := models.ProjectMember{ProjectID: projectID, UserID: userID, Role: string(role)}
-	return s.db.WithContext(ctx).Save(&m).Error
+	return s.iam.AddProjectMember(ctx, projectID, userID, string(role))
 }
 
 // UpdateRole 更新记录。
@@ -281,14 +269,10 @@ func (s *MemberService) UpdateRole(ctx context.Context, projectID, userID uuid.U
 	if err := ValidateRole(role); err != nil {
 		return err
 	}
-	return s.db.WithContext(ctx).Model(&models.ProjectMember{}).
-		Where("project_id = ? AND user_id = ?", projectID, userID).
-		Update("role", string(role)).Error
+	return s.iam.UpdateProjectMemberRole(ctx, projectID, userID, string(role))
 }
 
 // Remove 删除记录。
 func (s *MemberService) Remove(ctx context.Context, projectID, userID uuid.UUID) error {
-	return s.db.WithContext(ctx).
-		Where("project_id = ? AND user_id = ?", projectID, userID).
-		Delete(&models.ProjectMember{}).Error
+	return s.iam.RemoveProjectMember(ctx, projectID, userID)
 }

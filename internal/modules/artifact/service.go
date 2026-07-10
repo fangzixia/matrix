@@ -5,27 +5,26 @@ import (
 	"context"
 	"matrix/internal/modules/docmeta"
 	"matrix/internal/modules/workspace"
-	"matrix/internal/platform/db/models"
+	"matrix/internal/platform/db/repo"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 const evalPrefix = "EVAL-"
 
 // Service 管理评测与构建产物索引。
 type Service struct {
-	db *gorm.DB
-	ws *workspace.Service
+	stores *repo.Stores
+	ws     *workspace.Service
 }
 
 // NewService 创建产物服务实例。
-func NewService(db *gorm.DB, ws *workspace.Service) *Service {
-	return &Service{db: db, ws: ws}
+func NewService(stores *repo.Stores, ws *workspace.Service) *Service {
+	return &Service{stores: stores, ws: ws}
 }
 
 // Item 是产物列表项 API 返回的数据传输对象。
@@ -77,9 +76,7 @@ func (s *Service) ListEvaluations(ctx context.Context, projectID uuid.UUID, repo
 			collectFile(filepath.ToSlash(filepath.Join(workspace.DocsEvaluationsRel, name)), name)
 		}
 	}
-	var rows []models.Artifact
-	_ = s.db.WithContext(ctx).Where("project_id = ? AND kind = ?", projectID, "evaluation").
-		Order("created_at desc").Find(&rows).Error
+	rows, _ := s.stores.Artifact.ListEvaluations(ctx, projectID)
 	for _, r := range rows {
 		rel, err := workspace.SanitizeDocLogicalPath(r.Path)
 		if err != nil || rel == "" {
@@ -113,7 +110,7 @@ func (s *Service) ListEvaluations(ctx context.Context, projectID uuid.UUID, repo
 	return out, nil
 }
 
-// IndexAfterRun 在 verify/build 阶段成功后，将评测文件路径写入 DB 索引。
+// IndexAfterRun 在 verify 阶段成功后，将评测文件路径写入 DB 索引。
 func (s *Service) IndexAfterRun(ctx context.Context, projectID uuid.UUID, repositoryID *uuid.UUID, runID uuid.UUID, planPath, docsRoot string) error {
 	evalPath := findLatestEvalFile(docsRoot)
 	if evalPath == "" {
@@ -138,24 +135,10 @@ func (s *Service) upsert(ctx context.Context, projectID uuid.UUID, repositoryID 
 			title = docmeta.TitleOrFallback(title, string(b))
 		}
 	}
-	var existing models.Artifact
-	q := s.db.WithContext(ctx).Where("project_id = ? AND path = ?", projectID, evalPath)
-	err = q.First(&existing).Error
-	if err == nil {
-		existing.RunID = &runID
-		existing.PlanPath = planPath
-		existing.Title = title
-		if repositoryID != nil {
-			existing.RepositoryID = repositoryID
-		}
-		return s.db.WithContext(ctx).Save(&existing).Error
-	}
-	row := models.Artifact{
-		ProjectID: projectID, RepositoryID: repositoryID, RunID: &runID,
-		Kind: "evaluation", Path: evalPath, PlanPath: planPath, Title: title,
-		CreatedAt: time.Now(),
-	}
-	return s.db.WithContext(ctx).Create(&row).Error
+	return s.stores.Artifact.IndexAfterRun(ctx, repo.ArtifactIndexParams{
+		ProjectID: projectID, RepositoryID: repositoryID, RunID: runID,
+		Path: evalPath, PlanPath: planPath, Title: title,
+	})
 }
 
 // isEvalFileName 判断文件名是否为评测报告。

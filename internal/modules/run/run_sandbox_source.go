@@ -10,20 +10,27 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 // 可产出代码的沙箱来源 Run 类型（implement 多次执行时复用）。
-var codeSandboxKinds = []string{"implement", "pipeline", "build"}
+var codeSandboxKinds = []Kind{KindImplement, KindBuild}
 
 // verify 评测时仅复用最近一次成功的 implement Run。
-var verifySourceKinds = []string{"implement"}
+var verifySourceKinds = []Kind{KindImplement}
 
 type copyRepoOpts struct {
 	stage         string
-	sourceKinds   []string
+	sourceKinds   []Kind
 	requireSource bool
 	notFoundHint  string
+}
+
+func kindStrings(kinds []Kind) []string {
+	out := make([]string, len(kinds))
+	for i, k := range kinds {
+		out[i] = k.String()
+	}
+	return out
 }
 
 // copyRepo 从同 plan 指定来源 Run 复制 repo 到当前 Run，避免重新 git clone。
@@ -37,7 +44,7 @@ func (s *Service) copyRepo(
 		ctx, m.ProjectID, m.RepositoryID, m.FilePath, m.ID, opts.sourceKinds, opts.notFoundHint,
 	)
 	if err != nil {
-		if !opts.requireSource && isCodeSandboxNotFound(err) {
+		if !opts.requireSource && s.isCodeSandboxNotFound(err) {
 			return "", uuid.Nil, false, nil
 		}
 		return "", uuid.Nil, false, err
@@ -48,7 +55,7 @@ func (s *Service) copyRepo(
 	}
 	logging.Agent("run: "+opts.stage+" 从来源 Run 复制 repo",
 		"run_id", m.ID, "source_run_id", sourceRunID, "source_sandbox_path", sourcePath,
-		"sandbox_path", sandboxPath, "file_path", m.FilePath, "source_kinds", opts.sourceKinds,
+		"sandbox_path", sandboxPath, "file_path", m.FilePath, "source_kinds", kindStrings(opts.sourceKinds),
 	)
 	return sandboxPath, sourceRunID, true, nil
 }
@@ -60,7 +67,7 @@ func (s *Service) latestSandboxForPlan(
 	repositoryID *uuid.UUID,
 	planPath string,
 	excludeRunID uuid.UUID,
-	kinds []string,
+	kinds []Kind,
 	notFoundHint string,
 ) (sandboxPath string, sourceRunID uuid.UUID, err error) {
 	planPath = strings.TrimSpace(planPath)
@@ -73,19 +80,9 @@ func (s *Service) latestSandboxForPlan(
 	if notFoundHint == "" {
 		notFoundHint = "实现"
 	}
-	q := s.db.WithContext(ctx).Model(&models.Run{}).
-		Where("project_id = ?", projectID).
-		Where("file_path = ?", planPath).
-		Where("kind IN ?", kinds).
-		Where("status = ?", "succeeded").
-		Where("sandbox_path <> ''").
-		Where("id <> ?", excludeRunID)
-	if repositoryID != nil {
-		q = q.Where("repository_id = ?", *repositoryID)
-	}
-	var row models.Run
-	if err := q.Order("finished_at DESC NULLS LAST, created_at DESC").First(&row).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+	row, err := s.stores.Run.FindLatestSandboxForPlan(ctx, projectID, repositoryID, planPath, excludeRunID, kindStrings(kinds))
+	if err != nil {
+		if s.stores.Run.SandboxSourceNotFound(err) {
 			return "", uuid.Nil, fmt.Errorf("未找到计划 %s 的 %s Run，请先完成 %s", planPath, notFoundHint, notFoundHint)
 		}
 		return "", uuid.Nil, err
@@ -96,11 +93,11 @@ func (s *Service) latestSandboxForPlan(
 	return row.SandboxPath, row.ID, nil
 }
 
-func isCodeSandboxNotFound(err error) bool {
+func (s *Service) isCodeSandboxNotFound(err error) bool {
 	if err == nil {
 		return false
 	}
-	return errors.Is(err, gorm.ErrRecordNotFound) || strings.Contains(err.Error(), "未找到计划")
+	return s.stores.Run.SandboxSourceNotFound(err) || strings.Contains(err.Error(), "未找到计划")
 }
 
 func dirExists(path string) bool {

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Drawer, List, Space, Typography } from "antd";
 import type { PlanItem } from "@/api/projects";
 import * as projectsApi from "@/api/projects";
-import { confirmDisplayItems, parsePlanSections } from "@/utils/planParse";
+import { confirmDisplayGroups, parsePlanSections } from "@/utils/planParse";
 
 type Props = {
   projectId: string;
@@ -21,22 +21,11 @@ export default function PlanConfirmDrawer({
 }: Props) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const items = useMemo(
+  const groups = useMemo(
     () =>
-      plan?.content
-        ? confirmDisplayItems(parsePlanSections(plan.content))
-        : [],
+      plan?.content ? confirmDisplayGroups(parsePlanSections(plan.content)) : [],
     [plan?.content],
   );
-  const groupedItems = useMemo(() => {
-    const map = new Map<string, string[]>();
-    for (const item of items) {
-      const list = map.get(item.section) ?? [];
-      list.push(item.text);
-      map.set(item.section, list);
-    }
-    return map;
-  }, [items]);
   useEffect(() => {
     if (!open || !plan) return;
     setError("");
@@ -84,21 +73,24 @@ export default function PlanConfirmDrawer({
           style={{ marginBottom: 16 }}
         />
       )}
-      {items.length === 0 ? (
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 16 }}>
+        批准表示同意系统用户验收场景；附录中的技术验收标准供开发与自动验收使用。
+      </Typography.Paragraph>
+      {groups.length === 0 ? (
         <Typography.Paragraph type="secondary">
-          计划中无冲突或待澄清项，可直接批准。
+          计划正文结构完整，无额外待确认项，可直接批准。
         </Typography.Paragraph>
       ) : (
         <Space direction="vertical" size="middle" style={{ width: "100%" }}>
           <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-            批准前请知悉以下冲突与待澄清项：
+            批准前请知悉以下内容：
           </Typography.Paragraph>
-          {[...groupedItems.entries()].map(([section, texts]) => (
-            <div key={section}>
-              <Typography.Text strong>{section}</Typography.Text>
+          {groups.map((group) => (
+            <div key={group.section}>
+              <Typography.Text strong>{group.section}</Typography.Text>
               <List
                 size="small"
-                dataSource={texts}
+                dataSource={group.items}
                 renderItem={(text) => <List.Item>{text}</List.Item>}
                 style={{ marginTop: 4 }}
               />

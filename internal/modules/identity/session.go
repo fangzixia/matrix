@@ -8,27 +8,27 @@ import (
 	"errors"
 	"matrix/internal/platform/config"
 	"matrix/internal/platform/db/models"
+	"matrix/internal/platform/db/repo"
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 // SessionService 管理 Session Cookie 的创建与校验。
 type SessionService struct {
-	db  *gorm.DB
-	cfg config.SessionConfig
+	users *repo.UserStore
+	cfg   config.SessionConfig
 }
 
 // NewSessionService 创建 SessionService 并填充默认 Cookie 名与 TTL。
-func NewSessionService(db *gorm.DB, cfg config.SessionConfig) *SessionService {
+func NewSessionService(stores *repo.Stores, cfg config.SessionConfig) *SessionService {
 	if cfg.CookieName == "" {
 		cfg.CookieName = "_matrix_session"
 	}
 	if cfg.TTL <= 0 {
 		cfg.TTL = 720 * time.Hour
 	}
-	return &SessionService{db: db, cfg: cfg}
+	return &SessionService{users: stores.User, cfg: cfg}
 }
 
 // CookieName 返回 Session Cookie 名称。
@@ -55,7 +55,7 @@ func (s *SessionService) Create(ctx context.Context, userID uuid.UUID, ip, ua st
 		UserAgent: ua,
 		ExpiresAt: time.Now().Add(s.cfg.TTL),
 	}
-	if err := s.db.WithContext(ctx).Create(&sess).Error; err != nil {
+	if err := s.users.CreateSession(ctx, &sess); err != nil {
 		return "", err
 	}
 	return token, nil
@@ -64,18 +64,21 @@ func (s *SessionService) Create(ctx context.Context, userID uuid.UUID, ip, ua st
 // Validate 校验 Session 令牌并返回用户 ID。
 func (s *SessionService) Validate(ctx context.Context, token string) (*User, error) {
 	hash := hashToken(token)
-	var sess models.Session
-	if err := s.db.WithContext(ctx).Where("token_hash = ? AND expires_at > ?", hash, time.Now()).First(&sess).Error; err != nil {
+	sess, err := s.users.GetValidSession(ctx, hash, time.Now())
+	if err != nil {
 		return nil, errors.New("invalid session")
 	}
-	repo := NewUserRepo(s.db)
-	return repo.GetByID(ctx, sess.UserID)
+	m, err := s.users.GetByID(ctx, sess.UserID)
+	if err != nil {
+		return nil, errors.New("invalid session")
+	}
+	return toUser(m), nil
 }
 
 // Revoke 吊销指定 Session。
 func (s *SessionService) Revoke(ctx context.Context, token string) error {
 	hash := hashToken(token)
-	return s.db.WithContext(ctx).Where("token_hash = ?", hash).Delete(&models.Session{}).Error
+	return s.users.RevokeSession(ctx, hash)
 }
 
 // hashToken 对 Session token 做单向哈希。

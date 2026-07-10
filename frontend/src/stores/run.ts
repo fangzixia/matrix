@@ -3,11 +3,13 @@ import * as runsApi from "@/api/runs";
 import type { Run } from "@/api/runs";
 import { isStageKind } from "@/utils/stage";
 
+import type { RunKind, StageKind } from "@/types/runKind";
+
 interface RunState {
   runs: Run[];
   current: Run | null;
   loading: boolean;
-  fetchRuns: (projectId: string, kind?: string) => Promise<void>;
+  fetchRuns: (projectId: string, kind?: RunKind | StageKind) => Promise<void>;
   setCurrent: (run: Run | null) => void;
 }
 

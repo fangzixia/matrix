@@ -8,6 +8,7 @@ import (
 	"matrix/internal/modules/run"
 	"matrix/internal/modules/run/view"
 	"matrix/internal/platform/auth"
+	"matrix/internal/platform/db/repo"
 	platformhttp "matrix/internal/platform/http"
 	"matrix/internal/platform/logging"
 	"net/http"
@@ -16,7 +17,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 const sseEventRunView = "run:view"
@@ -46,27 +46,21 @@ func listRuns(c *gin.Context, d *app.Deps) {
 	c.JSON(200, gin.H{"runs": runs})
 }
 
-// startRun 启动Run。
+// startRun 启动Run(任务执行入口)。
 func startRun(c *gin.Context, d *app.Deps) {
 	u, _ := auth.User(c)
 	pid := auth.ProjectID(c)
-	var body struct {
-		Kind         string `json:"kind"`
-		Message      string `json:"message"`
-		FilePath     string `json:"file_path"`
-		EvalFilePath string `json:"eval_file_path"`
-	}
+	var body run.StartRunRequest
 	if !bindJSON(c, &body) {
 		return
 	}
-	if body.Kind == "" {
-		body.Kind = "task"
-	}
-	sync := c.Query("sync") == "1"
-	rn, err := d.RunService.Start(c.Request.Context(), pid, u.ID, run.StartInput{
-		Kind: body.Kind, Message: body.Message, FilePath: body.FilePath,
-		EvalFilePath: body.EvalFilePath, Title: body.Message, Sync: sync,
-	})
+	rn, err := d.RunService.Start(c.Request.Context(), pid, u.ID,
+		run.StartInput{
+			Kind:     body.Kind,
+			Message:  body.Message,
+			FilePath: body.FilePath,
+			Title:    body.Message,
+		})
 	if err != nil {
 		platformhttp.JSONError(c, 400, "bad_request", err.Error())
 		return
@@ -105,7 +99,7 @@ func streamRun(c *gin.Context, d *app.Deps) {
 		envs, done, maxSeq, err := d.RunService.StreamCatchUpSinceForProject(c.Request.Context(), pid, rid, mode, lastSeq)
 		if err != nil {
 			if first {
-				if err == gorm.ErrRecordNotFound {
+				if repo.IsNotFound(err) {
 					platformhttp.JSONError(c, 404, "not_found", "Run 不存在")
 				} else {
 					platformhttp.JSONError(c, 500, "internal", err.Error())
@@ -170,7 +164,7 @@ func getRunView(c *gin.Context, d *app.Deps) {
 	}
 	st, err := d.RunService.GetRunViewForProject(c.Request.Context(), pid, rid)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if repo.IsNotFound(err) {
 			platformhttp.JSONError(c, 404, "not_found", "Run 不存在")
 			return
 		}

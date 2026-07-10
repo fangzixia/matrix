@@ -12,14 +12,19 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
+
+// ViewPersistence 持久化 Run 视图快照。
+type ViewPersistence interface {
+	SaveView(ctx context.Context, row *models.RunView) error
+	LoadView(ctx context.Context, runID uuid.UUID) (*models.RunView, error)
+}
 
 // Store 管理 Run 视图投影与 DB 持久化；SSE 只读 DB，不经内存推送。
 type Store struct {
-	db   *gorm.DB
-	mu   sync.Mutex
-	runs map[string]*runSession
+	persistence ViewPersistence
+	mu          sync.Mutex
+	runs        map[string]*runSession
 }
 
 type runSession struct {
@@ -29,10 +34,10 @@ type runSession struct {
 }
 
 // NewStore 创建视图存储。
-func NewStore(db *gorm.DB) *Store {
+func NewStore(p ViewPersistence) *Store {
 	return &Store{
-		db:   db,
-		runs: make(map[string]*runSession),
+		persistence: p,
+		runs:        make(map[string]*runSession),
 	}
 }
 
@@ -84,7 +89,7 @@ func (s *Store) FinishRun(ctx context.Context, runID, status, output, errMsg str
 	logging.Agent("run-view: 视图已结束",
 		"run_id", runID, "status", status, "output_len", len(output),
 	)
-	if persistRow.RunID == uuid.Nil && s.db != nil {
+	if persistRow.RunID == uuid.Nil && s.persistence != nil {
 		st := NewRunViewState(runID)
 		st.Status = status
 		st.ReplyText = output
@@ -101,7 +106,7 @@ func (s *Store) FinishRun(ctx context.Context, runID, status, output, errMsg str
 		}
 	}
 	if persistRow.RunID != uuid.Nil {
-		if err := s.db.WithContext(ctx).Save(&persistRow).Error; err != nil {
+		if err := s.persistence.SaveView(ctx, &persistRow); err != nil {
 			logging.Agent("run-view: 持久化失败", "run_id", runID, "phase", "finish", "error", err.Error())
 			return err
 		}
@@ -168,15 +173,15 @@ func (s *Store) Snapshot(ctx context.Context, runID string) (*RunViewState, erro
 		return &st, nil
 	}
 	s.mu.Unlock()
-	if s.db == nil {
+	if s.persistence == nil {
 		return nil, nil
 	}
-	var row models.RunView
-	err := s.db.WithContext(ctx).First(&row, "run_id = ?", runID).Error
-	if err == gorm.ErrRecordNotFound {
-		return nil, nil
-	}
+	rid, err := uuid.Parse(runID)
 	if err != nil {
+		return nil, err
+	}
+	row, err := s.persistence.LoadView(ctx, rid)
+	if err != nil || row == nil {
 		return nil, err
 	}
 	var st RunViewState
@@ -226,7 +231,7 @@ func (s *Store) withSeq(runID string, env Envelope) Envelope {
 }
 
 func (s *Store) persistRowLocked(runID string, sess *runSession) models.RunView {
-	if sess == nil || sess.projector == nil || s.db == nil {
+	if sess == nil || sess.projector == nil || s.persistence == nil {
 		return models.RunView{}
 	}
 	st := sess.projector.State()
@@ -255,5 +260,5 @@ func (s *Store) saveRow(ctx context.Context, row models.RunView) error {
 	if row.RunID == uuid.Nil {
 		return nil
 	}
-	return s.db.WithContext(ctx).Save(&row).Error
+	return s.persistence.SaveView(ctx, &row)
 }

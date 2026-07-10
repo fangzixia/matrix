@@ -6,11 +6,11 @@ import (
 	"errors"
 	"matrix/internal/modules/iam"
 	"matrix/internal/platform/db/models"
+	"matrix/internal/platform/db/repo"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 // GroupDTO 是用户组 API 返回的数据传输对象。
@@ -41,26 +41,18 @@ type CreateInput struct {
 
 // Service 管理用户组成员与项目权限继承。
 type Service struct {
-	db *gorm.DB
+	stores *repo.Stores
 }
 
 // NewService 创建用户组服务实例。
-func NewService(db *gorm.DB) *Service {
-	return &Service{db: db}
+func NewService(stores *repo.Stores) *Service {
+	return &Service{stores: stores}
 }
 
 // ListForUser 返回当前用户可见的列表。
 func (s *Service) ListForUser(ctx context.Context, userID uuid.UUID, isAdmin bool) ([]GroupDTO, error) {
-	var rows []models.Group
-	q := s.db.WithContext(ctx).Model(&models.Group{})
-	if !isAdmin {
-		q = q.Where(
-			"owner_id = ? OR id IN (?)",
-			userID,
-			s.db.Model(&models.GroupMember{}).Select("group_id").Where("user_id = ?", userID),
-		)
-	}
-	if err := q.Order("name asc").Find(&rows).Error; err != nil {
+	rows, err := s.stores.Group.ListForUser(ctx, userID, isAdmin)
+	if err != nil {
 		return nil, err
 	}
 	out := make([]GroupDTO, len(rows))
@@ -72,20 +64,20 @@ func (s *Service) ListForUser(ctx context.Context, userID uuid.UUID, isAdmin boo
 
 // Get 执行对应操作。
 func (s *Service) Get(ctx context.Context, id uuid.UUID) (*GroupDTO, error) {
-	var m models.Group
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
+	m, err := s.stores.Group.GetByID(ctx, id)
+	if err != nil {
 		return nil, err
 	}
-	return toDTO(&m), nil
+	return toDTO(m), nil
 }
 
 // GetForUser 按用户权限返回单条记录（含当前用户角色与权限）。
 func (s *Service) GetForUser(ctx context.Context, id, userID uuid.UUID, isAdmin bool) (*GroupDTO, error) {
-	var m models.Group
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
+	m, err := s.stores.Group.GetByID(ctx, id)
+	if err != nil {
 		return nil, err
 	}
-	return s.enrich(ctx, &m, userID, isAdmin), nil
+	return s.enrich(ctx, m, userID, isAdmin), nil
 }
 
 // Create 创建记录。
@@ -94,20 +86,19 @@ func (s *Service) Create(ctx context.Context, ownerID uuid.UUID, in CreateInput)
 	if name == "" {
 		return nil, errors.New("组名称不能为空")
 	}
-	m := models.Group{Name: name, OwnerID: ownerID}
-	if err := s.db.WithContext(ctx).Create(&m).Error; err != nil {
+	m, err := s.stores.Group.Create(ctx, repo.CreateGroupParams{
+		Name: name, OwnerID: ownerID, OwnerRole: string(iam.RoleOwner),
+	})
+	if err != nil {
 		return nil, err
 	}
-	_ = s.db.WithContext(ctx).Create(&models.GroupMember{
-		GroupID: m.ID, UserID: ownerID, Role: string(iam.RoleOwner),
-	}).Error
-	return s.enrich(ctx, &m, ownerID, false), nil
+	return s.enrich(ctx, m, ownerID, false), nil
 }
 
 // Update 更新记录。
 func (s *Service) Update(ctx context.Context, id uuid.UUID, name *string) (*GroupDTO, error) {
-	var m models.Group
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
+	m, err := s.stores.Group.GetByID(ctx, id)
+	if err != nil {
 		return nil, err
 	}
 	if name != nil {
@@ -117,35 +108,27 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, name *string) (*Grou
 		}
 		m.Name = trimmed
 	}
-	if err := s.db.WithContext(ctx).Save(&m).Error; err != nil {
+	if err := s.stores.Group.Save(ctx, m); err != nil {
 		return nil, err
 	}
-	return toDTO(&m), nil
+	return toDTO(m), nil
 }
 
 // Delete 删除记录。
 func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&models.Project{}).Where("group_id = ?", id).Update("group_id", nil).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("group_id = ?", id).Delete(&models.GroupMember{}).Error; err != nil {
-			return err
-		}
-		return tx.Delete(&models.Group{}, "id = ?", id).Error
-	})
+	return s.stores.Group.Delete(ctx, id)
 }
 
 // ListMembers 返回组成员列表。
 func (s *Service) ListMembers(ctx context.Context, groupID uuid.UUID) ([]MemberDTO, error) {
-	var rows []models.GroupMember
-	if err := s.db.WithContext(ctx).Where("group_id = ?", groupID).Find(&rows).Error; err != nil {
+	rows, err := s.stores.Group.ListMembers(ctx, groupID)
+	if err != nil {
 		return nil, err
 	}
 	out := make([]MemberDTO, 0, len(rows))
 	for _, r := range rows {
-		var u models.User
-		if err := s.db.WithContext(ctx).First(&u, "id = ?", r.UserID).Error; err != nil {
+		u, err := s.stores.User.GetByID(ctx, r.UserID)
+		if err != nil {
 			continue
 		}
 		out = append(out, MemberDTO{
@@ -161,8 +144,7 @@ func (s *Service) AddMember(ctx context.Context, groupID, userID uuid.UUID, role
 	if err := iam.ValidateRole(role); err != nil {
 		return err
 	}
-	m := models.GroupMember{GroupID: groupID, UserID: userID, Role: string(role)}
-	return s.db.WithContext(ctx).Save(&m).Error
+	return s.stores.Group.AddMember(ctx, groupID, userID, string(role))
 }
 
 // UpdateMember 更新组成员角色。
@@ -170,22 +152,18 @@ func (s *Service) UpdateMember(ctx context.Context, groupID, userID uuid.UUID, r
 	if err := iam.ValidateRole(role); err != nil {
 		return err
 	}
-	return s.db.WithContext(ctx).Model(&models.GroupMember{}).
-		Where("group_id = ? AND user_id = ?", groupID, userID).
-		Update("role", string(role)).Error
+	return s.stores.Group.UpdateMemberRole(ctx, groupID, userID, string(role))
 }
 
 // RemoveMember 从组移除成员。
 func (s *Service) RemoveMember(ctx context.Context, groupID, userID uuid.UUID) error {
-	return s.db.WithContext(ctx).
-		Where("group_id = ? AND user_id = ?", groupID, userID).
-		Delete(&models.GroupMember{}).Error
+	return s.stores.Group.RemoveMember(ctx, groupID, userID)
 }
 
 // enrich 为实体补充当前用户权限等扩展字段。
 func (s *Service) enrich(ctx context.Context, m *models.Group, userID uuid.UUID, isAdmin bool) *GroupDTO {
 	g := toDTO(m)
-	enforcer := iam.NewEnforcer(s.db)
+	enforcer := iam.NewEnforcer(s.stores.IAM)
 	if isAdmin {
 		g.CurrentUserRole = new(iam.RoleOwner)
 		g.Permissions = new(iam.PermissionsForGroupRole(iam.RoleOwner))

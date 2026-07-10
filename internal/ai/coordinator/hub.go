@@ -2,6 +2,8 @@ package coordinator
 
 import (
 	"context"
+	"strings"
+
 	"matrix/internal/ai/activity"
 	"matrix/internal/ai/agent"
 	"matrix/internal/ai/audit"
@@ -11,16 +13,7 @@ import (
 	"time"
 )
 
-// SubAgentStreamHub 将 Worker 流式消息、进度与嵌套 Async 通道接到上层（如 desktop Bridge）。
-type SubAgentStreamHub interface {
-	WorkerSink(agentID, parentAgentID, parentToolUseID string) query.StreamSink
-	EnsureWorkerAsync(id agent.ID) *AsyncSupport
-	NotifySpawn(rec *agent.Record)
-	NotifyProgress(id agent.ID)
-	NotifyDone(id agent.ID)
-}
-
-// StreamHub 实现 SubAgentStreamHub：打标签推流、更新 Registry、写 sidechain、发嵌套 Async。
+// StreamHub 将 Worker 流式消息、进度与嵌套 Async 通道接到上层 UI。
 type StreamHub struct {
 	SessionID string
 	EmitUI    func(stream.Message)
@@ -116,8 +109,12 @@ func (h *StreamHub) applyProgress(msg stream.Message) {
 				r.Progress.Turn = msg.Data.Turn
 				r.Progress.Transition = msg.Data.Transition
 				r.Progress.CurrentTool = ""
-				r.Progress.Summary = activity.TurnSummary(msg.Data.Turn)
-				r.Progress.LastActivity = activity.TurnThinkingLabel(msg.Data.Turn, msg.Data.Transition)
+				summary := strings.TrimSpace(msg.Data.Summary)
+				if summary == "" || activity.IsGenericTurnSummary(summary) {
+					summary = activity.TurnThinkingLabel(msg.Data.Turn, msg.Data.Transition)
+				}
+				r.Progress.Summary = summary
+				r.Progress.LastActivity = summary
 				updated = true
 			case stream.DataToolProgress, stream.DataMCPProgress:
 				if msg.Data.ToolName != "" {
@@ -213,7 +210,7 @@ func (h *StreamHub) NotifySpawn(rec *agent.Record) {
 	}
 }
 
-// NotifyProgress 显式推送进度快照（实现 SubAgentStreamHub）。
+// NotifyProgress 显式推送进度快照。
 func (h *StreamHub) NotifyProgress(id agent.ID) {
 	if h == nil || h.OnUpdate == nil || h.Registry == nil {
 		return
@@ -224,14 +221,11 @@ func (h *StreamHub) NotifyProgress(id agent.ID) {
 }
 
 // SidechainPath 返回某 Agent 的旁路 transcript 路径。
-func SidechainPath(hub SubAgentStreamHub, id agent.ID) string {
-	if hub == nil {
+func (h *StreamHub) SidechainPath(id agent.ID) string {
+	if h == nil || h.Sidechain == nil {
 		return ""
 	}
-	if h, ok := hub.(*StreamHub); ok && h.Sidechain != nil {
-		return h.Sidechain.Path(id)
-	}
-	return ""
+	return h.Sidechain.Path(id)
 }
 
 // NotifyDone Worker 结束时推送。

@@ -11,6 +11,7 @@ import (
 	"matrix/internal/modules/settings"
 	"matrix/internal/platform/config"
 	platformdb "matrix/internal/platform/db"
+	"matrix/internal/platform/db/repo"
 	platformhttp "matrix/internal/platform/http"
 	"matrix/internal/platform/logging"
 	"matrix/internal/platform/migrate"
@@ -54,11 +55,12 @@ func Run(ctx context.Context, opts Options) error {
 	if err := migrate.Up(db, cfg.Database); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
-	if err := identity.BootstrapAdmin(ctx, db, cfg.Auth); err != nil {
+	stores := repo.New(db)
+	if err := identity.BootstrapAdmin(ctx, stores, cfg.Auth); err != nil {
 		return err
 	}
 	runtime := config.DefaultRuntime()
-	sysSettings := settings.NewService(db, runtime)
+	sysSettings := settings.NewService(stores, runtime)
 	if err := sysSettings.Bootstrap(ctx); err != nil {
 		return fmt.Errorf("system settings: %w", err)
 	}
@@ -68,7 +70,6 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	deps.RunService.SetLifecycle(ctx) // 进程退出时取消进行中的 Run
 	defer deps.Close()
-	deps.StartJobWorker(ctx) // 嵌入式任务队列消费者
 	engine := platformhttp.NewEngine(loggers.Access, loggers.System, dev)
 	routers.Register(engine, deps, opts.StaticFS)
 	loggers.System.Info("HTTP 服务监听中", "addr", cfg.Server.Addr)

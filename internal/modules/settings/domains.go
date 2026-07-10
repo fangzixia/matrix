@@ -7,10 +7,6 @@ const (
 	DomainMCP = "mcp"
 	// DomainGit 是 Git 配置在 system_settings 表中的行 ID。
 	DomainGit = "git"
-	// DomainWorker 是 Worker 配置在 system_settings 表中的行 ID。
-	DomainWorker = "worker"
-	// DomainPipeline 是 Pipeline 配置在 system_settings 表中的行 ID。
-	DomainPipeline = "pipeline"
 )
 
 // AISettings 模型、上下文与安全策略。
@@ -32,6 +28,4 @@ type Settings struct {
 	Security   SecuritySettings             `json:"security"`
 	MCPServers map[string]MCPServerSettings `json:"mcp_servers"`
 	Git        GitSettings                  `json:"git"`
-	Worker     WorkerSettings               `json:"worker"`
-	Pipeline   PipelineSettings             `json:"pipeline"`
 }

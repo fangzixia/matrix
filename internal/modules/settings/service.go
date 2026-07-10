@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"matrix/internal/platform/config"
-	"matrix/internal/platform/db/models"
+	"matrix/internal/platform/db/repo"
 	"matrix/internal/platform/gitutil"
 	"matrix/internal/platform/logging"
 	"strings"
@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 // ModelProfileSettings 单个 LLM 模型配置（含 API Key 脱敏字段）。
@@ -73,37 +72,22 @@ type GitSettings struct {
 	DefaultSSHKeyPath string      `json:"default_ssh_key_path,omitempty"`
 }
 
-// WorkerSettings 嵌入式任务队列 Worker 参数。
-type WorkerSettings struct {
-	Enabled      bool   `json:"enabled"`
-	PollInterval string `json:"poll_interval"`
-	MaxAttempts  int    `json:"max_attempts"`
-	Concurrency  int    `json:"concurrency"`
-}
-
-// PipelineSettings Harness 流水线默认阶段。
-type PipelineSettings struct {
-	DefaultStages   []string `json:"default_stages"`
-	PullBeforeStage bool     `json:"pull_before_stage"`
-}
-
-// Hooks 配置变更回调，用于同步 Git/流水线到依赖服务。
+// Hooks 配置变更回调，用于同步 Git 到依赖服务。
 type Hooks struct {
-	OnGitUpdate      func(config.GitConfig)
-	OnPipelineUpdate func(config.PipelineConfig)
+	OnGitUpdate func(config.GitConfig)
 }
 
 // Service 系统配置读写：DB 持久化 + 内存 runtime 热更新。
 type Service struct {
-	db      *gorm.DB
+	stores  *repo.Stores
 	runtime *config.RuntimeConfig
 	hooks   Hooks
 	mu      sync.Mutex
 }
 
 // NewService 创建系统配置服务实例。
-func NewService(db *gorm.DB, runtime *config.RuntimeConfig) *Service {
-	return &Service{db: db, runtime: runtime}
+func NewService(stores *repo.Stores, runtime *config.RuntimeConfig) *Service {
+	return &Service{stores: stores, runtime: runtime}
 }
 
 // Runtime 返回当前进程内运行时配置（只读引用，由 apply 热更新）。
@@ -111,7 +95,7 @@ func (s *Service) Runtime() *config.RuntimeConfig {
 	return s.runtime
 }
 
-// SetHooks 注册配置变更回调，用于同步 Git 与流水线到依赖服务。
+// SetHooks 注册配置变更回调，用于同步 Git 到依赖服务。
 func (s *Service) SetHooks(h Hooks) {
 	s.hooks = h
 }
@@ -252,98 +236,16 @@ func (s *Service) TestGit(ctx context.Context, gitURL string) (string, error) {
 	return gitutil.TestConnection(ctx, s.runtime.Git, gitURL, timeout)
 }
 
-// --- Worker ---
-
-// GetWorker 读取 Worker 系统设置。
-func (s *Service) GetWorker(ctx context.Context) (*WorkerSettings, error) {
-	stored, err := s.loadDomainWorker(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if stored != nil {
-		return stored, nil
-	}
-	def := defaultSettings()
-	return &def.Worker, nil
-}
-
-// SaveWorker 保存 Worker 系统设置。
-func (s *Service) SaveWorker(ctx context.Context, in WorkerSettings) (*WorkerSettings, error) {
-	merged, err := s.mergeWorkerInput(ctx, in)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateWorker(merged); err != nil {
-		return nil, err
-	}
-	if err := s.saveDomain(ctx, DomainWorker, merged); err != nil {
-		return nil, err
-	}
-	if err := s.ReloadRuntime(ctx); err != nil {
-		return nil, err
-	}
-	return s.GetWorker(ctx)
-}
-
-// --- Pipeline ---
-
-// GetPipeline 读取 Pipeline 系统设置。
-func (s *Service) GetPipeline(ctx context.Context) (*PipelineSettings, error) {
-	stored, err := s.loadDomainPipeline(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if stored != nil {
-		return stored, nil
-	}
-	def := defaultSettings()
-	return &def.Pipeline, nil
-}
-
-// SavePipeline 保存 Pipeline 系统设置。
-func (s *Service) SavePipeline(ctx context.Context, in PipelineSettings) (*PipelineSettings, error) {
-	if err := validatePipeline(in); err != nil {
-		return nil, err
-	}
-	if err := s.saveDomain(ctx, DomainPipeline, in); err != nil {
-		return nil, err
-	}
-	if err := s.ReloadRuntime(ctx); err != nil {
-		return nil, err
-	}
-	return s.GetPipeline(ctx)
-}
-
 // --- 存储层 ---
 
 // saveDomain 将指定域配置序列化写入 system_settings 表。
 func (s *Service) saveDomain(ctx context.Context, domainID string, data any) error {
-	raw, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-	row := models.SystemSetting{
-		ID:        domainID,
-		Settings:  string(raw),
-		UpdatedAt: time.Now(),
-	}
-	return s.db.WithContext(ctx).Save(&row).Error
+	return s.stores.Settings.SaveDomain(ctx, domainID, data)
 }
 
 // loadDomainRaw 从数据库读取指定域的原始 JSON。
 func (s *Service) loadDomainRaw(ctx context.Context, domainID string) (json.RawMessage, error) {
-	var row models.SystemSetting
-	err := s.db.WithContext(ctx).Where("id = ?", domainID).First(&row).Error
-	if err == gorm.ErrRecordNotFound {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	if row.Settings == "" || row.Settings == "{}" {
-		return nil, nil
-	}
-	return json.RawMessage(row.Settings), nil
+	return s.stores.Settings.LoadDomainRaw(ctx, domainID)
 }
 
 // loadDomainAI 加载 AI 域配置。
@@ -385,40 +287,12 @@ func (s *Service) loadDomainGit(ctx context.Context) (*GitSettings, error) {
 	return &st, nil
 }
 
-// loadDomainWorker 加载 Worker 域配置。
-func (s *Service) loadDomainWorker(ctx context.Context) (*WorkerSettings, error) {
-	raw, err := s.loadDomainRaw(ctx, DomainWorker)
-	if err != nil || raw == nil {
-		return nil, err
-	}
-	var st WorkerSettings
-	if err := json.Unmarshal(raw, &st); err != nil {
-		return nil, fmt.Errorf("worker settings: parse: %w", err)
-	}
-	return &st, nil
-}
-
-// loadDomainPipeline 加载 Pipeline 域配置。
-func (s *Service) loadDomainPipeline(ctx context.Context) (*PipelineSettings, error) {
-	raw, err := s.loadDomainRaw(ctx, DomainPipeline)
-	if err != nil || raw == nil {
-		return nil, err
-	}
-	var st PipelineSettings
-	if err := json.Unmarshal(raw, &st); err != nil {
-		return nil, fmt.Errorf("pipeline settings: parse: %w", err)
-	}
-	return &st, nil
-}
-
 // loadAllStored 从数据库加载全部系统配置域。
 func (s *Service) loadAllStored(ctx context.Context) (*Settings, error) {
 	ai, _ := s.loadDomainAI(ctx)
 	mcp, _ := s.loadDomainMCP(ctx)
 	git, _ := s.loadDomainGit(ctx)
-	worker, _ := s.loadDomainWorker(ctx)
-	pipeline, _ := s.loadDomainPipeline(ctx)
-	if ai == nil && mcp == nil && git == nil && worker == nil && pipeline == nil {
+	if ai == nil && mcp == nil && git == nil {
 		return nil, nil
 	}
 	base := defaultSettings()
@@ -433,12 +307,6 @@ func (s *Service) loadAllStored(ctx context.Context) (*Settings, error) {
 	if git != nil {
 		base.Git = *git
 		stripGitHints(&base.Git)
-	}
-	if worker != nil {
-		base.Worker = *worker
-	}
-	if pipeline != nil {
-		base.Pipeline = *pipeline
 	}
 	return &base, nil
 }
@@ -502,38 +370,6 @@ func (s *Service) mergeAIInput(ctx context.Context, in AISettings) (AISettings, 
 	return out, nil
 }
 
-// mergeWorkerInput 合并用户提交的 Worker 配置。
-func (s *Service) mergeWorkerInput(ctx context.Context, in WorkerSettings) (WorkerSettings, error) {
-	existing, err := s.loadDomainWorker(ctx)
-	if err != nil {
-		return WorkerSettings{}, err
-	}
-	out := in
-	if existing != nil {
-		if out.MaxAttempts < 1 {
-			out.MaxAttempts = existing.MaxAttempts
-		}
-		if out.Concurrency < 1 {
-			out.Concurrency = existing.Concurrency
-		}
-		if strings.TrimSpace(out.PollInterval) == "" {
-			out.PollInterval = existing.PollInterval
-		}
-	} else {
-		def := defaultWorkerSettings()
-		if out.MaxAttempts < 1 {
-			out.MaxAttempts = def.MaxAttempts
-		}
-		if out.Concurrency < 1 {
-			out.Concurrency = def.Concurrency
-		}
-		if strings.TrimSpace(out.PollInterval) == "" {
-			out.PollInterval = def.PollInterval
-		}
-	}
-	return out, nil
-}
-
 func (s *Service) applyAI(st AISettings) {
 	normalizeModelProfiles(&st.Models)
 	s.runtime.AI.Models = toConfigModels(st.Models)
@@ -562,25 +398,8 @@ func (s *Service) apply(st Settings, _ bool) {
 	if d, err := time.ParseDuration(st.Git.CloneTimeout); err == nil && d > 0 {
 		s.runtime.Git.CloneTimeout = d
 	}
-	s.runtime.Worker.Enabled = st.Worker.Enabled
-	if d, err := time.ParseDuration(st.Worker.PollInterval); err == nil && d > 0 {
-		s.runtime.Worker.PollInterval = d
-	}
-	if st.Worker.MaxAttempts > 0 {
-		s.runtime.Worker.MaxAttempts = st.Worker.MaxAttempts
-	}
-	if st.Worker.Concurrency > 0 {
-		s.runtime.Worker.Concurrency = st.Worker.Concurrency
-	}
-	if len(st.Pipeline.DefaultStages) > 0 {
-		s.runtime.Pipeline.DefaultStages = append([]string(nil), st.Pipeline.DefaultStages...)
-	}
-	s.runtime.Pipeline.PullBeforeStage = st.Pipeline.PullBeforeStage
 	if s.hooks.OnGitUpdate != nil {
 		s.hooks.OnGitUpdate(s.runtime.Git)
-	}
-	if s.hooks.OnPipelineUpdate != nil {
-		s.hooks.OnPipelineUpdate(s.runtime.Pipeline)
 	}
 }
 
@@ -670,27 +489,6 @@ func validateGit(in GitSettings) error {
 			return fmt.Errorf("clone_timeout 格式无效，请使用如 300s、5m")
 		}
 	}
-	return nil
-}
-
-// validateWorker 校验 Worker 域配置合法性。
-func validateWorker(in WorkerSettings) error {
-	if in.MaxAttempts < 1 {
-		return fmt.Errorf("max_attempts 至少为 1")
-	}
-	if in.Concurrency < 1 {
-		return fmt.Errorf("concurrency 至少为 1")
-	}
-	if in.PollInterval != "" {
-		if _, err := time.ParseDuration(in.PollInterval); err != nil {
-			return fmt.Errorf("poll_interval 格式无效，请使用如 2s、1m")
-		}
-	}
-	return nil
-}
-
-// validatePipeline 校验 Pipeline 域配置合法性。
-func validatePipeline(_ PipelineSettings) error {
 	return nil
 }
 

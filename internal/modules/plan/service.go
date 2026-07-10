@@ -5,14 +5,13 @@ import (
 	"context"
 	"matrix/internal/modules/docmeta"
 	"matrix/internal/modules/workspace"
-	"matrix/internal/platform/db/models"
+	"matrix/internal/platform/db/repo"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 const (
@@ -21,13 +20,13 @@ const (
 
 // Service 管理计划文档索引与列表查询。
 type Service struct {
-	db *gorm.DB
-	ws *workspace.Service
+	stores *repo.Stores
+	ws     *workspace.Service
 }
 
 // NewService 创建计划文档服务实例。
-func NewService(db *gorm.DB, ws *workspace.Service) *Service {
-	return &Service{db: db, ws: ws}
+func NewService(stores *repo.Stores, ws *workspace.Service) *Service {
+	return &Service{stores: stores, ws: ws}
 }
 
 // Item 是计划文档列表项 API 返回的数据传输对象。
@@ -127,27 +126,10 @@ func (s *Service) upsert(ctx context.Context, projectID uuid.UUID, repositoryID 
 		return err
 	}
 	title := docmeta.TitleOrFallback(filepath.Base(relPath), string(b))
-	now := time.Now()
-	var existing models.Plan
-	q := s.db.WithContext(ctx).Where("project_id = ? AND path = ?", projectID, relPath)
-	if repositoryID != nil {
-		q = q.Where("repository_id = ? OR repository_id IS NULL", *repositoryID)
-	}
-	err = q.First(&existing).Error
-	if err == nil {
-		existing.Title = title
-		existing.RunID = &runID
-		existing.UpdatedAt = now
-		if repositoryID != nil {
-			existing.RepositoryID = repositoryID
-		}
-		return s.db.WithContext(ctx).Save(&existing).Error
-	}
-	row := models.Plan{
-		ProjectID: projectID, RepositoryID: repositoryID, RunID: &runID,
-		Path: relPath, Title: title, Status: StatusDraft, UpdatedAt: now, CreatedAt: now,
-	}
-	return s.db.WithContext(ctx).Create(&row).Error
+	return s.stores.Plan.IndexAfterRun(ctx, repo.IndexAfterRunParams{
+		ProjectID: projectID, RepositoryID: repositoryID, RunID: runID,
+		Path: relPath, Title: title,
+	})
 }
 
 // isPlanFileName 判断文件名是否为计划文档。

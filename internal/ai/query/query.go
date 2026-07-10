@@ -140,7 +140,7 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 			return returnOutcome(ctx, Result{StopReason: StopMaxTurns, TurnCount: s.turnCount, Messages: s.messages})
 		}
 		trans := transitionStr(s.transition)
-		summary := activity.TurnSummary(s.turnCount)
+		summary := activity.TurnThinkingLabel(s.turnCount, trans)
 		publish(ctx, sink, stream.TurnProgress(sid, s.turnCount, trans, summary))
 		ctx = logging.With(ctx, logging.Fields{
 			logging.FieldSessionID: sid,
@@ -154,8 +154,9 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 				"log_prefix":    cfg.LogPrefix,
 			})
 		}
-		logging.AgentCtx(ctx, "loop: 迭代",
+		logging.AgentCtx(ctx, "loop: 决策",
 			"log_prefix", cfg.LogPrefix,
+			"activity", summary,
 			"message_count", len(s.messages),
 			"transition", trans,
 		)
@@ -187,8 +188,8 @@ func queryLoop(ctx context.Context, cfg Config, sink StreamSink) Result {
 			turnCount:  s.turnCount + 1,
 			transition: new(TransitionNextTurn),
 		}
-		logging.AgentCtx(ctx, "loop: 本轮完成",
-			"completed_turn", s.turnCount-1,
+		logging.AgentCtx(ctx, "loop: 步骤完成",
+			"activity", activity.SummarizeTools(toolCallsActivityInputs(turn.ToolCalls)),
 			"tool_calls", len(turn.ToolCalls),
 		)
 	}
@@ -212,11 +213,11 @@ func tryFinishTurn(ctx context.Context, cfg Config, s *state, turn *llm.Assistan
 	prevLen := len(s.messages)
 	s.messages = drainAsyncResults(cfg, s.turnCount, s.messages, cfg.AsyncResults, cfg.ContextPolicy.MaxAsyncResultRunes)
 	if len(s.messages) > prevLen {
-		logging.AgentCtx(ctx, "loop: 异步结果已消费", "new_messages", len(s.messages)-prevLen)
+		logging.AgentCtx(ctx, "loop: Worker 结果已消费", "new_messages", len(s.messages)-prevLen)
 		return Result{}, false
 	}
 	if cfg.HasPendingAsync != nil && cfg.HasPendingAsync() {
-		logging.AgentCtx(ctx, "loop: 等待异步子 Agent")
+		logging.AgentCtx(ctx, "loop: 等待 Worker", "activity", activity.LabelWaitingWorkers)
 		select {
 		case <-ctx.Done():
 			return Result{
@@ -229,7 +230,10 @@ func tryFinishTurn(ctx context.Context, cfg Config, s *state, turn *llm.Assistan
 			emitAsyncAudit(cfg, s.turnCount, msg)
 			s.messages = append(s.messages, truncateAsyncMessage(msg, cfg.ContextPolicy.MaxAsyncResultRunes))
 			s.messages = drainAsyncResults(cfg, s.turnCount, s.messages, cfg.AsyncResults, cfg.ContextPolicy.MaxAsyncResultRunes)
-			logging.AgentCtx(ctx, "loop: 已注入异步结果", "message_count", len(s.messages))
+			logging.AgentCtx(ctx, "loop: Worker 结果注入",
+				"activity", activity.AsyncResultLabel(msg.Content),
+				"message_count", len(s.messages),
+			)
 			return Result{}, false
 		}
 	}
@@ -359,6 +363,17 @@ func resolveToolUseID(d *llm.ToolCallDelta, pending map[int]string) string {
 	return id
 }
 
+func toolCallsActivityInputs(calls []llm.ToolCall) []activity.ToolSummaryInput {
+	out := make([]activity.ToolSummaryInput, 0, len(calls))
+	for _, tc := range calls {
+		out = append(out, activity.ToolSummaryInput{
+			Name:    tc.Function.Name,
+			Preview: tc.Function.Arguments,
+		})
+	}
+	return out
+}
+
 // act 执行 TAOR 循环的 A（行动）阶段：执行工具调用。
 func act(
 	ctx context.Context,
@@ -372,9 +387,14 @@ func act(
 	}
 	sid := cfg.SessionID
 	for _, tc := range toolCalls {
+		activityLabel := activity.SummarizeTools([]activity.ToolSummaryInput{{
+			Name:    tc.Function.Name,
+			Preview: tc.Function.Arguments,
+		}})
 		logging.AgentCtx(ctx, "loop: 工具执行",
 			"tool_name", tc.Function.Name,
 			"tool_call_id", tc.ID,
+			"activity", activityLabel,
 			"input", tc.Function.Arguments,
 		)
 		if cfg.Audit != nil {

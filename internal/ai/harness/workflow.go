@@ -1,4 +1,4 @@
-// Package harness 定义 Plan/Implement/Verify/Build 任务流与 Prompt 模板。
+// Package harness 定义 Plan/Implement/Verify 三种任务流与 Prompt 模板。
 package harness
 
 import "strings"
@@ -13,8 +13,6 @@ const (
 	KindImplement Kind = "implement"
 	// KindVerify 是验证阶段。
 	KindVerify Kind = "verify"
-	// KindBuild 是构建阶段。
-	KindBuild Kind = "build"
 )
 
 // State 是任务流执行状态。

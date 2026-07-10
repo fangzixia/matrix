@@ -7,12 +7,11 @@ import (
 	"fmt"
 	"matrix/internal/platform/config"
 	"matrix/internal/platform/db/models"
-	"strings"
+	"matrix/internal/platform/db/repo"
 	"time"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
 )
 
 // ErrInvalidCredentials 表示用户名或密码错误。
@@ -21,14 +20,14 @@ var ErrInvalidCredentials = errors.New("invalid credentials")
 // ErrUserBlocked 表示用户已被封禁。
 var ErrUserBlocked = errors.New("user blocked")
 
-// UserRepo 提供用户持久化 CRUD。
+// UserRepo 提供用户持久化 CRUD，密码哈希在 identity 层处理。
 type UserRepo struct {
-	db *gorm.DB
+	users *repo.UserStore
 }
 
 // NewUserRepo 创建 UserRepo。
-func NewUserRepo(db *gorm.DB) *UserRepo {
-	return &UserRepo{db: db}
+func NewUserRepo(stores *repo.Stores) *UserRepo {
+	return &UserRepo{users: stores.User}
 }
 
 // Create 创建记录。
@@ -45,7 +44,7 @@ func (r *UserRepo) Create(ctx context.Context, in CreateUserInput) (*User, error
 		IsAdmin:      in.IsAdmin,
 		State:        "active",
 	}
-	if err := r.db.WithContext(ctx).Create(&m).Error; err != nil {
+	if err := r.users.Create(ctx, &m); err != nil {
 		return nil, err
 	}
 	return toUser(&m), nil
@@ -53,49 +52,27 @@ func (r *UserRepo) Create(ctx context.Context, in CreateUserInput) (*User, error
 
 // GetByID 按 ID 查询用户。
 func (r *UserRepo) GetByID(ctx context.Context, id uuid.UUID) (*User, error) {
-	var m models.User
-	if err := r.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
+	m, err := r.users.GetByID(ctx, id)
+	if err != nil {
 		return nil, err
 	}
-	return toUser(&m), nil
+	return toUser(m), nil
 }
 
 // GetByUsername 按用户名查询用户。
 func (r *UserRepo) GetByUsername(ctx context.Context, username string) (*models.User, error) {
-	var m models.User
-	if err := r.db.WithContext(ctx).Where("username = ?", username).First(&m).Error; err != nil {
-		return nil, err
-	}
-	return &m, nil
+	return r.users.GetByUsername(ctx, username)
 }
 
 // GetByLogin 按登录名（用户名或邮箱）查询用户。
 func (r *UserRepo) GetByLogin(ctx context.Context, login string) (*models.User, error) {
-	var m models.User
-	if err := r.db.WithContext(ctx).
-		Where("username = ? OR email = ?", login, login).
-		First(&m).Error; err != nil {
-		return nil, err
-	}
-	return &m, nil
+	return r.users.GetByLogin(ctx, login)
 }
 
 // Search 按关键字搜索。
 func (r *UserRepo) Search(ctx context.Context, q string, limit int) ([]User, error) {
-	if limit <= 0 {
-		limit = 20
-	}
-	q = strings.TrimSpace(q)
-	if q == "" {
-		return []User{}, nil
-	}
-	like := "%" + q + "%"
-	var rows []models.User
-	if err := r.db.WithContext(ctx).
-		Where("state = ? AND (username ILIKE ? OR name ILIKE ? OR email ILIKE ?)", "active", like, like, like).
-		Order("username asc").
-		Limit(limit).
-		Find(&rows).Error; err != nil {
+	rows, err := r.users.Search(ctx, q, limit)
+	if err != nil {
 		return nil, err
 	}
 	out := make([]User, len(rows))
@@ -107,16 +84,8 @@ func (r *UserRepo) Search(ctx context.Context, q string, limit int) ([]User, err
 
 // List 返回列表。
 func (r *UserRepo) List(ctx context.Context, limit, offset int) ([]User, int64, error) {
-	var rows []models.User
-	var total int64
-	q := r.db.WithContext(ctx).Model(&models.User{})
-	if err := q.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-	if limit <= 0 {
-		limit = 50
-	}
-	if err := q.Order("created_at desc").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
+	rows, total, err := r.users.List(ctx, limit, offset)
+	if err != nil {
 		return nil, 0, err
 	}
 	out := make([]User, len(rows))
@@ -128,8 +97,8 @@ func (r *UserRepo) List(ctx context.Context, limit, offset int) ([]User, int64, 
 
 // Update 更新记录。
 func (r *UserRepo) Update(ctx context.Context, id uuid.UUID, in UpdateUserInput) (*User, error) {
-	var m models.User
-	if err := r.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
+	m, err := r.users.GetByID(ctx, id)
+	if err != nil {
 		return nil, err
 	}
 	if in.Email != nil {
@@ -151,15 +120,15 @@ func (r *UserRepo) Update(ctx context.Context, id uuid.UUID, in UpdateUserInput)
 		}
 		m.PasswordHash = string(hash)
 	}
-	if err := r.db.WithContext(ctx).Save(&m).Error; err != nil {
+	if err := r.users.Save(ctx, m); err != nil {
 		return nil, err
 	}
-	return toUser(&m), nil
+	return toUser(m), nil
 }
 
 // Delete 删除记录。
 func (r *UserRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	return r.db.WithContext(ctx).Delete(&models.User{}, "id = ?", id).Error
+	return r.users.Delete(ctx, id)
 }
 
 // ResetPassword 重置用户密码。
@@ -168,20 +137,17 @@ func (r *UserRepo) ResetPassword(ctx context.Context, id uuid.UUID, password str
 	if err != nil {
 		return err
 	}
-	return r.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", id).
-		Update("password_hash", string(hash)).Error
+	return r.users.UpdatePasswordHash(ctx, id, string(hash))
 }
 
 // Block 封禁用户账户。
 func (r *UserRepo) Block(ctx context.Context, id uuid.UUID) error {
-	return r.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", id).
-		Update("state", "blocked").Error
+	return r.users.UpdateState(ctx, id, "blocked")
 }
 
 // Unblock 解除用户封禁。
 func (r *UserRepo) Unblock(ctx context.Context, id uuid.UUID) error {
-	return r.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", id).
-		Update("state", "active").Error
+	return r.users.UpdateState(ctx, id, "active")
 }
 
 // UserWithStats 是带项目数量统计的用户 DTO。
@@ -198,9 +164,7 @@ func (r *UserRepo) ListWithStats(ctx context.Context, limit, offset int) ([]User
 	}
 	out := make([]UserWithStats, len(users))
 	for i, u := range users {
-		var n int64
-		_ = r.db.WithContext(ctx).Model(&models.ProjectMember{}).
-			Where("user_id = ?", u.ID).Count(&n).Error
+		n, _ := r.users.CountProjectMemberships(ctx, u.ID)
 		out[i] = UserWithStats{User: u, ProjectCount: n}
 	}
 	return out, total, nil
@@ -208,12 +172,15 @@ func (r *UserRepo) ListWithStats(ctx context.Context, limit, offset int) ([]User
 
 // Count 返回数量统计。
 func (r *UserRepo) Count(ctx context.Context) (int64, error) {
-	var n int64
-	err := r.db.WithContext(ctx).Model(&models.User{}).Count(&n).Error
-	return n, err
+	return r.users.Count(ctx)
 }
 
-// toUser 转换为User。
+// UpdateLastSignIn 更新用户最近登录时间。
+func (r *UserRepo) UpdateLastSignIn(ctx context.Context, id uuid.UUID, t time.Time) error {
+	return r.users.UpdateLastSignIn(ctx, id, t)
+}
+
+// toUser 转换为 User DTO。
 func toUser(m *models.User) *User {
 	return &User{
 		ID: m.ID, Username: m.Username, Email: m.Email, Name: m.Name,
@@ -254,20 +221,15 @@ func (s *AuthService) Login(ctx context.Context, username, password, ip, ua stri
 	return toUser(m), token, nil
 }
 
-// UpdateLastSignIn 更新用户最近登录时间。
-func (r *UserRepo) UpdateLastSignIn(ctx context.Context, id uuid.UUID, t time.Time) error {
-	return r.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", id).Update("last_sign_in_at", t).Error
-}
-
 // Logout 注销当前 Session。
 func (s *AuthService) Logout(ctx context.Context, token string) error {
 	return s.sessions.Revoke(ctx, token)
 }
 
 // BootstrapAdmin 在空库时创建配置中的首装管理员账户。
-func BootstrapAdmin(ctx context.Context, db *gorm.DB, cfg config.AuthConfig) error {
-	repo := NewUserRepo(db)
-	n, err := repo.Count(ctx)
+func BootstrapAdmin(ctx context.Context, stores *repo.Stores, cfg config.AuthConfig) error {
+	users := NewUserRepo(stores)
+	n, err := users.Count(ctx)
 	if err != nil {
 		return err
 	}
@@ -282,7 +244,7 @@ func BootstrapAdmin(ctx context.Context, db *gorm.DB, cfg config.AuthConfig) err
 	if user == "" {
 		user = "root"
 	}
-	_, err = repo.Create(ctx, CreateUserInput{
+	_, err = users.Create(ctx, CreateUserInput{
 		Username: user,
 		Email:    user + "@localhost",
 		Password: pass,

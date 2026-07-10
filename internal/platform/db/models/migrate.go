@@ -5,7 +5,7 @@ func All() []any {
 	return []any{
 		&User{}, &Session{}, &Group{}, &GroupMember{},
 		&Project{}, &ProjectMember{}, &ProjectRepository{},
-		&Run{}, &RunStep{}, &RunView{}, &RunJob{},
+		&Run{}, &RunStep{}, &RunView{},
 		&Notification{}, &ChatSession{}, &ChatMessage{}, &PlanResolution{},
 		&SystemSetting{},
 		&Plan{}, &Artifact{},

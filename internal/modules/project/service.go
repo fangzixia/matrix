@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"matrix/internal/modules/iam"
 	"matrix/internal/platform/db/models"
+	"matrix/internal/platform/db/repo"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 const (
@@ -50,12 +50,12 @@ type CreateInput struct {
 
 // Service 提供项目 CRUD、可见性与路径管理。
 type Service struct {
-	db *gorm.DB
+	stores *repo.Stores
 }
 
 // NewService 创建项目服务实例。
-func NewService(db *gorm.DB) *Service {
-	return &Service{db: db}
+func NewService(stores *repo.Stores) *Service {
+	return &Service{stores: stores}
 }
 
 // Create 创建记录。
@@ -78,82 +78,46 @@ func (s *Service) Create(ctx context.Context, ownerID uuid.UUID, in CreateInput)
 	if err := ValidateProjectCode(code); err != nil {
 		return nil, err
 	}
-	var existing models.Project
-	if err := s.db.WithContext(ctx).Where("path = ?", code).First(&existing).Error; err == nil {
-		return nil, fmt.Errorf("项目编码 %q 已被使用", code)
-	} else if err != gorm.ErrRecordNotFound {
+	exists, err := s.stores.Project.ExistsByPath(ctx, code, uuid.Nil)
+	if err != nil {
 		return nil, err
 	}
-	m := models.Project{
+	if exists {
+		return nil, fmt.Errorf("项目编码 %q 已被使用", code)
+	}
+	m, err := s.stores.Project.Create(ctx, repo.CreateProjectParams{
 		Name: in.Name, Path: code, GitURL: in.GitURL, GitBranch: branch,
 		Visibility: vis, GroupID: in.GroupID, OwnerID: ownerID,
-	}
-	if err := s.db.WithContext(ctx).Create(&m).Error; err != nil {
+		OwnerRole: string(iam.RoleOwner),
+	})
+	if err != nil {
 		return nil, err
 	}
-	_ = s.db.WithContext(ctx).Create(&models.ProjectMember{
-		ProjectID: m.ID, UserID: ownerID, Role: string(iam.RoleOwner),
-	}).Error
-	return s.enrich(ctx, &m, ownerID, false), nil
+	return s.enrich(ctx, m, ownerID, false), nil
 }
 
 // Get 执行对应操作。
 func (s *Service) Get(ctx context.Context, id uuid.UUID) (*Project, error) {
-	var m models.Project
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
+	m, err := s.stores.Project.GetByID(ctx, id)
+	if err != nil {
 		return nil, err
 	}
-	return toDTO(&m), nil
+	return toDTO(m), nil
 }
 
 // GetForUser 按用户权限返回单条记录。
 func (s *Service) GetForUser(ctx context.Context, id, userID uuid.UUID, isAdmin bool) (*Project, error) {
-	var m models.Project
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
+	m, err := s.stores.Project.GetByID(ctx, id)
+	if err != nil {
 		return nil, err
 	}
-	return s.enrich(ctx, &m, userID, isAdmin), nil
+	return s.enrich(ctx, m, userID, isAdmin), nil
 }
 
 // ListForUser 返回当前用户可见的列表。
 func (s *Service) ListForUser(ctx context.Context, userID uuid.UUID, isAdmin bool, scope string) ([]Project, error) {
-	var rows []models.Project
-	q := s.db.WithContext(ctx).Model(&models.Project{})
-	switch scope {
-	case "explore":
-		if !isAdmin {
-			q = q.Where("visibility IN ?", []string{VisibilityInternal, VisibilityPublic})
-		}
-	case "starred":
-		return []Project{}, nil
-	default:
-		if strings.HasPrefix(scope, "group/") {
-			gid, err := uuid.Parse(strings.TrimPrefix(scope, "group/"))
-			if err != nil {
-				return nil, err
-			}
-			q = q.Where("group_id = ?", gid)
-			if !isAdmin {
-				q = q.Where(
-					"owner_id = ? OR id IN (?) OR group_id IN (?)",
-					userID,
-					s.db.Model(&models.ProjectMember{}).Select("project_id").Where("user_id = ?", userID),
-					s.db.Model(&models.GroupMember{}).Select("group_id").Where("user_id = ?", userID),
-				)
-			}
-			break
-		}
-		if !isAdmin {
-			q = q.Where(
-				"owner_id = ? OR id IN (?) OR group_id IN (?) OR visibility IN ?",
-				userID,
-				s.db.Model(&models.ProjectMember{}).Select("project_id").Where("user_id = ?", userID),
-				s.db.Model(&models.GroupMember{}).Select("group_id").Where("user_id = ?", userID),
-				[]string{VisibilityInternal, VisibilityPublic},
-			)
-		}
-	}
-	if err := q.Order("updated_at desc").Find(&rows).Error; err != nil {
+	rows, err := s.stores.Project.ListForUser(ctx, userID, isAdmin, scope, VisibilityInternal, VisibilityPublic)
+	if err != nil {
 		return nil, err
 	}
 	out := make([]Project, len(rows))
@@ -165,8 +129,8 @@ func (s *Service) ListForUser(ctx context.Context, userID uuid.UUID, isAdmin boo
 
 // Update 更新记录。
 func (s *Service) Update(ctx context.Context, id uuid.UUID, name, path, gitURL, branch, visibility *string, groupID *uuid.UUID) (*Project, error) {
-	var m models.Project
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
+	m, err := s.stores.Project.GetByID(ctx, id)
+	if err != nil {
 		return nil, err
 	}
 	if name != nil {
@@ -180,11 +144,12 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, name, path, gitURL, 
 		if err := ValidateProjectCode(code); err != nil {
 			return nil, err
 		}
-		var dup models.Project
-		if err := s.db.WithContext(ctx).Where("path = ? AND id <> ?", code, id).First(&dup).Error; err == nil {
-			return nil, fmt.Errorf("项目编码 %q 已被使用", code)
-		} else if err != gorm.ErrRecordNotFound {
+		exists, err := s.stores.Project.ExistsByPath(ctx, code, id)
+		if err != nil {
 			return nil, err
+		}
+		if exists {
+			return nil, fmt.Errorf("项目编码 %q 已被使用", code)
 		}
 		m.Path = code
 	}
@@ -200,21 +165,21 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, name, path, gitURL, 
 	if groupID != nil {
 		m.GroupID = groupID
 	}
-	if err := s.db.WithContext(ctx).Save(&m).Error; err != nil {
+	if err := s.stores.Project.Save(ctx, m); err != nil {
 		return nil, err
 	}
-	return toDTO(&m), nil
+	return toDTO(m), nil
 }
 
 // Delete 删除记录。
 func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
-	return s.db.WithContext(ctx).Delete(&models.Project{}, "id = ?", id).Error
+	return s.stores.Project.Delete(ctx, id)
 }
 
 // ProjectWorkspaceKey 返回项目工作区目录键（项目编码）；无编码时返回错误，不使用 UUID 兜底。
 func (s *Service) ProjectWorkspaceKey(ctx context.Context, projectID uuid.UUID) (string, error) {
-	var m models.Project
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", projectID).Error; err != nil {
+	m, err := s.stores.Project.GetByID(ctx, projectID)
+	if err != nil {
 		return "", err
 	}
 	code := NormalizeProjectCode(m.Path)
@@ -230,7 +195,7 @@ func (s *Service) ProjectWorkspaceKey(ctx context.Context, projectID uuid.UUID) 
 // enrich 为实体补充当前用户权限等扩展字段。
 func (s *Service) enrich(ctx context.Context, m *models.Project, userID uuid.UUID, isAdmin bool) *Project {
 	p := toDTO(m)
-	enforcer := iam.NewEnforcer(s.db)
+	enforcer := iam.NewEnforcer(s.stores.IAM)
 	role, isMember, _ := enforcer.EffectiveRole(ctx, userID, m.ID)
 	if isAdmin {
 		p.CurrentUserRole = new(iam.RoleOwner)

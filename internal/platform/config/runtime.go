@@ -8,12 +8,9 @@ import (
 
 // RuntimeConfig 是进程内运行时配置，由系统配置服务从数据库加载并热更新。
 type RuntimeConfig struct {
-	AI       AIConfig
-	MCP      MCPConfig
-	Git      GitConfig
-	Worker   WorkerConfig
-	Pipeline PipelineConfig
-	Run      RunConfig
+	AI  AIConfig
+	MCP MCPConfig
+	Git GitConfig
 }
 
 // AIConfig 是 LLM 模型、上下文与安全策略。
@@ -94,32 +91,10 @@ type GitAccess struct {
 	SSHKeyPath string `json:"ssh_key_path"`
 }
 
-// WorkerConfig 是嵌入式任务队列 Worker 参数。
-type WorkerConfig struct {
-	Enabled      bool
-	PollInterval time.Duration
-	MaxAttempts  int
-	Concurrency  int
-}
-
-// PipelineConfig 是 Harness 默认流水线阶段。
-type PipelineConfig struct {
-	DefaultStages   []string
-	PullBeforeStage bool
-}
-
-// RunConfig 是 Run 沙箱相关内部参数。
-type RunConfig struct {
-	CleanupOnFailure bool // 失败或取消时删除 Run 沙箱目录
-}
-
 // DefaultRuntime 返回运行时配置的代码内置默认值（数据库无记录时由 Bootstrap 应用）。
 func DefaultRuntime() *RuntimeConfig {
 	return &RuntimeConfig{
 		MCP: MCPConfig{Servers: map[string]MCPServerConfig{}},
-		Run: RunConfig{
-			CleanupOnFailure: true,
-		},
 	}
 }
 

@@ -16,8 +16,6 @@ export default function RunsRedirectPage() {
         if (cancelled) return;
         if (isStageKind(run.kind)) {
           setTarget(`/projects/${id}/${run.kind}/${runId}`);
-        } else if (run.kind === "pipeline") {
-          setTarget(`/projects/${id}/build/${runId}`);
         } else {
           setTarget(`/projects/${id}`);
         }

@@ -841,8 +841,7 @@ func cloneState(s RunViewState) RunViewState {
 		}
 	}
 	if s.Result != nil {
-		r := *s.Result
-		out.Result = &r
+		out.Result = new(*s.Result)
 	}
 	return out
 }

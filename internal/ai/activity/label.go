@@ -9,7 +9,17 @@ import (
 	"unicode/utf8"
 )
 
-var genericTurnSummaryRE = regexp.MustCompile(`^第 \d+ 轮$`)
+var (
+	genericTurnSummaryRE = regexp.MustCompile(`^第 \d+ 轮( · .+)?$`)
+	asyncResultDescRE    = regexp.MustCompile(`Agent "([^"]+)"`)
+)
+
+const (
+	// LabelThinking 是无具体工具活动时的默认状态文案。
+	LabelThinking = "思考中…"
+	// LabelWaitingWorkers 是协调者等待异步 Worker 时的状态文案。
+	LabelWaitingWorkers = "等待 Worker 完成…"
+)
 
 // ToolSummaryInput 是 DeriveTurnSummary 所需的工具活动摘要输入。
 type ToolSummaryInput struct {
@@ -18,12 +28,10 @@ type ToolSummaryInput struct {
 	LiveOutput string
 }
 
-// TurnSummary 返回轮次在用户界面中的简短标题（不含内部跃迁信息）。
+// TurnSummary 返回新一轮迭代开始时的占位标题（不含轮次号）。
 func TurnSummary(turn int) string {
-	if turn < 1 {
-		turn = 1
-	}
-	return fmt.Sprintf("第 %d 轮", turn)
+	_ = turn
+	return LabelThinking
 }
 
 // IsGenericTurnSummary 识别无意义的占位 summary（纯轮次号或旧版跃迁格式）。
@@ -33,6 +41,9 @@ func IsGenericTurnSummary(s string) bool {
 		return true
 	}
 	if strings.Contains(s, "跃迁:") {
+		return true
+	}
+	if s == LabelThinking || s == LabelWaitingWorkers {
 		return true
 	}
 	return genericTurnSummaryRE.MatchString(s)
@@ -55,32 +66,67 @@ func DeriveTurnSummary(turn int, tools []ToolSummaryInput, message, thinking str
 	if line := firstLine(message); line != "" {
 		return truncateRunes(line, 80)
 	}
-	if strings.TrimSpace(thinking) != "" {
-		return "思考中…"
-	}
-	return TurnSummary(turn)
+	return LabelThinking
 }
 
 // TurnThinkingLabel 新一轮 TAOR 迭代开始、尚无工具活动时的状态文案。
 func TurnThinkingLabel(turn int, transition string) string {
+	_ = turn
 	if transition == "stop_hook_blocking" {
-		return fmt.Sprintf("第 %d 轮 · 校验未通过，正在重试…", turn)
+		return "校验未通过，正在重试…"
 	}
-	if turn <= 1 {
-		return "思考中…"
-	}
-	return fmt.Sprintf("第 %d 轮 · 思考中…", turn)
+	return LabelThinking
 }
 
-// TurnWithToolsLabel 工具调用间隙或完成后的轮次进度文案。
+// TurnWithToolsLabel 工具调用间隙或完成后的进度文案。
 func TurnWithToolsLabel(turn, toolUseCount int) string {
+	_ = turn
 	if toolUseCount <= 0 {
-		return TurnThinkingLabel(turn, "")
+		return LabelThinking
 	}
-	if turn <= 1 {
-		return fmt.Sprintf("已调用 %d 个工具", toolUseCount)
+	return fmt.Sprintf("已调用 %d 个工具", toolUseCount)
+}
+
+// SummarizeTools 将工具活动合并为一行可读摘要（用于日志与进度标题）。
+func SummarizeTools(tools []ToolSummaryInput) string {
+	var parts []string
+	for _, t := range tools {
+		if label := extractToolIntent(t.Name, t.Preview, t.LiveOutput); label != "" {
+			parts = append(parts, label)
+		}
 	}
-	return fmt.Sprintf("第 %d 轮 · 已调用 %d 个工具", turn, toolUseCount)
+	if len(parts) == 0 {
+		return ""
+	}
+	return truncateRunes(strings.Join(parts, " · "), 120)
+}
+
+// AsyncResultLabel 从 Worker 异步结果消息提取简短可读标签。
+func AsyncResultLabel(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return "Worker 结果"
+	}
+	if m := asyncResultDescRE.FindStringSubmatch(content); len(m) > 1 && strings.TrimSpace(m[1]) != "" {
+		return "Worker「" + truncateRunes(strings.TrimSpace(m[1]), 60) + "」"
+	}
+	if strings.Contains(content, "<agent_launched>") {
+		if desc := xmlTagContent(content, "description"); desc != "" {
+			return "Worker「" + truncateRunes(desc, 60) + "」"
+		}
+	}
+	if line := firstLine(content); line != "" {
+		return truncateRunes(line, 80)
+	}
+	return "Worker 结果"
+}
+
+func xmlTagContent(s, tag string) string {
+	re := regexp.MustCompile(`<` + tag + `>([^<]*)</` + tag + `>`)
+	if m := re.FindStringSubmatch(s); len(m) > 1 {
+		return strings.TrimSpace(m[1])
+	}
+	return ""
 }
 
 // ToolActivityLabel 根据工具名与执行状态生成活动导向文案。
@@ -145,6 +191,9 @@ func intentFromLiveOutput(liveOutput string) string {
 	if strings.HasPrefix(line, "子 Agent:") || strings.HasPrefix(line, "子 Agent：") {
 		return strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(line, "子 Agent:"), "子 Agent："))
 	}
+	if strings.HasPrefix(line, "Worker:") || strings.HasPrefix(line, "Worker：") {
+		return strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(line, "Worker:"), "Worker："))
+	}
 	if strings.HasPrefix(line, "$ ") {
 		return line
 	}
@@ -170,6 +219,15 @@ func intentFromPreview(name, preview string) string {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(preview), &args); err != nil {
 		return intentFromPartialJSON(name, preview)
+	}
+	if name == "agent" {
+		if desc := stringArg(args, "description"); desc != "" {
+			return "委派 Worker「" + truncateRunes(desc, 60) + "」"
+		}
+		if prompt := stringArg(args, "prompt"); prompt != "" {
+			return truncateRunes(prompt, 80)
+		}
+		return ""
 	}
 	if desc := stringArg(args, "description"); desc != "" {
 		return truncateRunes(desc, 80)
@@ -199,10 +257,6 @@ func intentFromPreview(name, preview string) string {
 		if u := stringArg(args, "url"); u != "" {
 			return "获取 " + truncateRunes(u, 60)
 		}
-	case "agent":
-		if prompt := stringArg(args, "prompt"); prompt != "" {
-			return truncateRunes(prompt, 80)
-		}
 	default:
 		if q := stringArg(args, "query"); q != "" {
 			return truncateRunes(q, 80)
@@ -217,8 +271,12 @@ func intentFromPartialJSON(name, preview string) string {
 		if m := re.FindStringSubmatch(preview); len(m) > 1 && m[1] != "" {
 			val := m[1]
 			switch key {
-			case "description", "query", "prompt":
+			case "description":
+				if name == "agent" {
+					return "委派 Worker「" + truncateRunes(val, 60) + "」"
+				}
 				return truncateRunes(val, 80)
+			case "query", "prompt":
 			case "target_path", "path", "file_path":
 				return formatPathIntent(name, val)
 			case "pattern":

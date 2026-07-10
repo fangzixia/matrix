@@ -295,7 +295,7 @@ func runChat(c *gin.Context, d *app.Deps) {
 	}
 	// 提交任务
 	rn, err := d.RunService.Start(c.Request.Context(), pid, u.ID, run.StartInput{
-		Kind: "chat", Title: body.Message, Message: body.Message,
+		Kind: run.KindChat, Title: body.Message, Message: body.Message,
 		ModelID:       modelID,
 		ChatSessionID: &sessionID, ChatUserMessageID: &userMessageID,
 	})

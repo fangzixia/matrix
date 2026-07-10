@@ -6,6 +6,7 @@ import (
 	"matrix/internal/ai/agent"
 	"matrix/internal/ai/audit"
 	"matrix/internal/ai/coordinator"
+	"matrix/internal/ai/harness"
 	"matrix/internal/ai/llm"
 	"matrix/internal/ai/mcp"
 	"matrix/internal/ai/ports"
@@ -246,6 +247,9 @@ func (r *Runtime) buildQueryConfig(
 	parentReg := coordinator.NewParentRegistry(coordCfg)
 	asyncResults, hasPending := coordAsync.QueryConfigFields()
 	prompt := coordinator.BuildParentSystemPrompt(workerOnly.Names(), mcpMgr.Names())
+	if req.Kind == string(harness.KindVerify) {
+		prompt += "\n\n" + harness.VerifyCoordinatorSupplement
+	}
 	logging.Agent("run: 构建 Query 配置", "session_id", sessionID, "sandbox", req.SandboxDir)
 	return coordinator.QueryConfigFromCoordinator(coordCfg, coordinator.QueryConfigOverrides{
 		SystemPrompt:    prompt,

@@ -19,7 +19,6 @@ type Run struct {
 	AuditPath    string     `gorm:"size:1024"`
 	Title        string     `gorm:"size:512"`
 	FilePath     string     `gorm:"size:512"`
-	EvalFilePath string     `gorm:"size:512"`
 	SandboxPath  string     `gorm:"size:1024"`
 	// SourceSandboxRunID 为 verify/implement 复用的代码沙箱来源 Run（不入库）。
 	SourceSandboxRunID uuid.UUID  `gorm:"-" json:"source_sandbox_run_id,omitempty"`
@@ -68,24 +67,4 @@ type RunView struct {
 	Seq       int64     `gorm:"not null;default:0"`
 	State     string    `gorm:"type:jsonb;not null"`
 	UpdatedAt time.Time
-}
-
-// RunJob 是 Run 对应的异步任务队列条目。
-type RunJob struct {
-	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
-	RunID     uuid.UUID `gorm:"type:uuid;uniqueIndex;not null"`
-	Status    string    `gorm:"size:32;not null;index"`
-	LockedBy  string    `gorm:"size:128"`
-	LockedAt  *time.Time
-	Attempts  int `gorm:"default:0"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
-
-// BeforeCreate 在 RunJob 入库前生成 UUID 主键。
-func (j *RunJob) BeforeCreate(tx *gorm.DB) error {
-	if j.ID == uuid.Nil {
-		j.ID = uuid.New()
-	}
-	return nil
 }

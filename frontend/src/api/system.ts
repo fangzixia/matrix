@@ -1,6 +1,6 @@
 /**
  * 系统配置 API：root 用户在 /admin/system 各 Tab 独立读写。
- * 对应后端 /api/admin/system/settings/{ai|mcp|git|worker|pipeline}
+ * 对应后端 /api/admin/system/settings/{ai|mcp|git}
  */
 import { api } from "./client";
 
@@ -72,20 +72,6 @@ export interface SystemGitSettings {
   default_ssh_key_path?: string;
 }
 
-/** Worker 任务队列参数 */
-export interface SystemWorkerSettings {
-  enabled: boolean;
-  poll_interval: string;
-  max_attempts: number;
-  concurrency: number;
-}
-
-/** 流水线默认阶段 */
-export interface SystemPipelineSettings {
-  default_stages: string[];
-  pull_before_stage: boolean;
-}
-
 export function getAISettings() {
   return api<AISettings>("/api/admin/system/settings/ai");
 }
@@ -127,26 +113,4 @@ export function testGitAccess(git_url: string) {
       body: JSON.stringify({ git_url }),
     },
   );
-}
-
-export function getWorkerSettings() {
-  return api<SystemWorkerSettings>("/api/admin/system/settings/worker");
-}
-
-export function saveWorkerSettings(body: SystemWorkerSettings) {
-  return api<SystemWorkerSettings>("/api/admin/system/settings/worker", {
-    method: "PUT",
-    body: JSON.stringify(body),
-  });
-}
-
-export function getPipelineSettings() {
-  return api<SystemPipelineSettings>("/api/admin/system/settings/pipeline");
-}
-
-export function savePipelineSettings(body: SystemPipelineSettings) {
-  return api<SystemPipelineSettings>("/api/admin/system/settings/pipeline", {
-    method: "PUT",
-    body: JSON.stringify(body),
-  });
 }

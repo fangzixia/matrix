@@ -9,14 +9,16 @@ export const runStatusLabels: Record<string, string> = {
   pending: "等待中",
 };
 
-export const runKindLabels: Record<string, string> = {
+import type { StageKind } from "@/types/runKind";
+
+export const runKindLabels: Record<StageKind, string> = {
   plan: "计划",
   implement: "实现",
   verify: "验证",
   build: "构建",
 };
 
-export const stageTitles: Record<string, string> = {
+export const stageTitles: Record<StageKind, string> = {
   plan: "编写计划",
   implement: "编码实现",
   verify: "验证评测",
@@ -24,10 +26,10 @@ export const stageTitles: Record<string, string> = {
 };
 
 /** Harness 各阶段说明文案 */
-export const harnessKindHints: Record<string, string> = {
-  plan: "以源代码调研为依据，编写含范围与结构化验收标准的用户向计划（docs/plans/PLAN-*.md）",
+export const harnessKindHints: Record<StageKind, string> = {
+  plan: "从系统用户角度描述需求如何被满足，生成易读的计划文档（含验收场景与附录）",
   implement: "根据计划文档完成编码实现与必要自测",
-  verify: "对照计划验收当前实现并生成评测报告（docs/evaluations/EVAL-*.md）",
+  verify: "以系统用户身份实操验收，生成需求满足度评测报告（docs/evaluations/EVAL-*.md）",
   build: "按计划完成实现与验收闭环",
 };
 

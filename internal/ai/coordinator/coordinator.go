@@ -94,7 +94,7 @@ type Config struct {
 	// 由 Bridge 持有并在每次会话开始时 SetParent(sessionCtx)。
 	RunControl *RunControl
 	// StreamHub 将 Worker 过程消息推到 UI，并更新 Registry 进度（可选）。
-	StreamHub SubAgentStreamHub
+	StreamHub *StreamHub
 	// EnableNestedAgents 为 true 时 Worker 可再派生子 Agent（独立 Async + 编排工具）。
 	EnableNestedAgents bool
 	// SpawnerAgentID 为调用 agent 工具的 Agent（嵌套 Worker）；空表示 Coordinator 顶层派生。
@@ -181,7 +181,7 @@ func makeAgentExecute(cfg Config) func(context.Context, map[string]any) (string,
 		}
 		parentAgentID := cfg.SpawnerAgentID
 		parentToolUseID := tools.ToolCallIDFromContext(ctx)
-		tools.EmitStatus(ctx, fmt.Sprintf("子 Agent: %s …", description))
+		tools.EmitStatus(ctx, fmt.Sprintf("Worker: %s …", description))
 		id := agent.NewID()
 		rec := &agent.Record{
 			ID:              id,
@@ -192,7 +192,7 @@ func makeAgentExecute(cfg Config) func(context.Context, map[string]any) (string,
 			ParentToolUseID: parentToolUseID,
 			CreatedAt:       time.Now(),
 		}
-		rec.SidechainPath = SidechainPath(cfg.StreamHub, id)
+		rec.SidechainPath = cfg.StreamHub.SidechainPath(id)
 		cfg.AgentRegistry.Register(rec)
 		if cfg.StreamHub != nil {
 			cfg.StreamHub.NotifySpawn(rec)
@@ -208,10 +208,10 @@ func makeAgentExecute(cfg Config) func(context.Context, map[string]any) (string,
 		if cfg.Async != nil {
 			cfg.Async.Inc()
 			go func() {
-				logging.Agent("coordinator: 异步子 Agent 启动", "agent_id", id, "description", description)
+				logging.Agent("Worker 启动", "agent_id", id, "description", description)
 				result := runSubAgentWorker(cfg, id, subCfg, workerSink)
 				finishSubAgent(cfg, id, result)
-				logging.Agent("coordinator: 异步子 Agent 完成",
+				logging.Agent("Worker 完成",
 					"agent_id", id, "turns", result.TurnCount, "stop_reason", result.StopReason)
 				cfg.Async.Send(query.Message{
 					Role:    query.RoleUser,
@@ -224,10 +224,10 @@ func makeAgentExecute(cfg Config) func(context.Context, map[string]any) (string,
 				id, description,
 			), nil
 		}
-		logging.Agent("coordinator: 同步子 Agent 启动", "agent_id", id, "description", description)
+		logging.Agent("Worker 启动（同步）", "agent_id", id, "description", description)
 		result := runSubAgentWorker(cfg, id, subCfg, workerSink)
 		finishSubAgent(cfg, id, result)
-		logging.Agent("coordinator: 同步子 Agent 完成", "agent_id", id, "turns", result.TurnCount)
+		logging.Agent("Worker 完成（同步）", "agent_id", id, "turns", result.TurnCount)
 		return agent.FormatResult(id, description, result), nil
 	}
 }
