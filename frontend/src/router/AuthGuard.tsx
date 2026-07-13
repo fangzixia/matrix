@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
-import { Spin } from "antd";
+import { Flex, Spin } from "antd";
 import { useAuthStore } from "@/stores/auth";
 import { resolvePostLoginRedirect } from "./guards";
 
@@ -22,9 +22,9 @@ export function AuthGuard({ public: isPublic, admin, root }: AuthGuardProps) {
   }, [initialized, fetchMe]);
   if (!initialized) {
     return (
-      <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
+      <Flex justify="center" style={{ padding: 48 }}>
         <Spin size="large" />
-      </div>
+      </Flex>
     );
   }
   if (isPublic) {

@@ -2,18 +2,15 @@ package view
 
 import (
 	"fmt"
-	"matrix/internal/ai/activity"
-	"matrix/internal/ai/agent"
-	"matrix/internal/ai/stream"
+	ai "matrix/ai/sdk"
+	"matrix/internal/modules/run/view/activity"
 	"strings"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 const maxLiveOutputRunes = 8192
 
-// Projector 将内部 stream.Message 投影为 RunViewState 与 AG-UI 事件。
+// Projector 将 AG-UI 事件投影为 RunViewState。
 type Projector struct {
 	runID     string
 	projectID string
@@ -50,221 +47,11 @@ func (p *Projector) State() RunViewState {
 	return cloneState(p.state)
 }
 
-// Apply 处理一条内部 stream 消息并更新 RunViewState。
-func (p *Projector) Apply(msg stream.Message) {
-	switch msg.Type {
-	case stream.TypeProgress:
-		p.applyProgress(msg)
-	case stream.TypeStreamEvent:
-		p.applyStreamEvent(msg)
-	case stream.TypeAssistant:
-		p.applyAssistant(msg)
-	case stream.TypeResult:
-		p.applyResult(msg)
-	case stream.TypeSubAgentUpdate, stream.TypeSubAgentDone:
-		p.applySubagentSnapshot(msg.Snapshot)
-	}
-
-	p.syncReplyText()
-	if p.shouldEmitSnapshot() {
-		p.lastSnap = time.Now()
-	}
-}
-
 // OnSubagent 由 coordinator 直接更新子 Agent 快照。
-func (p *Projector) OnSubagent(snap agent.Snapshot) {
+func (p *Projector) OnSubagent(snap ai.AgentSnapshot) {
 	p.setSubagentFromSnapshot(snap)
 	p.state.StatusLabel = subagentStatusLabel(snap)
 	p.lastSnap = time.Time{}
-}
-
-func (p *Projector) applyProgress(msg stream.Message) {
-	if msg.Data == nil {
-		return
-	}
-	data := msg.Data
-
-	switch data.Type {
-	case stream.DataTurnProgress:
-		turnNum := data.Turn
-		if turnNum < 1 {
-			turnNum = 1
-		}
-		if msg.Scope == stream.ScopeWorker {
-			p.ensureWorkerTurn(msg, turnNum, data.Summary)
-		} else {
-			p.ensureCoordinatorTurn(turnNum, data.Summary)
-		}
-		p.state.StatusLabel = activity.TurnThinkingLabel(turnNum, data.Transition)
-
-	case stream.DataToolOutputDelta:
-		turn := p.resolveToolTurn(msg, msg.ToolUseID)
-		if turn == nil {
-			turn = p.activeTurn(msg)
-		}
-		if turn != nil {
-			p.appendToolOutputDelta(turn, msg.ToolUseID, data.ToolName, data.Delta)
-			p.refreshTurnSummary(turn)
-		}
-		if data.ToolName != "" {
-			p.state.StatusLabel = activity.ToolActivityLabel(data.ToolName, "streaming")
-		}
-
-	case stream.DataToolProgress, stream.DataMCPProgress:
-		if data.Status == "input_streaming" && data.Delta != "" {
-			toolUseID := msg.ToolUseID
-			if toolUseID == "" {
-				toolUseID = fmt.Sprintf("input-%s", data.ToolName)
-			}
-			turn := p.resolveToolTurn(msg, toolUseID)
-			if turn == nil {
-				turn = p.activeTurn(msg)
-			}
-			if turn == nil {
-				return
-			}
-			if !isProvisionalToolID(toolUseID) {
-				p.reconcileProvisionalTools(turn, data.ToolName, toolUseID)
-			}
-			tool := p.upsertToolInTurn(turn, toolUseID, data.ToolName, "loading", data.ServerName, "", 0)
-			if tool != nil {
-				tool.Preview = tool.Preview + data.Delta
-			}
-			p.refreshTurnSummary(turn)
-		} else if data.Status == "started" {
-			toolUseID := msg.ToolUseID
-			if toolUseID == "" {
-				return
-			}
-			turn := p.resolveToolTurn(msg, toolUseID)
-			if turn == nil {
-				turn = p.activeTurn(msg)
-			}
-			if turn == nil {
-				return
-			}
-			p.reconcileProvisionalTools(turn, data.ToolName, toolUseID)
-			p.upsertToolInTurn(turn, toolUseID, data.ToolName, "loading", data.ServerName, data.Message, 0)
-			p.refreshTurnSummary(turn)
-			p.rememberCoordinatorToolTurn(msg, toolUseID)
-			p.state.StatusLabel = activity.ToolActivityLabel(data.ToolName, "started")
-		} else if data.Status == "completed" || data.Status == "failed" {
-			toolUseID := msg.ToolUseID
-			if toolUseID == "" {
-				return
-			}
-			turn := p.resolveToolTurn(msg, toolUseID)
-			if turn == nil {
-				turn = p.activeTurn(msg)
-			}
-			if turn == nil {
-				return
-			}
-			status := mapToolStatus(data.Status)
-			if data.ToolName == "" {
-				if existing, _ := p.findToolGlobal(toolUseID); existing != nil {
-					data.ToolName = existing.ToolCallName
-				}
-			}
-			p.reconcileProvisionalTools(turn, data.ToolName, toolUseID)
-			tool := p.upsertToolInTurn(turn, toolUseID, data.ToolName, status, data.ServerName, data.Message, data.ElapsedTimeMs)
-			if tool != nil {
-				tool.OutputStreaming = false
-			}
-			p.refreshTurnSummary(turn)
-			p.lastSnap = time.Time{}
-			p.state.StatusLabel = activity.TurnWithToolsLabel(turn.Turn, countFinishedTools(turn.Tools))
-		}
-	}
-}
-
-func (p *Projector) applyStreamEvent(msg stream.Message) {
-	if msg.Event == nil {
-		return
-	}
-	turn := p.activeTurn(msg)
-	if turn == nil {
-		return
-	}
-	ev := msg.Event
-
-	switch ev.Type {
-	case stream.EventMessageStart:
-		turn.MessageStreaming = true
-		turn.ThinkingStreaming = true
-		if p.messageID == "" {
-			p.messageID = uuid.NewString()
-		}
-	case stream.EventMessageStop:
-		turn.MessageStreaming = false
-		turn.ThinkingStreaming = false
-	case stream.EventContentBlockDelta:
-		if ev.Delta == nil {
-			return
-		}
-		if p.messageID == "" {
-			p.messageID = uuid.NewString()
-		}
-		if ev.Delta.Type == stream.DeltaThinking && ev.Delta.Thinking != "" {
-			turn.Thinking += ev.Delta.Thinking
-			p.refreshTurnSummary(turn)
-		}
-		if ev.Delta.Type == stream.DeltaText && ev.Delta.Text != "" {
-			turn.Message += ev.Delta.Text
-			p.refreshTurnSummary(turn)
-		}
-	}
-}
-
-func (p *Projector) applyAssistant(msg stream.Message) {
-	if msg.Assistant == nil {
-		return
-	}
-	turn := p.activeTurn(msg)
-	if turn == nil {
-		return
-	}
-	var thinking, text string
-	for _, block := range msg.Assistant.Content {
-		if block.Type == "thinking" && block.Thinking != "" {
-			thinking += block.Thinking
-		}
-		if block.Type == "text" && block.Text != "" {
-			text += block.Text
-		}
-	}
-	if thinking != "" {
-		turn.Thinking = thinking
-	}
-	if text != "" {
-		turn.Message = text
-	}
-	turn.ThinkingStreaming = false
-	turn.MessageStreaming = false
-	p.refreshTurnSummary(turn)
-}
-
-func (p *Projector) applyResult(msg stream.Message) {
-	result := &ResultView{
-		Subtype:    msg.Subtype,
-		Output:     msg.Output,
-		IsError:    msg.IsError,
-		Error:      msg.ErrorMessage,
-		NumTurns:   msg.NumTurns,
-		DurationMs: msg.DurationMs,
-		StopReason: msg.StopReason,
-	}
-	if msg.Output != "" && !msg.IsError {
-		p.state.Result = result
-	} else if msg.IsError || msg.Subtype == stream.ResultError || msg.Subtype == stream.ResultErrorMaxTurns {
-		p.state.Result = result
-		if msg.ErrorMessage != "" {
-			p.state.Error = FormatUserRunError(msg.ErrorMessage)
-		}
-	} else if p.state.Result == nil {
-		p.state.Result = result
-	}
-	p.finalizeStaleTools(!msg.IsError && msg.Subtype != stream.ResultError && msg.Subtype != stream.ResultErrorMaxTurns)
 }
 
 // finalizeStaleTools 在 Run 结束时清理仍卡在 loading 的工具条目（投影遗漏时的兜底）。
@@ -289,19 +76,7 @@ func (p *Projector) finalizeStaleTools(runSucceeded bool) {
 	}
 }
 
-func (p *Projector) applySubagentSnapshot(snapshot any) {
-	if snapshot == nil {
-		return
-	}
-	switch v := snapshot.(type) {
-	case agent.Snapshot:
-		p.setSubagentFromSnapshot(v)
-	case map[string]any:
-		p.setSubagentFromMap(v)
-	}
-}
-
-func (p *Projector) setSubagentFromSnapshot(snap agent.Snapshot) {
+func (p *Projector) setSubagentFromSnapshot(snap ai.AgentSnapshot) {
 	if snap.ID == "" {
 		return
 	}
@@ -405,65 +180,6 @@ func (p *Projector) ensureCoordinatorTurn(turnNum int, summary string) *TurnView
 	return p.parse.coordinatorTurn
 }
 
-func (p *Projector) ensureWorkerTurn(msg stream.Message, turnNum int, summary string) *TurnView {
-	parentID := p.resolveParentToolUseID(msg)
-	tool := p.findTool(parentID)
-	wk := p.workerMapKeyFrom(msg)
-	if tool == nil {
-		if parentID != "" {
-			tool = p.ensureParentAgentToolPlaceholder(parentID)
-		}
-		if tool == nil {
-			if wk != "" {
-				if existing, ok := p.parse.workerCurrentTurn[wk]; ok {
-					if summary != "" {
-						existing.Summary = summary
-					}
-					return existing
-				}
-			}
-			return nil
-		}
-	}
-	if wk == "" {
-		return nil
-	}
-	if existing, ok := p.parse.workerCurrentTurn[wk]; ok && existing.Turn == turnNum {
-		if summary != "" {
-			existing.Summary = summary
-		}
-		return existing
-	}
-	turn := TurnView{
-		Key:  fmt.Sprintf("worker-%s-turn-%d", msg.AgentID, turnNum),
-		Turn: turnNum, Scope: "worker", AgentID: msg.AgentID,
-		ParentToolUseID: parentID, Summary: summary, Tools: []ToolView{},
-	}
-	tool.WorkerTurns = append(tool.WorkerTurns, turn)
-	idx := len(tool.WorkerTurns) - 1
-	p.parse.workerCurrentTurn[wk] = &tool.WorkerTurns[idx]
-	return p.parse.workerCurrentTurn[wk]
-}
-
-func (p *Projector) activeTurn(msg stream.Message) *TurnView {
-	if msg.Scope == stream.ScopeWorker {
-		wk := p.workerMapKeyFrom(msg)
-		if wk != "" {
-			if t, ok := p.parse.workerCurrentTurn[wk]; ok {
-				return t
-			}
-		}
-		if t := p.ensureWorkerTurn(msg, 1, ""); t != nil {
-			return t
-		}
-		return nil
-	}
-	if p.parse.coordinatorTurn == nil {
-		return p.ensureCoordinatorTurn(1, "")
-	}
-	return p.parse.coordinatorTurn
-}
-
 func (p *Projector) findToolInTurn(turn *TurnView, toolUseID string) *ToolView {
 	for i := range turn.Tools {
 		if turn.Tools[i].ToolCallID == toolUseID {
@@ -498,16 +214,6 @@ func (p *Projector) findToolGlobal(toolUseID string) (*ToolView, *TurnView) {
 		}
 	}
 	return nil, nil
-}
-
-// resolveToolTurn 优先在已有工具条目所在轮次更新，避免 activeTurn 漂移导致完成态丢失。
-func (p *Projector) resolveToolTurn(msg stream.Message, toolUseID string) *TurnView {
-	if toolUseID != "" {
-		if _, turn := p.findToolGlobal(toolUseID); turn != nil {
-			return turn
-		}
-	}
-	return p.activeTurn(msg)
 }
 
 func (p *Projector) upsertToolInTurn(turn *TurnView, toolUseID, toolName, status, serverName, message string, elapsed int64) *ToolView {
@@ -578,31 +284,6 @@ func (p *Projector) appendToolOutputDelta(turn *TurnView, toolUseID, toolName, d
 		runes := []rune(tool.LiveOutput)
 		tool.LiveOutput = string(runes[len(runes)-maxLiveOutputRunes:])
 	}
-}
-
-func (p *Projector) resolveParentToolUseID(msg stream.Message) string {
-	if msg.ParentToolUseID != nil && *msg.ParentToolUseID != "" {
-		return *msg.ParentToolUseID
-	}
-	if msg.AgentID != "" {
-		return p.parse.workerParentToolID[msg.AgentID]
-	}
-	return ""
-}
-
-func (p *Projector) workerMapKeyFrom(msg stream.Message) string {
-	parentID := p.resolveParentToolUseID(msg)
-	if parentID == "" || msg.AgentID == "" {
-		return ""
-	}
-	return parentID + ":" + msg.AgentID
-}
-
-func (p *Projector) rememberCoordinatorToolTurn(msg stream.Message, toolUseID string) {
-	if msg.Scope == stream.ScopeWorker || toolUseID == "" || p.parse.coordinatorTurn == nil {
-		return
-	}
-	p.parse.parentToolCoordinatorTurn[toolUseID] = p.parse.coordinatorTurn.Turn
 }
 
 // ensureParentAgentToolPlaceholder 在 Worker 事件早于父 agent 工具投影时创建占位条目。
@@ -704,7 +385,7 @@ func toolSummaryInputs(tools []ToolView) []activity.ToolSummaryInput {
 	return out
 }
 
-func subagentStatusLabel(snap agent.Snapshot) string {
+func subagentStatusLabel(snap ai.AgentSnapshot) string {
 	if snap.Description != "" {
 		return fmt.Sprintf("子任务：%s…", snap.Description)
 	}

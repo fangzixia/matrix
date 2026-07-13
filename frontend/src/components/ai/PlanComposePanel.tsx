@@ -3,7 +3,9 @@ import { Alert, Flex, theme } from "antd";
 import MatrixAiChat, {
   type ChatPromptItem,
 } from "@/components/ai/MatrixAiChat";
-import RunActivityPanel from "@/components/ai/RunActivityPanel";
+import RunActivityPanel, {
+  runViewHasActivityPanel,
+} from "@/components/ai/RunActivityPanel";
 import { usePlanCompose } from "@/hooks/usePlanCompose";
 
 export interface PlanComposePanelProps {
@@ -58,7 +60,10 @@ export default function PlanComposePanel({
         <Alert
           type="error"
           title={error}
-          style={{ margin: "8px 24px 0", flexShrink: 0 }}
+          style={{
+            margin: `${token.marginXS}px ${token.paddingLG}px 0`,
+            flexShrink: 0,
+          }}
         />
       )}
       <MatrixAiChat
@@ -74,8 +79,8 @@ export default function PlanComposePanel({
         onResendUserMessage={resendUserMessage}
         onToggleMessageActivity={toggleMessageActivity}
         activitySlot={
-          activityState ? (
-            <div aria-live="polite" style={{ margin: "0 24px 12px" }}>
+          activityState && runViewHasActivityPanel(activityState, true) ? (
+            <div aria-live="polite">
               <RunActivityPanel
                 state={activityState}
                 running={loading}
@@ -88,16 +93,16 @@ export default function PlanComposePanel({
         style={{ flex: 1, minHeight: 0, height: "100%" }}
       />
       {footer ? (
-        <div
+        <Flex
           style={{
             flexShrink: 0,
-            padding: "12px 24px 16px",
+            padding: `${token.paddingSM}px ${token.paddingLG}px ${token.padding}px`,
             borderTop: `1px solid ${token.colorBorderSecondary}`,
             background: token.colorBgContainer,
           }}
         >
           {footer}
-        </div>
+        </Flex>
       ) : null}
     </Flex>
   );

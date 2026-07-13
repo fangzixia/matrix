@@ -4,12 +4,14 @@ import {
   type RunViewStreamHandlers,
 } from "@/api/runView";
 import * as runsApi from "@/api/runs";
-import type { RunViewState, StreamMode, ViewEnvelope } from "@/types/runView";
+import type { LoggedEvent, RunViewState, StreamMode } from "@/types/runView";
 import {
-  applyEnvelope,
+  applyAguiEvent,
   extractReplyText,
   extractRunFailure,
   formatUserRunError,
+  isJobTerminalEvent,
+  jobTerminalFromEvent,
 } from "@/utils/viewReducer";
 import { runDebug, runDebugWarn } from "@/utils/runDebug";
 
@@ -22,9 +24,9 @@ export interface RunFinishedState {
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
 const RUN_POLL_MS = 3_000;
 
-function envelopeKey(env: ViewEnvelope): string {
-  if (env.seq > 0) return `${env.type}:${env.seq}`;
-  return `${env.type}:${env.timestamp}`;
+function loggedEventKey(logged: LoggedEvent): string {
+  if (logged.seq > 0) return `${logged.event.type}:${logged.seq}`;
+  return `${logged.event.type}:${logged.timestamp ?? 0}`;
 }
 
 function isTerminalStatus(status: string): boolean {
@@ -37,7 +39,7 @@ export interface StreamRunViewTask {
 }
 
 /**
- * 订阅 Run 视图 SSE 直至终态；结束后等待 RUN_FINISHED，断线或超时时 getRun 兜底。
+ * 订阅 Run 视图 SSE 直至终态；结束后等待 job_run_finished，断线或超时时 getRun 兜底。
  */
 export function startStreamRunViewUntilTerminal(
   projectId: string,
@@ -84,32 +86,30 @@ export function startStreamRunViewUntilTerminal(
     resolveTerminal = null;
   }
 
-  function handleEnvelope(env: ViewEnvelope) {
-    const key = envelopeKey(env);
+  function handleLoggedEvent(logged: LoggedEvent) {
+    const key = loggedEventKey(logged);
     if (seenKeys.has(key)) return;
     seenKeys.add(key);
-    if (env.seq > lastSeq) lastSeq = env.seq;
-    runDebug("stream.envelope", {
+    if (logged.seq > lastSeq) lastSeq = logged.seq;
+    runDebug("stream.event", {
       runId: taskId,
-      type: env.type,
-      seq: env.seq,
+      type: logged.event.type,
+      seq: logged.seq,
     });
-    if (env.type === "RUN_FINISHED") {
-      const pl = env.payload as {
-        status: string;
-        output?: string;
-        error?: string;
-      };
-      finishTerminal(
-        {
-          status: pl.status,
-          output: pl.output,
-          error_message: pl.error,
-        },
-        "sse",
-      );
+    if (isJobTerminalEvent(logged)) {
+      const pl = jobTerminalFromEvent(logged);
+      if (pl) {
+        finishTerminal(
+          {
+            status: pl.status,
+            output: pl.output,
+            error_message: pl.error,
+          },
+          "sse",
+        );
+      }
     }
-    state = applyEnvelope(state, env);
+    state = applyAguiEvent(state, logged);
     const full = extractReplyText(state);
     if (full !== lastFull) {
       const delta = full.startsWith(lastFull)
@@ -154,7 +154,7 @@ export function startStreamRunViewUntilTerminal(
   runDebug("stream.start", { runId: taskId, projectId, mode });
 
   const handlers: RunViewStreamHandlers = {
-    onEnvelope: handleEnvelope,
+    onEvent: handleLoggedEvent,
     onDisconnect: () => {
       runDebugWarn("stream.sse.disconnect", { runId: taskId });
       if (terminalReceived) return;

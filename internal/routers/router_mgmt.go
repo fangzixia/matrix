@@ -376,10 +376,10 @@ func streamNotifications(c *gin.Context, d *app.Deps) {
 			if !open {
 				return
 			}
-			if msg.Type != "notification" || msg.Output == "" {
+			if msg.Type != "notification" || msg.Payload == "" {
 				continue
 			}
-			fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", events.EventNotification, msg.Output)
+			fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", events.EventNotification, msg.Payload)
 			flusher.Flush()
 		case <-c.Request.Context().Done():
 			return

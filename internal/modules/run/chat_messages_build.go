@@ -6,13 +6,13 @@ import (
 	"errors"
 	"fmt"
 
-	"matrix/internal/ai/query"
+	ai "matrix/ai/sdk"
 	"matrix/internal/platform/db/models"
 	"matrix/internal/platform/logging"
 )
 
 // buildChatRunMessages 从 chat_messages 表重建 Chat Run 的 LLM 输入。
-func (s *Service) buildChatRunMessages(ctx context.Context, m *models.Run) ([]query.Message, error) {
+func (s *Service) buildChatRunMessages(ctx context.Context, m *models.Run) ([]ai.Message, error) {
 	if m.ChatSessionID == nil || m.ChatUserMessageID == nil {
 		return nil, errors.New("chat run 缺少 session 关联")
 	}
@@ -28,12 +28,12 @@ func (s *Service) buildChatRunMessages(ctx context.Context, m *models.Run) ([]qu
 	if err != nil {
 		return nil, err
 	}
-	var attachments []query.MessageAttachment
+	var attachments []ai.MessageAttachment
 	if userRow.Attachments != "" && userRow.Attachments != "null" {
 		_ = json.Unmarshal([]byte(userRow.Attachments), &attachments)
 	}
-	userMsg := query.Message{
-		Role: query.RoleUser, Content: userRow.Content, Attachments: attachments,
+	userMsg := ai.Message{
+		Role: ai.RoleUser, Content: userRow.Content, Attachments: attachments,
 	}
 	out := append(history, userMsg)
 	logging.Agent("run: chat 消息已构建",

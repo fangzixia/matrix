@@ -6,6 +6,7 @@ import "gorm.io/gorm"
 type catalog struct {
 	run               *RunRepo
 	runView           *RunViewRepo
+	runViewEvent      *RunViewEventRepo
 	chatSession       *ChatSessionRepo
 	chatMessage       *ChatMessageRepo
 	project           *ProjectRepo
@@ -25,6 +26,7 @@ func newCatalog(db *gorm.DB) *catalog {
 	return &catalog{
 		run:               NewRunRepo(db),
 		runView:           NewRunViewRepo(db),
+		runViewEvent:      NewRunViewEventRepo(db),
 		chatSession:       NewChatSessionRepo(db),
 		chatMessage:       NewChatMessageRepo(db),
 		project:           NewProjectRepo(db),

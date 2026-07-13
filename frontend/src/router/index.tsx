@@ -1,6 +1,6 @@
 import { lazy, Suspense, type ComponentType } from "react";
 import { createBrowserRouter, Navigate } from "react-router-dom";
-import { Spin } from "antd";
+import { Flex, Spin } from "antd";
 import { AuthGuard } from "./AuthGuard";
 import { AppShell } from "@/layouts/AppShell";
 import { AuthLayout } from "@/layouts/AuthLayout";
@@ -12,9 +12,9 @@ const lazyPage = (factory: () => Promise<{ default: ComponentType }>) => {
   return (
     <Suspense
       fallback={
-        <div style={{ padding: 48, textAlign: "center" }}>
+        <Flex justify="center" style={{ padding: 48 }}>
           <Spin />
-        </div>
+        </Flex>
       }
     >
       <Comp />

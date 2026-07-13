@@ -47,3 +47,12 @@ type RunView struct {
 	State     string    `gorm:"type:jsonb;not null"`
 	UpdatedAt time.Time
 }
+
+// RunViewEvent 是 Run 视图 AG-UI 事件日志条目（按 Matrix Job ID 聚合）。
+type RunViewEvent struct {
+	JobID     uuid.UUID `gorm:"type:uuid;primaryKey"`
+	Seq       int64     `gorm:"primaryKey"`
+	EventType string    `gorm:"not null"`
+	Event     string    `gorm:"type:jsonb;not null"`
+	CreatedAt time.Time
+}

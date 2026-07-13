@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"matrix/internal/ai/query"
+	ai "matrix/ai/sdk"
 	"matrix/internal/platform/db/models"
 	"matrix/internal/platform/db/repo"
 
@@ -44,7 +44,7 @@ func modelToChatNode(row models.ChatMessage) ChatMessageNode {
 		node.RunID = row.RunID.String()
 	}
 	if row.Attachments != "" && row.Attachments != "null" {
-		var atts []query.MessageAttachment
+		var atts []ai.MessageAttachment
 		_ = json.Unmarshal([]byte(row.Attachments), &atts)
 		node.Attachments = atts
 	}
@@ -54,7 +54,7 @@ func modelToChatNode(row models.ChatMessage) ChatMessageNode {
 	return node
 }
 
-func encodeAttachments(atts []query.MessageAttachment) string {
+func encodeAttachments(atts []ai.MessageAttachment) string {
 	if len(atts) == 0 {
 		return "[]"
 	}
@@ -65,8 +65,8 @@ func encodeAttachments(atts []query.MessageAttachment) string {
 	return string(b)
 }
 
-// HistoryForParentDB 从数据库按 parent_id 回溯祖先链并转为 query.Message。
-func (s *Service) HistoryForParentDB(ctx context.Context, sessionID uuid.UUID, parentID string) ([]query.Message, error) {
+// HistoryForParentDB 从数据库按 parent_id 回溯祖先链并转为 ai.Message。
+func (s *Service) HistoryForParentDB(ctx context.Context, sessionID uuid.UUID, parentID string) ([]ai.Message, error) {
 	sm, err := s.loadSessionTreeByID(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -92,7 +92,7 @@ func (s *Service) ValidateParentDB(ctx context.Context, sessionID uuid.UUID, par
 }
 
 // InsertChatUserMessage 插入用户消息并更新 active_leaf_id。
-func (s *Service) InsertChatUserMessage(ctx context.Context, sessionID uuid.UUID, parentID string, content string, attachments []query.MessageAttachment, messageID uuid.UUID) error {
+func (s *Service) InsertChatUserMessage(ctx context.Context, sessionID uuid.UUID, parentID string, content string, attachments []ai.MessageAttachment, messageID uuid.UUID) error {
 	var parentUUID *uuid.UUID
 	parentID = strings.TrimSpace(parentID)
 	if parentID != "" {

@@ -113,8 +113,8 @@ func streamRun(c *gin.Context, d *app.Deps) {
 				)
 				first = false
 			}
-			for _, env := range envs {
-				writeRunViewSSE(c.Writer, env)
+			for _, le := range envs {
+				writeRunViewSSE(c.Writer, le)
 			}
 			if maxSeq > lastSeq {
 				lastSeq = maxSeq
@@ -135,9 +135,9 @@ func streamRun(c *gin.Context, d *app.Deps) {
 	}
 }
 
-func writeRunViewSSE(w http.ResponseWriter, env view.Envelope) {
-	b, _ := json.Marshal(env)
-	fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", env.Seq, sseEventRunView, b)
+func writeRunViewSSE(w http.ResponseWriter, le view.LoggedEvent) {
+	b, _ := json.Marshal(le)
+	fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", le.Seq, sseEventRunView, b)
 }
 
 func parseRunViewAfterSeq(c *gin.Context) int64 {

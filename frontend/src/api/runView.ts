@@ -2,7 +2,7 @@
  * Run 视图 SSE 与 REST API。
  */
 import { api } from "./client";
-import type { RunViewState, StreamMode, ViewEnvelope } from "@/types/runView";
+import type { LoggedEvent, RunViewState, StreamMode } from "@/types/runView";
 import { normalizeRunViewState } from "@/utils/viewReducer";
 import { runDebug, runDebugWarn } from "@/utils/runDebug";
 
@@ -15,7 +15,7 @@ export interface ToolLogResponse {
 }
 
 export interface RunViewStreamHandlers {
-  onEnvelope: (env: ViewEnvelope) => void;
+  onEvent: (logged: LoggedEvent) => void;
   onDisconnect?: () => void;
 }
 
@@ -63,10 +63,10 @@ export function subscribeRunViewStream(
 
   es.addEventListener("run:view", (ev) => {
     try {
-      const payload = JSON.parse(
+      const logged = JSON.parse(
         (ev as MessageEvent).data,
-      ) as ViewEnvelope;
-      handlers.onEnvelope(payload);
+      ) as LoggedEvent;
+      handlers.onEvent(logged);
     } catch (e) {
       runDebugWarn("sse.parse_error", {
         runId,

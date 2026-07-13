@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"matrix/internal/ai/agent"
-	"matrix/internal/ai/harness"
-	"matrix/internal/ai/query"
-	"matrix/internal/ai/tools"
+	ai "matrix/ai/sdk"
 	"matrix/internal/modules/eval"
+	"matrix/internal/modules/run/harness"
 	"matrix/internal/modules/run/view"
 	"matrix/internal/modules/workspace"
 	"matrix/internal/platform/db/models"
@@ -354,12 +352,13 @@ func (s *Service) executeRunStage(ctx context.Context, m *models.Run, kind *Kind
 			return errors.New("未配置 API Key")
 		}
 		runID := m.ID.String()
-		sink := s.viewStore.Sink(runID, m.ProjectID.String())
-		onSubagent := func(snap agent.Snapshot) {
+		threadID := m.ProjectID.String()
+		sink := s.viewStore.Sink(runID, threadID)
+		onSubagent := func(snap ai.AgentSnapshot) {
 			s.viewStore.OnSubagent(ctx, runID, snap)
 		}
 		sessionsDir := storageProjectSessions(s.paths, projectCode)
-		*sess = s.newAgentSession(aiCfg, mcpCfg, modelSpec, profile, m.SandboxPath, sessionsDir, runID, sink, onSubagent)
+		*sess = s.newAgentSession(aiCfg, mcpCfg, modelSpec, profile, m.SandboxPath, sessionsDir, runID, threadID, sink, onSubagent)
 	}
 	session := *sess
 
@@ -370,7 +369,7 @@ func (s *Service) executeRunStage(ctx context.Context, m *models.Run, kind *Kind
 	planAbsPath := s.harnessPlanFilePath(m.ProjectID, m.FilePath, kind)
 	evalFilePath := s.harnessEvalAbsPath(m.ProjectID, docsRoot, m, kind)
 
-	var messages []query.Message
+	var messages []ai.Message
 	if *kind == KindChat {
 		messages, err = s.buildChatRunMessages(ctx, m)
 		if err != nil {
@@ -490,7 +489,7 @@ func (s *Service) indexHarnessOutputs(ctx context.Context, m *models.Run, kind *
 	}
 }
 
-func runOutput(result query.Result) string {
+func runOutput(result ai.Result) string {
 	if result.Answer != "" {
 		return result.Answer
 	}
@@ -520,13 +519,14 @@ func (s *Service) attachRunCancel(ctx context.Context, runID, sandboxDir string,
 		logging.FieldRunID:     runID,
 		logging.FieldSessionID: runID,
 	})
-	runCtx = tools.WithSandbox(runCtx, sandboxDir)
+	var roots []string
+	if sandboxDir != "" {
+		roots = append(roots, sandboxDir)
+	}
 	if len(extraSandbox) > 0 {
-		runCtx = tools.WithExtraSandboxRoots(runCtx, extraSandbox)
+		roots = append(roots, extraSandbox...)
 	}
-	if matrixDir != "" {
-		runCtx = tools.WithMatrixDir(runCtx, matrixDir)
-	}
+	runCtx = ai.WithPolicy(runCtx, ai.NewPolicy(roots, matrixDir))
 	s.runCancelMu.Lock()
 	s.runCancels[runID] = cancel
 	s.runCancelMu.Unlock()

@@ -5,10 +5,10 @@
   --hr-margin: 20px 0;
   --table-margin: 12px 0 16px;
   --padding-code: 12px 14px;
-  --border-radius-middle: 8px;
+  --border-radius-middle: var(--ant-border-radius-lg, 8px);
 
-  font-size: 14px;
-  line-height: 1.65;
+  font-size: var(--ant-font-size, 14px);
+  line-height: var(--ant-line-height, 1.5715);
 
   h1,
   h2,
@@ -44,7 +44,7 @@
   pre code:not([class$="-highlightCode-code"] pre code) {
     font-family: var(--font-mono, "JetBrains Mono", ui-monospace, SFMono-Regular,
       Menlo, Monaco, Consolas, monospace);
-    font-size: 13px;
+    font-size: calc(var(--ant-font-size, 14px) - 1px);
     line-height: 1.55;
   }
 
@@ -73,12 +73,12 @@
   --table-margin: 10px 0 14px;
 
   h2 {
-    font-size: 18px;
-    line-height: 28px;
+    font-size: var(--ant-font-size-heading-3, 20px);
+    line-height: var(--ant-line-height-heading-3, 1.4);
   }
 
   h3 {
-    font-size: 16px;
-    line-height: 26px;
+    font-size: var(--ant-font-size-heading-4, 16px);
+    line-height: var(--ant-line-height-heading-4, 1.5);
   }
 }

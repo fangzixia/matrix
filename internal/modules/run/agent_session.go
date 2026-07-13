@@ -5,38 +5,33 @@ import (
 	"path/filepath"
 	"time"
 
-	"matrix/internal/ai/agent"
-	"matrix/internal/ai/audit"
-	"matrix/internal/ai/coordinator"
-	"matrix/internal/ai/harness"
-	"matrix/internal/ai/llm"
-	"matrix/internal/ai/mcp"
-	"matrix/internal/ai/query"
-	"matrix/internal/ai/stream"
-	"matrix/internal/ai/tools"
+	ai "matrix/ai/sdk"
+	"matrix/internal/modules/run/audit"
+	"matrix/internal/modules/run/harness"
 	"matrix/internal/platform/config"
 	"matrix/internal/platform/logging"
 )
 
 // agentSession 复用 MCP、Registry 与 Coordinator 基础设施，跨 build 多轮阶段共享。
 type agentSession struct {
-	client     *llm.Client
+	client     *ai.Client
 	model      string
 	maxTokens  int
 	allowShell bool
-	ctxPolicy  query.ContextPolicy
+	ctxPolicy  ai.ContextPolicy
 
-	mcpMgr     *mcp.Manager
-	registry   *agent.Registry
-	coordAsync *coordinator.AsyncSupport
-	workerRun  *coordinator.RunControl
-	sidechain  *agent.SidechainWriter
+	mcpMgr     *ai.MCPManager
+	registry   *ai.AgentRegistry
+	coordAsync *ai.AsyncSupport
+	workerRun  *ai.RunControl
+	sidechain  *ai.AgentSidechainWriter
 
 	sandboxDir  string
 	sessionsDir string
-	sessionID   string
-	viewSink    stream.Sink
-	onSubagent  func(agent.Snapshot)
+	jobID       string
+	threadID    string
+	viewSink    ai.Sink
+	onSubagent  func(ai.AgentSnapshot)
 }
 
 func (s *Service) newAgentSession(
@@ -44,11 +39,11 @@ func (s *Service) newAgentSession(
 	mcpCfg config.MCPConfig,
 	modelSpec config.ModelSpec,
 	profile config.ModelProfile,
-	sandboxDir, sessionsDir, sessionID string,
-	viewSink stream.Sink,
-	onSubagent func(agent.Snapshot),
+	sandboxDir, sessionsDir, jobID, threadID string,
+	viewSink ai.Sink,
+	onSubagent func(ai.AgentSnapshot),
 ) *agentSession {
-	client := llm.NewClient(modelSpec.BaseURL, modelSpec.APIKey)
+	client := ai.NewClient(modelSpec.BaseURL, modelSpec.APIKey)
 	client.ModelName = profile.Name
 	subagentsDir := filepath.Join(filepath.Dir(sessionsDir), "subagents")
 	return &agentSession{
@@ -56,37 +51,39 @@ func (s *Service) newAgentSession(
 		model:      modelSpec.Model,
 		maxTokens:  modelSpec.MaxTokens,
 		allowShell: aiCfg.Security.AllowShell,
-		ctxPolicy: query.ContextPolicy{
+		ctxPolicy: ai.ContextPolicy{
 			AutoCompactThreshold: aiCfg.Context.AutoCompactThreshold,
 			KeepRecentMessages:   aiCfg.Context.KeepRecentMessages,
 		},
 		mcpMgr:      newMCPManager(mcpCfg.Servers, aiCfg.Security.AllowCommandMCP),
-		registry:    agent.NewRegistry(),
-		coordAsync:  coordinator.NewAsyncSupport(),
-		workerRun:   coordinator.NewRunControl(),
-		sidechain:   agent.NewSidechainWriter(subagentsDir),
+		registry:    ai.NewAgentRegistry(),
+		coordAsync:  ai.NewAsyncSupport(),
+		workerRun:   ai.NewRunControl(),
+		sidechain:   ai.NewAgentSidechainWriter(subagentsDir),
 		sandboxDir:  sandboxDir,
 		sessionsDir: sessionsDir,
-		sessionID:   sessionID,
+		jobID:       jobID,
+		threadID:    threadID,
 		viewSink:    viewSink,
 		onSubagent:  onSubagent,
 	}
 }
 
-func (a *agentSession) runPhase(ctx context.Context, kind Kind, messages []query.Message) (query.Result, error) {
-	streamSink, closeSink := buildStreamingSink(a.viewSink, a.sessionID)
+func (a *agentSession) runPhase(ctx context.Context, kind Kind, messages []ai.Message) (ai.Result, error) {
+	aguiRunID := ai.NewRunID()
+	streamSink, closeSink := ai.BuildCoalescedSink(a.viewSink, 100*time.Millisecond, 200*time.Millisecond)
 	defer closeSink()
 
-	auditWriter := audit.NewWriter(a.sessionsDir, a.sandboxDir, a.sessionID)
-	hub := coordinator.NewStreamHub(a.sessionID, a.registry, a.sidechain, streamSink, nil, a.onSubagent, a.onSubagent)
+	auditWriter := audit.NewWriter(a.sessionsDir, a.sandboxDir, aguiRunID)
+	hub := ai.NewStreamHub(a.threadID, aguiRunID, a.registry, a.sidechain, streamSink, nil, a.onSubagent, a.onSubagent)
 	hub.Audit = auditWriter
 
-	qCfg := a.buildQueryConfig(kind, messages, a.mcpMgr, hub, auditWriter)
+	qCfg := a.buildQueryConfig(kind, messages, a.mcpMgr, hub, auditWriter, aguiRunID)
 	a.workerRun.SetParent(ctx)
 	defer a.workerRun.SetParent(context.Background())
 
 	start := time.Now()
-	result := query.RunSession(ctx, qCfg, streamSink)
+	result := ai.RunSession(ctx, qCfg, streamSink)
 	_ = auditWriter.Close(audit.SessionMeta{
 		StopReason: string(result.StopReason),
 		TurnCount:  result.TurnCount,
@@ -97,18 +94,19 @@ func (a *agentSession) runPhase(ctx context.Context, kind Kind, messages []query
 
 func (a *agentSession) buildQueryConfig(
 	kind Kind,
-	messages []query.Message,
-	mcpMgr *mcp.Manager,
-	hub *coordinator.StreamHub,
+	messages []ai.Message,
+	mcpMgr *ai.MCPManager,
+	hub *ai.StreamHub,
 	auditWriter *audit.Writer,
-) query.Config {
-	reg := tools.DefaultRegistry()
+	aguiRunID string,
+) ai.Config {
+	reg := ai.DefaultRegistry()
 	if !a.allowShell {
-		reg = tools.RegistryWithoutShell(nil)
+		reg = ai.RegistryWithoutShell(nil)
 	}
-	_ = tools.RegisterMCPTools(reg, mcpMgr)
-	workerOnly := coordinator.CloneWorkerRegistry(reg)
-	coordCfg := coordinator.Config{
+	_ = ai.RegisterMCPTools(reg, mcpMgr)
+	workerOnly := ai.CloneWorkerRegistry(reg)
+	coordCfg := ai.CoordinatorConfig{
 		LLM:           a.client,
 		Model:         a.model,
 		AgentRegistry: a.registry,
@@ -120,38 +118,39 @@ func (a *agentSession) buildQueryConfig(
 		Async:         a.coordAsync,
 		RunControl:    a.workerRun,
 		StreamHub:     hub,
-		SessionID:     a.sessionID,
+		ThreadID:      a.threadID,
+		RunID:         aguiRunID,
+		SessionID:     aguiRunID,
 		Audit:         auditWriter,
 		SandboxDir:    a.sandboxDir,
+		WorkerUserMessageFormat: func(p string) string {
+			return harness.FormatWorkspaceUserMessage(a.sandboxDir, "", p, "")
+		},
 	}
-	parentReg := coordinator.NewParentRegistry(coordCfg)
+	parentReg := ai.NewParentRegistry(coordCfg)
 	asyncResults, hasPending := a.coordAsync.QueryConfigFields()
-	prompt := coordinator.BuildParentSystemPrompt(workerOnly.Names(), mcpMgr.Names())
+	prompt := ai.BuildParentSystemPrompt(workerOnly.Names(), mcpMgr.Names())
 	if kind == KindVerify {
 		prompt += "\n\n" + harness.VerifyCoordinatorSupplement
 	}
-	logging.Agent("run: 构建 Query 配置", "session_id", a.sessionID, "sandbox", a.sandboxDir)
-	return coordinator.QueryConfigFromCoordinator(coordCfg, coordinator.QueryConfigOverrides{
+	logging.Agent("run: 构建 Query 配置", "job_id", a.jobID, "run_id", aguiRunID, "sandbox", a.sandboxDir)
+	cfg := ai.QueryConfigFromCoordinator(coordCfg, ai.CoordinatorQueryConfigOverrides{
 		SystemPrompt:    prompt,
 		Registry:        parentReg,
 		AsyncResults:    asyncResults,
 		HasPendingAsync: hasPending,
-		InitialMessages: append([]query.Message(nil), messages...),
+		InitialMessages: append([]ai.Message(nil), messages...),
 	})
+	cfg.ThreadID = a.threadID
+	cfg.RunID = aguiRunID
+	cfg.ParentRunID = a.jobID
+	cfg.SessionID = aguiRunID
+	return cfg
 }
 
-func buildStreamingSink(base stream.Sink, runID string) (stream.Sink, func()) {
-	coalescedText := stream.NewCoalesceSink(base, runID, 100*time.Millisecond)
-	coalesced := stream.NewOutputCoalesceSink(coalescedText, runID, 200*time.Millisecond)
-	return coalesced, func() {
-		coalesced.Close()
-		coalescedText.Close()
-	}
-}
-
-func newMCPManager(servers map[string]config.MCPServerConfig, allowCommandMCP bool) *mcp.Manager {
-	m := mcp.NewManager()
-	cfgs := map[string]mcp.ServerConfig{}
+func newMCPManager(servers map[string]config.MCPServerConfig, allowCommandMCP bool) *ai.MCPManager {
+	m := ai.NewMCPManager()
+	cfgs := map[string]ai.MCPServerConfig{}
 	for name, srv := range servers {
 		if srv.Disabled {
 			continue
@@ -159,7 +158,7 @@ func newMCPManager(servers map[string]config.MCPServerConfig, allowCommandMCP bo
 		if !allowCommandMCP && srv.Command != "" {
 			continue
 		}
-		cfgs[name] = mcp.ServerConfig{
+		cfgs[name] = ai.MCPServerConfig{
 			Command: srv.Command, Args: srv.Args, URL: srv.URL,
 			Headers: srv.Headers, Env: srv.Env, Disabled: srv.Disabled,
 		}

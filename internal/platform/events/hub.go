@@ -3,7 +3,6 @@ package events
 
 import (
 	"encoding/json"
-	"matrix/internal/ai/stream"
 	"sync"
 )
 
@@ -12,8 +11,14 @@ const (
 	EventNotification = "notification"
 )
 
+// Notification 是站内通知 SSE 载荷。
+type Notification struct {
+	Type    string `json:"type"`
+	Payload string `json:"payload"`
+}
+
 // Subscriber 是订阅通知事件的 buffered channel。
-type Subscriber chan stream.Message
+type Subscriber chan Notification
 
 // Hub 按 userID 维护 SSE 订阅者集合。
 type Hub struct {
@@ -51,8 +56,7 @@ func (h *Hub) Unsubscribe(key string, ch Subscriber) {
 	}
 }
 
-// publish 向 key 的全部订阅者非阻塞推送消息。
-func (h *Hub) publish(key string, msg stream.Message) {
+func (h *Hub) publish(key string, msg Notification) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for ch := range h.subs[key] {
@@ -66,7 +70,7 @@ func (h *Hub) publish(key string, msg stream.Message) {
 // PublishNotification 向指定用户推送站内通知 SSE 消息。
 func (h *Hub) PublishNotification(userID string, payload any) {
 	b, _ := json.Marshal(payload)
-	h.publish("user:"+userID, stream.Message{
-		Type: "notification", SessionID: "user:" + userID, Output: string(b),
+	h.publish("user:"+userID, Notification{
+		Type: "notification", Payload: string(b),
 	})
 }

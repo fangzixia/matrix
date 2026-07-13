@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"matrix/internal/ai/query"
+	ai "matrix/ai/sdk"
 	"matrix/internal/modules/artifact"
 	"matrix/internal/modules/notification"
 	"matrix/internal/modules/plan"
@@ -222,7 +222,7 @@ func (s *Service) StreamCatchUpSinceForProject(
 	runID uuid.UUID,
 	mode view.Mode,
 	afterSeq int64,
-) ([]view.Envelope, bool, int64, error) {
+) ([]view.LoggedEvent, bool, int64, error) {
 	m, err := s.loadProjectRun(ctx, projectID, runID)
 	if err != nil {
 		return nil, false, afterSeq, err
@@ -230,16 +230,16 @@ func (s *Service) StreamCatchUpSinceForProject(
 	return s.catchUpRunView(ctx, m, mode, afterSeq)
 }
 
-func (s *Service) catchUpRunView(ctx context.Context, m *models.Run, mode view.Mode, afterSeq int64) ([]view.Envelope, bool, int64, error) {
+func (s *Service) catchUpRunView(ctx context.Context, m *models.Run, mode view.Mode, afterSeq int64) ([]view.LoggedEvent, bool, int64, error) {
 	userErr := ""
 	if m.ErrorMessage != "" {
 		userErr = view.FormatUserRunError(m.ErrorMessage)
 	}
-	envs, done, maxSeq := s.viewStore.CatchUpAfterSeq(
+	events, done, maxSeq := s.viewStore.CatchUpAfterSeq(
 		ctx, m.ID.String(), mode, afterSeq,
 		m.Status, m.Output, userErr,
 	)
-	return envs, done, maxSeq, nil
+	return events, done, maxSeq, nil
 }
 
 // GetRunViewForProject 返回项目内 Run 活动视图快照。
@@ -252,13 +252,13 @@ func (s *Service) GetRunViewForProject(ctx context.Context, projectID, runID uui
 
 // ChatMessageDTO 是单条聊天消息 API 返回。
 type ChatMessageDTO struct {
-	ID          string                    `json:"id"`
-	ParentID    *string                   `json:"parent_id"`
-	Role        string                    `json:"role"`
-	Content     string                    `json:"content"`
-	Attachments []query.MessageAttachment `json:"attachments,omitempty"`
-	RunID       string                    `json:"run_id,omitempty"`
-	CreatedAt   string                    `json:"created_at,omitempty"`
+	ID          string                 `json:"id"`
+	ParentID    *string                `json:"parent_id"`
+	Role        string                 `json:"role"`
+	Content     string                 `json:"content"`
+	Attachments []ai.MessageAttachment `json:"attachments,omitempty"`
+	RunID       string                 `json:"run_id,omitempty"`
+	CreatedAt   string                 `json:"created_at,omitempty"`
 }
 
 // ChatSessionSummaryDTO 是会话列表项（不含消息树）。

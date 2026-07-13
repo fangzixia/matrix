@@ -36,6 +36,7 @@ import {
   isRunViewTerminal,
   useRunActivityView,
 } from "@/hooks/useRunActivityView";
+import { MATRIX_LAYOUT } from "@/theme/layout";
 
 type AttachmentsRef = GetRef<typeof Attachments>;
 
@@ -188,6 +189,7 @@ function MessageActivityBlock({
   projectId: string;
   runId: string;
 }) {
+  const { token } = theme.useToken();
   const { state, loading, error, disconnected } = useRunActivityView(
     projectId,
     runId,
@@ -197,16 +199,16 @@ function MessageActivityBlock({
   if (loading) return <Spin size="small" />;
   if (error) {
     return (
-      <Typography.Text type="danger" style={{ fontSize: 12 }}>
+      <Typography.Text type="danger" style={{ fontSize: token.fontSizeSM }}>
         {error}
       </Typography.Text>
     );
   }
   if (!state) return null;
   return (
-    <Flex vertical gap={8}>
+    <Flex vertical gap={token.marginXS}>
       {disconnected && !isRunViewTerminal(state) ? (
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+        <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
           连接中断，正在等待浏览器自动重连…
         </Typography.Text>
       ) : null}
@@ -286,13 +288,19 @@ export default function MatrixAiChat({
     [validateFile],
   );
 
-  const bubbleItems: BubbleItemType[] = items.map((item) => ({
-    key: item.key,
-    role: item.role,
-    content: item.content,
-    loading: item.loading,
-    streaming: item.role === "ai" && !!item.loading,
-  }));
+  // Bubble 的 loading 会替换整段内容为转圈；流式输出中应只用 streaming，
+  // 仅在尚无正文时显示 loading，否则回复会跑到 activitySlot 并与气泡叠层错乱。
+  const bubbleItems: BubbleItemType[] = items.map((item) => {
+    const pending = item.role === "ai" && !!item.loading;
+    const hasContent = Boolean(item.content?.trim());
+    return {
+      key: item.key,
+      role: item.role,
+      content: item.content,
+      loading: pending && !hasContent,
+      streaming: pending,
+    };
+  });
 
   const bubbleRole = useMemo(
     () => ({
@@ -351,7 +359,8 @@ export default function MatrixAiChat({
         const src = itemsByKey.get(data.key ?? "");
         const textContent =
           typeof data.content === "string" ? data.content : "";
-        const showActions = !data.loading && textContent;
+        const isStreaming = !!data.streaming || !!data.loading;
+        const showActions = !isStreaming && !!textContent;
         return {
           placement: "start" as const,
           variant: "filled" as const,
@@ -381,7 +390,7 @@ export default function MatrixAiChat({
                 <MarkdownView
                   content={content}
                   variant="chat"
-                  streaming={!!data.loading}
+                  streaming={isStreaming}
                 />
                 {src?.activityExpanded && src.runId && projectId ? (
                   <MessageActivityBlock
@@ -464,67 +473,68 @@ export default function MatrixAiChat({
     return parts.length ? `支持附件：${parts.join("、")}` : undefined;
   }, [showAttachments, allowedTypes]);
 
-  const messageList = (
-    <>
-      {items.length === 0 ? (
-        <Flex vertical gap={16} align="center" style={{ paddingTop: 48 }}>
-          <Welcome
-            icon={<RobotOutlined />}
-            title={welcomeTitle}
-            description={
-              welcomeDescription ||
-              (modelLabel ? `当前模型：${modelLabel}` : undefined)
-            }
-            variant="borderless"
+  const messageList =
+    items.length === 0 ? (
+      <Flex vertical gap={16} align="center" style={{ paddingTop: 48 }}>
+        <Welcome
+          icon={<RobotOutlined />}
+          title={welcomeTitle}
+          description={
+            welcomeDescription ||
+            (modelLabel ? `当前模型：${modelLabel}` : undefined)
+          }
+          variant="borderless"
+        />
+        {multimodalHint || attachmentHint ? (
+          <Typography.Text type="secondary">
+            {multimodalHint || attachmentHint}
+          </Typography.Text>
+        ) : null}
+        {prompts && prompts.length > 0 ? (
+          <Prompts
+            title="你可以问我"
+            items={prompts.map((p) => ({
+              key: p.key,
+              label: p.label,
+              description: p.description,
+            }))}
+            onItemClick={(info) => {
+              const label =
+                typeof info.data.label === "string"
+                  ? info.data.label
+                  : String(info.data.label ?? "");
+              setInputValue(label);
+            }}
+            styles={{
+              list: { gap: token.marginSM, maxWidth: 720, width: "100%" },
+              item: {
+                flex: "1 1 200px",
+                border: `1px solid ${token.colorBorderSecondary}`,
+                borderRadius: token.borderRadiusLG,
+                background: token.colorBgContainer,
+                boxShadow: token.boxShadowTertiary,
+                padding: `${token.paddingSM + 2}px ${token.padding}px`,
+              },
+            }}
+            wrap
           />
-          {multimodalHint || attachmentHint ? (
-            <Typography.Text type="secondary">
-              {multimodalHint || attachmentHint}
-            </Typography.Text>
-          ) : null}
-          {prompts && prompts.length > 0 ? (
-            <Prompts
-              title="你可以问我"
-              items={prompts.map((p) => ({
-                key: p.key,
-                label: p.label,
-                description: p.description,
-              }))}
-              onItemClick={(info) => {
-                const label =
-                  typeof info.data.label === "string"
-                    ? info.data.label
-                    : String(info.data.label ?? "");
-                setInputValue(label);
-              }}
-              styles={{
-                list: { gap: 12, maxWidth: 720, width: "100%" },
-                item: {
-                  flex: "1 1 200px",
-                  border: `1px solid ${token.colorBorderSecondary}`,
-                  borderRadius: token.borderRadiusLG,
-                  background: token.colorBgContainer,
-                  boxShadow: token.boxShadowTertiary,
-                  padding: "14px 16px",
-                },
-              }}
-              wrap
-            />
-          ) : null}
-        </Flex>
-      ) : (
-        <Bubble.List items={bubbleItems} autoScroll role={bubbleRole} />
-      )}
-      {activitySlot}
-    </>
-  );
+        ) : null}
+      </Flex>
+    ) : (
+      <Bubble.List
+        items={bubbleItems}
+        autoScroll
+        role={bubbleRole}
+        style={{ height: "100%" }}
+      />
+    );
 
   const senderPanel = (
     <div
       style={{
         height: "100%",
         boxSizing: "border-box",
-        padding: "12px 24px 16px",
+        padding: `${token.paddingSM}px ${token.paddingLG}px ${token.padding}px`,
         background: token.colorBgContainer,
         borderTop: `1px solid ${token.colorBorderSecondary}`,
         overflow: "auto",
@@ -599,18 +609,43 @@ export default function MatrixAiChat({
       }}
     >
       <Splitter.Panel defaultSize="70%" min="120px">
-        <div
+        <Flex
+          vertical
           style={{
             height: "100%",
             minHeight: 0,
-            overflow: "auto",
-            padding: "16px 24px",
             boxSizing: "border-box",
             background: token.colorBgLayout,
           }}
         >
-          {messageList}
-        </div>
+          <Flex
+            vertical
+            style={{
+              flex: 1,
+              minHeight: 0,
+              overflow: items.length === 0 ? "auto" : "hidden",
+              padding: `${token.padding}px ${token.paddingLG}px`,
+              boxSizing: "border-box",
+            }}
+          >
+            {messageList}
+          </Flex>
+          {activitySlot ? (
+            <Flex
+              vertical
+              style={{
+                flexShrink: 0,
+                maxHeight: MATRIX_LAYOUT.activityPanelMaxHeight,
+                overflow: "auto",
+                padding: `0 ${token.paddingLG}px ${token.paddingSM}px`,
+                boxSizing: "border-box",
+                borderTop: `1px solid ${token.colorBorderSecondary}`,
+              }}
+            >
+              {activitySlot}
+            </Flex>
+          ) : null}
+        </Flex>
       </Splitter.Panel>
       <Splitter.Panel min="96px">{senderPanel}</Splitter.Panel>
     </Splitter>

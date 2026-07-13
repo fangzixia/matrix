@@ -3,7 +3,7 @@ package run
 import (
 	"encoding/json"
 	"fmt"
-	"matrix/internal/ai/harness"
+	"matrix/internal/modules/run/harness"
 	"strings"
 )
 

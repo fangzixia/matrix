@@ -117,7 +117,7 @@ type ActivitySnapshotPayload struct {
 func AllowedInChat(eventType string) bool {
 	switch eventType {
 	case EventRUNStarted, EventRUNFinished, EventRUNError, EventTEXTMessageContent,
-		EventACTIVITYSnapshot, EventSTATESnapshot:
+		EventACTIVITYSnapshot, EventSTATESnapshot, "job_run_finished":
 		return true
 	default:
 		return false

@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"matrix/internal/ai/query"
+	ai "matrix/ai/sdk"
 	"matrix/internal/app"
 	"matrix/internal/modules/iam"
 	"matrix/internal/modules/run"
@@ -251,9 +251,9 @@ func runChat(c *gin.Context, d *app.Deps) {
 		}
 	}
 	// 格式化附件
-	var attachments []query.MessageAttachment
+	var attachments []ai.MessageAttachment
 	for _, att := range body.Attachments {
-		attachments = append(attachments, query.MessageAttachment{
+		attachments = append(attachments, ai.MessageAttachment{
 			Type: att.Type, MimeType: att.MimeType, Name: att.Name, Data: att.Data,
 		})
 	}

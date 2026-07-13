@@ -1,14 +1,16 @@
-/** Run 视图类型，对齐 internal/modules/run/view */
+/** Run 视图类型，对齐 internal/modules/run/view + AG-UI 扁平事件 */
 
 export type StreamMode = "chat" | "detail";
 
-export type ViewEventType =
+/** AG-UI 事件类型（扁平 JSON 的 type 字段） */
+export type AguiEventType =
   | "RUN_STARTED"
   | "RUN_FINISHED"
   | "RUN_ERROR"
   | "TEXT_MESSAGE_START"
   | "TEXT_MESSAGE_CONTENT"
   | "TEXT_MESSAGE_END"
+  | "REASONING_MESSAGE_START"
   | "REASONING_MESSAGE_CONTENT"
   | "REASONING_MESSAGE_END"
   | "TOOL_CALL_START"
@@ -18,10 +20,40 @@ export type ViewEventType =
   | "ACTIVITY_SNAPSHOT"
   | "STATE_SNAPSHOT"
   | "STEP_STARTED"
-  | "STEP_FINISHED";
+  | "STEP_FINISHED"
+  | "CUSTOM";
 
+/** AG-UI 扁平事件（SSE event 字段） */
+export interface AguiStreamEvent {
+  type: AguiEventType | string;
+  timestamp?: number;
+  threadId?: string;
+  runId?: string;
+  messageId?: string;
+  delta?: string;
+  toolCallId?: string;
+  toolCallName?: string;
+  content?: string;
+  activityType?: string;
+  snapshot?: RunViewState;
+  result?: Record<string, unknown>;
+  message?: string;
+  name?: string;
+  value?: Record<string, unknown>;
+  stepName?: string;
+}
+
+/** SSE 事件日志条目（Matrix jobId + seq + 扁平 AG-UI event） */
+export interface LoggedEvent {
+  jobId: string;
+  seq: number;
+  timestamp?: number;
+  event: AguiStreamEvent;
+}
+
+/** @deprecated 旧 ViewEnvelope 格式，仅作兼容别名 */
 export interface ViewEnvelope<T = unknown> {
-  type: ViewEventType | string;
+  type: AguiEventType | string;
   runId: string;
   seq: number;
   timestamp: number;
@@ -92,13 +124,15 @@ export interface ResultView {
   stopReason?: string;
 }
 
-export interface RunFinishedPayload {
-  status: string;
+export interface JobRunFinishedValue {
+  jobId?: string;
+  status?: string;
   output?: string;
   error?: string;
 }
 
-export interface TextDeltaPayload {
-  messageId: string;
-  delta: string;
+export interface RunFinishedResult {
+  output?: string;
+  error?: string;
+  status?: string;
 }

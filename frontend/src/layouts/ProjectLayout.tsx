@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { Outlet, useParams } from "react-router-dom";
+import { Flex } from "antd";
 import { useProjectStore } from "@/stores/project";
 
 export function ProjectLayout() {
@@ -9,16 +10,8 @@ export function ProjectLayout() {
     if (id) fetchProject(id);
   }, [id, fetchProject]);
   return (
-    <div
-      style={{
-        height: "100%",
-        flex: 1,
-        display: "flex",
-        flexDirection: "column",
-        minHeight: 0,
-      }}
-    >
+    <Flex vertical style={{ height: "100%", flex: 1, minHeight: 0 }}>
       <Outlet />
-    </div>
+    </Flex>
   );
 }

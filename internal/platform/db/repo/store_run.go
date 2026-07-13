@@ -119,6 +119,16 @@ func (s *RunStore) LoadView(ctx context.Context, runID uuid.UUID) (*models.RunVi
 	return row, nil
 }
 
+// AppendViewEvent 追加 AG-UI 事件日志。
+func (s *RunStore) AppendViewEvent(ctx context.Context, row *models.RunViewEvent) error {
+	return s.c.runViewEvent.Append(ctx, row)
+}
+
+// ListViewEventsAfterSeq 回放 job 事件日志。
+func (s *RunStore) ListViewEventsAfterSeq(ctx context.Context, jobID uuid.UUID, afterSeq int64) ([]models.RunViewEvent, error) {
+	return s.c.runViewEvent.ListAfterSeq(ctx, jobID, afterSeq)
+}
+
 // GetOutput 读取 Run 输出（助手消息等场景）。
 func (s *RunStore) GetOutput(ctx context.Context, runID uuid.UUID) (string, error) {
 	m, err := s.c.run.GetByID(ctx, runID)

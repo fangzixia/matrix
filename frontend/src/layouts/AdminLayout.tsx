@@ -10,6 +10,7 @@ import {
 } from "@ant-design/icons";
 import { MatrixLogo } from "@/components/MatrixLogo";
 import { useAuthStore } from "@/stores/auth";
+import { MATRIX_LAYOUT } from "@/theme/layout";
 
 const { Header, Sider, Content } = Layout;
 
@@ -64,7 +65,7 @@ export function AdminLayout() {
       </Header>
       <Layout>
         <Sider
-          width={220}
+          width={MATRIX_LAYOUT.appSiderWidth}
           theme="light"
           style={{
             background: token.colorFillAlter,

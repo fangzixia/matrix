@@ -48,6 +48,7 @@ import * as notificationsApi from "@/api/notifications";
 import type { Notification } from "@/api/notifications";
 import { subscribeNotificationStream } from "@/api/stream";
 import { formatRelativeTime } from "@/api/projects";
+import { MATRIX_LAYOUT } from "@/theme/layout";
 
 const { Header, Sider, Content } = Layout;
 
@@ -505,7 +506,7 @@ export function AppShell() {
       >
         {projectId && currentProject && (
           <Sider
-            width={220}
+            width={MATRIX_LAYOUT.appSiderWidth}
             theme="light"
             style={{
               background: token.colorFillAlter,

@@ -15,16 +15,30 @@
 |------|------|
 | `components/MatrixLogo.tsx` | Ant Design 无品牌 Logo |
 | `components/ai/MatrixAiChat.tsx` | AI 对话，基于 @ant-design/x |
+| `components/ai/ProjectChatWorkspace.tsx` | 会话列表 + 对话主区拼装（Conversations + MatrixAiChat） |
+| `components/ai/PlanComposePanel.tsx` | 计划编写场景对话壳 |
+| `components/ai/RunActivityPanel.tsx` | Run 过程可视化（ThoughtChain / Collapse） |
 | `components/admin/system/*Tab.tsx` | 管理后台业务配置页（非通用 UI） |
+| `components/docs/*` | Markdown / 文档选择等业务薄封装 |
 
 ## 设计令牌
 
-定义于 `frontend/src/assets/styles/tokens.scss`：
+定义于：
 
-- 主色：`--matrix-color-orange-500` / `--matrix-color-orange-600`
-- 背景：`--matrix-background-color-default` / `--matrix-background-color-subtle`
-- 边框：`--matrix-border-color-default`
-- 布局：`--matrix-sidebar-width: 240px`、`--matrix-header-height: 40px`
+| 文件 | 内容 |
+|------|------|
+| `frontend/src/theme/colors.ts` | 主色、背景、边框、Logo 印记色、阴影 |
+| `frontend/src/theme/antd-theme.ts` | Ant Design `ThemeConfig`（经 `XProvider` 注入） |
+| `frontend/src/theme/layout.ts` | 侧栏宽度、活动面板最大高度等布局尺寸 |
+| `frontend/src/theme/surface.ts` | 页面 Card 表面样式辅助 |
+
+布局常量：
+
+- App 侧栏：`MATRIX_LAYOUT.appSiderWidth`（220）
+- 对话会话列表：`MATRIX_LAYOUT.chatSiderWidth`（240）
+- 活动面板最大高度：`MATRIX_LAYOUT.activityPanelMaxHeight`（280）
+
+颜色与间距在组件内优先使用 `theme.useToken()`；禁止在页面/组件中硬编码 `#rgb` / `rgba(...)`（色板源文件除外）。
 
 ## 布局
 
@@ -56,14 +70,36 @@
 
 ## 主题
 
-Ant Design 主题配置：`frontend/src/theme/antdTheme.ts`，在 `App.tsx` 通过 `XProvider` 注入。
+Ant Design 主题配置：`frontend/src/theme/antd-theme.ts`，在 `App.tsx` 通过 `XProvider` 注入。色板源：`frontend/src/theme/colors.ts`。
 
 ## Run 视图流（AG-UI 对齐）
 
-- **SSE**：`GET /api/projects/:id/runs/:runId/stream?mode=chat|detail`，事件名 `run:view`，载荷为 `ViewEnvelope`（AG-UI 事件类型）
+### 两层 ID 模型
+
+| 概念 | 字段 | 说明 |
+|------|------|------|
+| **Matrix Job** | `jobId`（= `runs.id`） | 用户创建的任务；SSE 日志 `run_view_events.job_id`、REST/SSE URL 中的 `runId` 均指此 ID |
+| **AG-UI Run** | `event.runId` | 每次 `RunSession` 生成的会话 ID（Build 多阶段每阶段一个新 runId）；仅出现在 AG-UI 事件 JSON 内 |
+| **Thread** | `event.threadId` | 对话线程，Matrix 中等于 `projectId`（或 chat session） |
+
+AI 模块只输出标准 AG-UI 扁平事件；Matrix 宿主投影为 `RunViewState`，持久化事件日志，并在 Job 终态时额外发出 `CUSTOM` / `job_run_finished`（非 AG-UI 原生 `RUN_FINISHED`）。
+
+### API
+
+- **SSE**：`GET /api/projects/:id/runs/:runId/stream?mode=chat|detail`，事件名 `run:view`，载荷为 `LoggedEvent`：
+
+```json
+{
+  "jobId": "<matrix-job-uuid>",
+  "seq": 42,
+  "timestamp": 1710000000000,
+  "event": { "type": "STATE_SNAPSHOT", "snapshot": { ... } }
+}
+```
+
 - **快照**：`GET /api/projects/:id/runs/:runId/view` → `{ state: RunViewState | null }`
 - **工具日志**：`GET /api/projects/:id/runs/:runId/tools/:toolUseId/log`
-- **chat 通道**：`RUN_*` + `TEXT_MESSAGE_CONTENT` + `ACTIVITY_SNAPSHOT` + `STATE_SNAPSHOT`（Chat 页：回复文本 + 子 Agent / 工具进度）
-- **detail 通道**：完整活动视图（Stage 任务详情页使用）
-- **SSE 连接时**：服务端立即补发当前 `STATE_SNAPSHOT`（或 `RUN_STARTED`）；已结束的 Run 补发 `RUN_FINISHED` 后关闭连接；运行中每 15s 发送 keepalive 注释
-- 前端类型：`frontend/src/types/runView.ts`；状态归约：`frontend/src/utils/viewReducer.ts`
+- **chat 通道**：`RUN_STARTED` + `TEXT_MESSAGE_CONTENT` + `ACTIVITY_SNAPSHOT` + `STATE_SNAPSHOT` + Job 终态 `job_run_finished`
+- **detail 通道**：完整 AG-UI 事件日志（含 TOOL/STEP/REASONING 等）
+- **SSE 连接时**：服务端从 `run_view_events` 按 seq catch-up；已结束的 Job 补发 `job_run_finished` 后关闭连接；运行中每 2s 轮询新事件
+- 前端类型：`frontend/src/types/runView.ts`（`LoggedEvent` + `AguiStreamEvent`）；状态归约：`frontend/src/utils/viewReducer.ts`（`applyAguiEvent`）

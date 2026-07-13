@@ -4,20 +4,20 @@ import (
 	"fmt"
 	"strings"
 
-	"matrix/internal/ai/query"
+	ai "matrix/ai/sdk"
 )
 
 const chatMessagesVersion = 2
 
 // ChatMessageNode 是会话消息树中的单条节点。
 type ChatMessageNode struct {
-	ID          string                    `json:"id"`
-	ParentID    *string                   `json:"parent_id"`
-	Role        string                    `json:"role"`
-	Content     string                    `json:"content"`
-	Attachments []query.MessageAttachment `json:"attachments,omitempty"`
-	RunID       string                    `json:"run_id,omitempty"`
-	CreatedAt   string                    `json:"created_at,omitempty"`
+	ID          string                 `json:"id"`
+	ParentID    *string                `json:"parent_id"`
+	Role        string                 `json:"role"`
+	Content     string                 `json:"content"`
+	Attachments []ai.MessageAttachment `json:"attachments,omitempty"`
+	RunID       string                 `json:"run_id,omitempty"`
+	CreatedAt   string                 `json:"created_at,omitempty"`
 }
 
 // SessionMessages 是会话消息树（内存结构）。
@@ -69,22 +69,22 @@ func WalkAncestors(sm SessionMessages, nodeID string) ([]ChatMessageNode, error)
 	return chain, nil
 }
 
-// NodesToQueryMessages 将消息节点转为 query.Message 列表。
-func NodesToQueryMessages(nodes []ChatMessageNode) []query.Message {
-	out := make([]query.Message, 0, len(nodes))
+// NodesToQueryMessages 将消息节点转为 ai.Message 列表。
+func NodesToQueryMessages(nodes []ChatMessageNode) []ai.Message {
+	out := make([]ai.Message, 0, len(nodes))
 	for _, n := range nodes {
-		role := query.RoleUser
+		role := ai.RoleUser
 		switch strings.ToLower(n.Role) {
 		case "assistant":
-			role = query.RoleAssistant
+			role = ai.RoleAssistant
 		case "system":
-			role = query.RoleSystem
+			role = ai.RoleSystem
 		case "user":
-			role = query.RoleUser
+			role = ai.RoleUser
 		default:
-			role = query.Role(n.Role)
+			role = ai.Role(n.Role)
 		}
-		out = append(out, query.Message{
+		out = append(out, ai.Message{
 			Role:        role,
 			Content:     n.Content,
 			Attachments: n.Attachments,
@@ -107,7 +107,7 @@ func ValidateParent(sm SessionMessages, parentID string) error {
 }
 
 // HistoryForParent 返回挂到 parentID 时应传给 LLM 的历史消息。
-func HistoryForParent(sm SessionMessages, parentID string) ([]query.Message, error) {
+func HistoryForParent(sm SessionMessages, parentID string) ([]ai.Message, error) {
 	ancestors, err := WalkAncestors(sm, parentID)
 	if err != nil {
 		return nil, err

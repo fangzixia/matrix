@@ -18,8 +18,11 @@ import type { ConversationItemType, ConversationsProps } from "@ant-design/x";
 import MatrixAiChat, {
   type ChatPromptItem,
 } from "@/components/ai/MatrixAiChat";
-import RunActivityPanel from "@/components/ai/RunActivityPanel";
+import RunActivityPanel, {
+  runViewHasActivityPanel,
+} from "@/components/ai/RunActivityPanel";
 import { useProjectChat } from "@/hooks/useProjectChat";
+import { MATRIX_LAYOUT } from "@/theme/layout";
 
 export interface ProjectChatWorkspaceProps {
   projectId: string;
@@ -166,11 +169,11 @@ export default function ProjectChatWorkspace({
           },
         }}
         style={{
-          width: 260,
+          width: MATRIX_LAYOUT.chatSiderWidth,
           flexShrink: 0,
           height: "100%",
           borderRight: `1px solid ${token.colorBorder}`,
-          padding: "12px 8px",
+          padding: `${token.paddingSM}px ${token.paddingXS}px`,
         }}
       />
       <Flex
@@ -187,7 +190,10 @@ export default function ProjectChatWorkspace({
           <Alert
             type="error"
             title={error}
-            style={{ margin: "8px 24px 0", flexShrink: 0 }}
+            style={{
+              margin: `${token.marginXS}px ${token.paddingLG}px 0`,
+              flexShrink: 0,
+            }}
           />
         )}
         <MatrixAiChat
@@ -214,8 +220,8 @@ export default function ProjectChatWorkspace({
           onResendUserMessage={resendUserMessage}
           onToggleMessageActivity={toggleMessageActivity}
           activitySlot={
-            activityState ? (
-              <div aria-live="polite" style={{ margin: "0 24px 12px" }}>
+            activityState && runViewHasActivityPanel(activityState, true) ? (
+              <div aria-live="polite">
                 <RunActivityPanel
                   state={activityState}
                   running={loading}
@@ -228,16 +234,16 @@ export default function ProjectChatWorkspace({
           style={{ flex: 1, minHeight: 0, height: "100%" }}
         />
         {footer ? (
-          <div
+          <Flex
             style={{
               flexShrink: 0,
-              padding: "12px 24px 16px",
+              padding: `${token.paddingSM}px ${token.paddingLG}px ${token.padding}px`,
               borderTop: `1px solid ${token.colorBorderSecondary}`,
               background: token.colorBgContainer,
             }}
           >
             {footer}
-          </div>
+          </Flex>
         ) : null}
       </Flex>
       <Modal

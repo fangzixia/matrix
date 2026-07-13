@@ -4,8 +4,8 @@ import {
   subscribeRunViewStream,
   type RunViewStreamHandlers,
 } from "@/api/runView";
-import type { RunViewState, StreamMode, ViewEnvelope } from "@/types/runView";
-import { applyEnvelope } from "@/utils/viewReducer";
+import type { LoggedEvent, RunViewState, StreamMode } from "@/types/runView";
+import { applyAguiEvent } from "@/utils/viewReducer";
 import { runDebugWarn } from "@/utils/runDebug";
 
 export {
@@ -63,13 +63,13 @@ export function useRunActivityView(
     [onTerminal],
   );
 
-  const applyViewEnvelope = useCallback(
-    (env: ViewEnvelope) => {
-      if (env.seq > 0 && env.seq <= lastSeqRef.current) return;
-      if (env.seq > 0) lastSeqRef.current = env.seq;
+  const applyLoggedEvent = useCallback(
+    (logged: LoggedEvent) => {
+      if (logged.seq > 0 && logged.seq <= lastSeqRef.current) return;
+      if (logged.seq > 0) lastSeqRef.current = logged.seq;
       setDisconnected(false);
       setState((prev) => {
-        const next = applyEnvelope(prev, env);
+        const next = applyAguiEvent(prev, logged);
         notifyTerminal(next);
         return next;
       });
@@ -116,7 +116,7 @@ export function useRunActivityView(
       const initial = await reload();
       if (cancelled || !live) return;
       const handlers: RunViewStreamHandlers = {
-        onEnvelope: applyViewEnvelope,
+        onEvent: applyLoggedEvent,
         onDisconnect: () => {
           runDebugWarn("activity_view.sse.disconnect", { runId: currentRunId });
           setDisconnected(true);
@@ -137,7 +137,7 @@ export function useRunActivityView(
       cancelled = true;
       stop();
     };
-  }, [applyViewEnvelope, live, mode, projectId, reload, reset, runId, stop]);
+  }, [applyLoggedEvent, live, mode, projectId, reload, reset, runId, stop]);
 
   return {
     state,

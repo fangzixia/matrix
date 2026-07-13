@@ -485,6 +485,7 @@ export function useProjectChat(projectId: string) {
         setError(e instanceof Error ? e.message : "发送失败");
       } finally {
         activeRunIdRef.current = null;
+        setActivityState(null);
         if (!cancelledRef.current) {
           setLoading(false);
         }

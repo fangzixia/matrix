@@ -1,7 +1,10 @@
 import type {
-  RunFinishedPayload,
+  AguiStreamEvent,
+  JobRunFinishedValue,
+  LoggedEvent,
+  RunFinishedResult,
   RunViewState,
-  TextDeltaPayload,
+  SubagentView,
   TurnView,
   ViewEnvelope,
 } from "@/types/runView";
@@ -41,64 +44,144 @@ export function normalizeRunViewState(state: RunViewState): RunViewState {
   return normalizeState(state);
 }
 
-/** 将 SSE 事件应用到 RunViewState。 */
+function resultFromRunFinished(result?: RunFinishedResult) {
+  const output = typeof result?.output === "string" ? result.output : "";
+  const error = typeof result?.error === "string" ? result.error : undefined;
+  const status =
+    typeof result?.status === "string" ? result.status : "succeeded";
+  return { output, error, status };
+}
+
+/** 将 AG-UI 扁平事件（LoggedEvent）应用到 RunViewState。 */
+export function applyAguiEvent(
+  state: RunViewState | null,
+  logged: LoggedEvent,
+): RunViewState {
+  const ev = logged.event;
+  const jobId = logged.jobId;
+  const seq = logged.seq;
+  const base = state ?? emptyState(jobId);
+
+  switch (ev.type) {
+    case "STATE_SNAPSHOT": {
+      const snap = ev.snapshot as RunViewState | undefined;
+      if (!snap) return { ...base, seq };
+      return normalizeState({ ...snap, runId: jobId, seq });
+    }
+    case "TEXT_MESSAGE_CONTENT":
+      return {
+        ...base,
+        seq,
+        replyText: base.replyText + (ev.delta ?? ""),
+      };
+    case "ACTIVITY_SNAPSHOT":
+      if (ev.activityType === "subagent" && ev.content) {
+        const content = ev.content as unknown as SubagentView;
+        if (content.id) {
+          return {
+            ...base,
+            seq,
+            subagents: { ...base.subagents, [content.id]: content },
+          };
+        }
+      }
+      return { ...base, seq };
+    case "RUN_STARTED":
+      return { ...base, seq, status: "running" };
+    case "RUN_FINISHED": {
+      const { output, error, status } = resultFromRunFinished(
+        ev.result as RunFinishedResult | undefined,
+      );
+      return {
+        ...base,
+        seq,
+        status,
+        replyText: output.trim() || base.replyText,
+        error,
+        result: {
+          output,
+          isError: status === "failed" || status === "cancelled",
+          error,
+        },
+      };
+    }
+    case "RUN_ERROR":
+      return {
+        ...base,
+        seq,
+        status: "failed",
+        error: ev.message,
+      };
+    case "CUSTOM":
+      if (ev.name === "job_run_finished") {
+        const val = (ev.value ?? {}) as JobRunFinishedValue;
+        const status = val.status ?? base.status;
+        const output = val.output ?? "";
+        const error = val.error;
+        return {
+          ...base,
+          seq,
+          status,
+          replyText: output.trim() || base.replyText,
+          error,
+          result: {
+            output,
+            isError: status === "failed" || status === "cancelled",
+            error,
+          },
+        };
+      }
+      return { ...base, seq };
+    default:
+      return { ...base, seq };
+  }
+}
+
+/** 判断 LoggedEvent 是否表示 Matrix Job 终态。 */
+export function isJobTerminalEvent(logged: LoggedEvent): boolean {
+  const ev = logged.event;
+  if (ev.type === "CUSTOM" && ev.name === "job_run_finished") {
+    const status = (ev.value as JobRunFinishedValue | undefined)?.status;
+    return status === "succeeded" || status === "failed" || status === "cancelled";
+  }
+  return false;
+}
+
+/** 从 Job 终态事件提取终态载荷。 */
+export function jobTerminalFromEvent(logged: LoggedEvent): {
+  status: string;
+  output?: string;
+  error?: string;
+} | null {
+  if (!isJobTerminalEvent(logged)) return null;
+  const val = (logged.event.value ?? {}) as JobRunFinishedValue;
+  return {
+    status: val.status ?? "failed",
+    output: val.output,
+    error: val.error,
+  };
+}
+
+/** @deprecated 旧 ViewEnvelope 归约，内部转发 applyAguiEvent。 */
 export function applyEnvelope(
   state: RunViewState | null,
   env: ViewEnvelope,
 ): RunViewState {
-  const base = state ?? emptyState(env.runId);
-
-  switch (env.type) {
-    case "STATE_SNAPSHOT":
-      return normalizeState({ ...(env.payload as RunViewState), seq: env.seq });
-    case "TEXT_MESSAGE_CONTENT": {
-      const pl = env.payload as TextDeltaPayload;
-      return {
-        ...base,
-        seq: env.seq,
-        replyText: base.replyText + (pl.delta ?? ""),
-      };
-    }
-    case "ACTIVITY_SNAPSHOT": {
-      const pl = env.payload as {
-        subagents?: RunViewState["subagents"];
-        statusLabel?: string;
-      };
-      return {
-        ...base,
-        seq: env.seq,
-        subagents: pl.subagents ?? base.subagents,
-        statusLabel: pl.statusLabel ?? base.statusLabel,
-      };
-    }
-    case "RUN_FINISHED": {
-      const pl = env.payload as RunFinishedPayload;
-      return {
-        ...base,
-        seq: env.seq,
-        status: pl.status,
-        replyText: pl.output?.trim() || base.replyText,
-        error: pl.error,
-        result: {
-          output: pl.output,
-          isError: pl.status === "failed" || pl.status === "cancelled",
-          error: pl.error,
-        },
-      };
-    }
-    case "RUN_STARTED": {
-      const pl = env.payload as { statusLabel?: string; phase?: string };
-      return {
-        ...base,
-        seq: env.seq,
-        status: "running",
-        statusLabel: pl.statusLabel ?? base.statusLabel,
-        phase: pl.phase,
-      };
-    }
-    default:
-      return { ...base, seq: env.seq };
+  const flat: AguiStreamEvent = {
+    type: env.type,
+    ...(typeof env.payload === "object" && env.payload !== null
+      ? (env.payload as AguiStreamEvent)
+      : {}),
+  };
+  if (env.type === "STATE_SNAPSHOT") {
+    flat.snapshot = env.payload as RunViewState;
   }
+  return applyAguiEvent(state, {
+    jobId: env.runId,
+    seq: env.seq,
+    timestamp: env.timestamp,
+    event: flat,
+  });
 }
 
 /** 从视图状态提取面向用户的最终回复文本。 */
@@ -172,4 +255,3 @@ export function extractRunFailure(
   if (!raw) return null;
   return formatUserRunError(raw);
 }
-

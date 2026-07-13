@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { ApiOutlined, RobotOutlined, ToolOutlined } from "@ant-design/icons";
-import { Button, Collapse, Empty, Space, Tag, Typography } from "antd";
+import { Button, Collapse, Empty, Space, Tag, Typography, theme } from "antd";
 import {
   CodeHighlighter,
   Think,
@@ -18,6 +18,7 @@ import type {
 } from "@/types/runView";
 import { formatAgentProgress, deriveTurnTitle } from "@/utils/agentProgress";
 import { getToolLog } from "@/api/runView";
+import { MATRIX_LAYOUT } from "@/theme/layout";
 
 export interface RunActivityPanelProps {
   state: RunViewState;
@@ -51,10 +52,12 @@ function renderTurnBody(
   running?: boolean,
   projectId?: string,
   runId?: string,
+  /** 紧凑模式：正文已在对话气泡中展示，此处只保留思考/工具链，避免叠层重复。 */
+  hideMessage?: boolean,
 ) {
   const streaming = running && isLatest;
   const tools = turn.tools ?? [];
-  const messageBody = turnMessageBody(turn);
+  const messageBody = hideMessage ? null : turnMessageBody(turn);
   return (
     <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
       {turn.thinking ? (
@@ -130,6 +133,7 @@ function ToolOutputBlock({
   projectId?: string;
   runId?: string;
 }) {
+  const { token } = theme.useToken();
   const [fullLog, setFullLog] = useState("");
   const [loadingLog, setLoadingLog] = useState(false);
   const [logError, setLogError] = useState("");
@@ -153,13 +157,22 @@ function ToolOutputBlock({
   const textBlock =
     lang === "text" ? (
       <Typography.Paragraph
-        style={{ marginBottom: 0, whiteSpace: "pre-wrap", fontSize: 13 }}
+        style={{
+          marginBottom: 0,
+          whiteSpace: "pre-wrap",
+          fontSize: token.fontSizeSM,
+        }}
         type="secondary"
       >
         {shown}
       </Typography.Paragraph>
     ) : (
-      <div style={{ maxHeight: 320, overflow: "auto" }}>
+      <div
+        style={{
+          maxHeight: MATRIX_LAYOUT.toolOutputMaxHeight,
+          overflow: "auto",
+        }}
+      >
         <CodeHighlighter lang={lang} header={false}>
           {shown}
         </CodeHighlighter>
@@ -167,10 +180,10 @@ function ToolOutputBlock({
     );
 
   return (
-    <Space orientation="vertical" size={4} style={{ width: "100%" }}>
+    <Space orientation="vertical" size={token.marginXXS} style={{ width: "100%" }}>
       {textBlock}
       {isStreaming ? (
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+        <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
           输出流式更新中…
         </Typography.Text>
       ) : null}
@@ -186,11 +199,39 @@ function ToolOutputBlock({
         </Button>
       ) : null}
       {logError ? (
-        <Typography.Text type="danger" style={{ fontSize: 12 }}>
+        <Typography.Text type="danger" style={{ fontSize: token.fontSizeSM }}>
           {logError}
         </Typography.Text>
       ) : null}
     </Space>
+  );
+}
+
+function WorkerTurnsNest({
+  turns,
+  running,
+  projectId,
+  runId,
+}: {
+  turns: TurnView[];
+  running?: boolean;
+  projectId?: string;
+  runId?: string;
+}) {
+  const { token } = theme.useToken();
+  return (
+    <div
+      style={{
+        marginTop: token.marginXS,
+        paddingLeft: token.paddingXS,
+        borderLeft: `2px solid ${token.colorBorderSecondary}`,
+      }}
+    >
+      <ThoughtChain
+        line
+        items={workerTurnsToChainItems(turns, running, projectId, runId)}
+      />
+    </div>
   );
 }
 
@@ -209,23 +250,12 @@ function toolToChainItem(
   let itemContent: ReactNode = null;
   if (hasWorkers) {
     itemContent = (
-      <div
-        style={{
-          marginTop: 8,
-          paddingLeft: 8,
-          borderLeft: "2px solid rgba(0,0,0,0.06)",
-        }}
-      >
-        <ThoughtChain
-          line
-          items={workerTurnsToChainItems(
-            tool.workerTurns!,
-            running,
-            projectId,
-            runId,
-          )}
-        />
-      </div>
+      <WorkerTurnsNest
+        turns={tool.workerTurns!}
+        running={running}
+        projectId={projectId}
+        runId={runId}
+      />
     );
   } else if (content) {
     itemContent = (
@@ -240,7 +270,10 @@ function toolToChainItem(
     );
   } else if (isAgentTool && tool.status === "loading" && !hasWorkers) {
     itemContent = (
-      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+      <Typography.Text
+        type="secondary"
+        style={{ fontSize: "var(--ant-font-size-sm)" }}
+      >
         Worker 启动中…
       </Typography.Text>
     );
@@ -328,7 +361,7 @@ function turnHeader(turn: TurnView) {
       <Tag color={turn.scope === "worker" ? "purple" : "blue"}>
         {turn.scope === "worker" ? "Worker" : "协调者"}
       </Tag>
-      <span>{deriveTurnTitle(turn)}</span>
+      <Typography.Text>{deriveTurnTitle(turn)}</Typography.Text>
     </Space>
   );
 }
@@ -345,6 +378,25 @@ function turnMessageBody(turn: TurnView): string | null {
   if (!firstLine || !title.startsWith(firstLine)) return msg;
   const rest = msg.slice(firstLine.length).replace(/^\s*\r?\n/, "").trim();
   return rest || null;
+}
+
+function turnHasPanelBody(turn: TurnView): boolean {
+  return Boolean(turn.thinking) || (turn.tools?.length ?? 0) > 0;
+}
+
+/** 紧凑对话场景：是否值得单独占用活动面板（有思考/工具/子代理，而非仅气泡正文）。 */
+export function runViewHasActivityPanel(
+  state: RunViewState,
+  compact?: boolean,
+): boolean {
+  if (Object.keys(state.subagents ?? {}).length > 0) return true;
+  if (!compact && state.result?.output) return true;
+  const turns = compact
+    ? selectCompactTurns(state.turns, state.subagents)
+    : state.turns;
+  if (!turns.length) return true;
+  if (!compact) return true;
+  return turns.some(turnHasPanelBody);
 }
 
 export default function RunActivityPanel({
@@ -372,18 +424,21 @@ export default function RunActivityPanel({
   }, [latestKey]);
   const collapseItems = useMemo(
     () =>
-      visibleTurns.map((turn) => ({
-        key: turn.key,
-        label: turnHeader(turn),
-        children: renderTurnBody(
-          turn,
-          turn.key === latestKey,
-          running,
-          projectId,
-          state.runId,
-        ),
-      })),
-    [visibleTurns, latestKey, running, projectId, state.runId],
+      visibleTurns
+        .filter((turn) => !compact || turnHasPanelBody(turn))
+        .map((turn) => ({
+          key: turn.key,
+          label: turnHeader(turn),
+          children: renderTurnBody(
+            turn,
+            turn.key === latestKey,
+            running,
+            projectId,
+            state.runId,
+            compact,
+          ),
+        })),
+    [visibleTurns, latestKey, running, projectId, state.runId, compact],
   );
   const subagentItems = useMemo(
     () =>
@@ -402,6 +457,14 @@ export default function RunActivityPanel({
       })),
     [subagentList, running],
   );
+  if (
+    compact &&
+    !collapseItems.length &&
+    !subagentList.length &&
+    visibleTurns.length > 0
+  ) {
+    return null;
+  }
   if (!visibleTurns.length && !result?.output && !subagentList.length) {
     if (running) {
       return (
@@ -440,6 +503,7 @@ export default function RunActivityPanel({
         />
       ) : null}
       {result?.output &&
+      !compact &&
       !visibleTurns.some((t) => (t.message ?? "").includes(result.output!)) ? (
         <div style={{ marginTop: 16, width: "100%" }}>
           <MarkdownView content={result.output} variant="chat" />

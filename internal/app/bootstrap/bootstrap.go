@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
+	ai "matrix/ai/sdk"
 	"matrix/internal/app"
 	"matrix/internal/modules/identity"
 	"matrix/internal/modules/settings"
@@ -18,6 +19,7 @@ import (
 	"matrix/internal/platform/storage"
 	"matrix/internal/routers"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -47,6 +49,7 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	defer loggers.Close()
+	wireAILLMLogging()
 	loggers.System.Info("存储路径已解析", "data_dir", paths.DataDir, "log_dir", paths.LogDir)
 	db, err := platformdb.Open(cfg.Database)
 	if err != nil {
@@ -95,4 +98,20 @@ func envOr(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// wireAILLMLogging 将 matrix/ai 的 LLM HTTP 日志桥接到 platform/logging（llm.log）。
+func wireAILLMLogging() {
+	ai.SetHTTPLogHooks(
+		func(ctx context.Context, meta ai.HTTPMeta, body string) {
+			logging.LogLLMHTTPRequest(ctx, logging.LLMHTTPMeta{
+				URL: meta.URL, BaseURL: meta.BaseURL, Model: meta.Model, ModelName: meta.ModelName,
+			}, body)
+		},
+		func(ctx context.Context, meta ai.HTTPMeta, status int, body string, latency time.Duration) {
+			logging.LogLLMHTTPResponse(ctx, logging.LLMHTTPMeta{
+				URL: meta.URL, BaseURL: meta.BaseURL, Model: meta.Model, ModelName: meta.ModelName,
+			}, status, body, latency)
+		},
+	)
 }

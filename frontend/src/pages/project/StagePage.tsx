@@ -336,7 +336,7 @@ export default function StagePage() {
               style={{
                 height: "100%",
                 minHeight: 0,
-                padding: "12px 16px 16px",
+                padding: `${token.paddingSM}px ${token.padding}px ${token.padding}px`,
                 background: token.colorBgLayout,
                 boxSizing: "border-box",
                 borderTop: `1px solid ${token.colorBorderSecondary}`,
@@ -344,20 +344,29 @@ export default function StagePage() {
             >
               <Typography.Text
                 strong
-                style={{ display: "block", marginBottom: 12, flexShrink: 0 }}
+                style={{
+                  display: "block",
+                  marginBottom: token.marginSM,
+                  flexShrink: 0,
+                }}
               >
                 历史任务
               </Typography.Text>
-              <div
+              <Card
+                variant="outlined"
                 style={{
                   flex: 1,
                   minHeight: 0,
                   overflow: "auto",
-                  background: token.colorBgContainer,
-                  border: `1px solid ${token.colorBorderSecondary}`,
-                  borderRadius: token.borderRadiusLG,
-                  padding: "8px 12px",
                   boxShadow: token.boxShadowTertiary,
+                  borderColor: token.colorBorder,
+                }}
+                styles={{
+                  body: {
+                    padding: `${token.paddingXS}px ${token.paddingSM}px`,
+                    height: "100%",
+                    boxSizing: "border-box",
+                  },
                 }}
               >
                 <TaskHistoryTable
@@ -365,7 +374,7 @@ export default function StagePage() {
                   kind={kind}
                   tasks={stageTasks}
                 />
-              </div>
+              </Card>
             </Flex>
           </Splitter.Panel>
         </Splitter>

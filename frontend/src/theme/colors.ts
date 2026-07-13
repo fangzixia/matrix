@@ -11,6 +11,9 @@ export const MATRIX_COLORS = {
   borderSecondary: "#e5e7eb",
   primaryBg: "#fff5f0",
   primaryBorder: "#fdd9c8",
+  /** Logo 印记色（GitLab 风格） */
+  brandMark: "#e24329",
+  brandAccent: "#fca326",
 } as const;
 
 export const MATRIX_SHADOW = {
